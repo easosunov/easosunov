@@ -99,7 +99,7 @@
       appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
     };
 
-    // ---- UI ----
+    // UI
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
     const startBtn = document.getElementById("startBtn");
@@ -113,18 +113,32 @@
 
     function setStatus(el, msg) { el.textContent = msg; }
 
-    // ---- Firestore ----
+    // Firestore
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // Load roomId from URL hash if present
     if (location.hash && location.hash.length > 1) {
       roomIdInput.value = location.hash.substring(1);
     }
 
-    // ---- WebRTC ----
+    // WebRTC
     let localStream = null;
     let pc = null;
+
+    // Make "Start then Join quickly" safe
+    let startingMediaPromise = null;
+    let joinInProgress = false;
+
+    // Snapshot unsubscribers to avoid stacking listeners
+    let unsubRoomA = null;
+    let unsubCalleeA = null;
+
+    let unsubRoomB = null;
+    let unsubCallerB = null;
+
+    // Session tracking
+    let lastSeenJoinRequestA = 0;
+    let lastAnsweredSessionB = null;
 
     const rtcConfig = {
       iceServers: [
@@ -137,6 +151,7 @@
         pc.onicecandidate = null;
         pc.ontrack = null;
         pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
         pc.close();
         pc = null;
       }
@@ -174,19 +189,38 @@
     }
 
     async function startMedia() {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localVideo.srcObject = localStream;
+      if (localStream) return;
 
-      setStatus(mediaStatus, "Camera/mic started.");
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      createBtn.disabled = false;
-      joinBtn.disabled = false;
-      copyLinkBtn.disabled = !roomIdInput.value.trim();
+      if (startingMediaPromise) {
+        await startingMediaPromise;
+        return;
+      }
+
+      startingMediaPromise = (async () => {
+        setStatus(mediaStatus, "Requesting camera/mic permission…");
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+
+        setStatus(mediaStatus, "Camera/mic started.");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        createBtn.disabled = false;
+        joinBtn.disabled = false;
+        copyLinkBtn.disabled = !roomIdInput.value.trim();
+      })();
+
+      try { await startingMediaPromise; }
+      finally { startingMediaPromise = null; }
     }
 
     async function stopMedia() {
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeA) { unsubCalleeA(); unsubCalleeA = null; }
+      if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
+      if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
+
       closePeer();
+
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
@@ -200,25 +234,36 @@
       createBtn.disabled = true;
       joinBtn.disabled = true;
       copyLinkBtn.disabled = true;
+
+      lastAnsweredSessionB = null;
     }
 
+    // =========================
+    // Person A: Create/Restart a new session (new offer)
+    // =========================
     async function createRoom() {
       if (!localStream) throw new Error("Start media first.");
 
       let roomRef;
       const existingId = roomIdInput.value.trim();
 
-      if (existingId) {
-        roomRef = doc(db, "rooms", existingId);
-      } else {
+      if (existingId) roomRef = doc(db, "rooms", existingId);
+      else {
         roomRef = doc(collection(db, "rooms"));
         roomIdInput.value = roomRef.id;
         location.hash = roomRef.id;
       }
 
+      // Avoid stacking listeners
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeA) { unsubCalleeA(); unsubCalleeA = null; }
+
       ensurePeerConnection();
+
+      // Start clean each session
       await clearRoomCandidates(roomRef);
 
+      // Bump session counter
       const roomSnap = await getDoc(roomRef);
       const prevSession = roomSnap.exists() ? (roomSnap.data().session || 0) : 0;
       const session = prevSession + 1;
@@ -227,7 +272,12 @@
       const calleeCandidates = collection(roomRef, "calleeCandidates");
 
       pc.onicecandidate = async (event) => {
-        if (event.candidate) await addDoc(callerCandidates, event.candidate.toJSON());
+        if (event.candidate) {
+          await addDoc(callerCandidates, {
+            session,
+            ...event.candidate.toJSON()
+          });
+        }
       };
 
       const offer = await pc.createOffer();
@@ -243,8 +293,20 @@
       setStatus(callStatus, `Room active (session ${session}). Room ID: ${roomRef.id}`);
       copyLinkBtn.disabled = false;
 
-      onSnapshot(roomRef, async (snapshot) => {
+      // Listen: (1) joinRequest ping from B, (2) answer for this session
+      unsubRoomA = onSnapshot(roomRef, async (snapshot) => {
         const data = snapshot.data();
+
+        // If B requests a rejoin, restart session (new offer)
+        if (data?.joinRequest && data.joinRequest > lastSeenJoinRequestA) {
+          lastSeenJoinRequestA = data.joinRequest;
+
+          // If already connected, you can ignore, but restarting is safer for "come & go"
+          setStatus(callStatus, "Join request received — restarting session…");
+          setTimeout(() => createRoom().catch(() => {}), 200);
+          return;
+        }
+
         if (!data?.answer || data.session !== session) return;
 
         const incomingSdp = data.answer.sdp;
@@ -256,64 +318,122 @@
         }
       });
 
-      onSnapshot(calleeCandidates, (snapshot) => {
+      // Only add callee candidates for THIS session
+      unsubCalleeA = onSnapshot(calleeCandidates, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-          if (change.type === "added" && pc) {
-            await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
+          if (change.type !== "added" || !pc) return;
+          const cand = change.doc.data();
+          if (cand.session !== session) return;
+          try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch {}
         });
       });
+
+      pc.onconnectionstatechange = () => {
+        setStatus(callStatus, `A connection: ${pc.connectionState} (session ${session})`);
+      };
     }
 
+    // =========================
+    // Person B: Follow the room (answer newest offer/session)
+    // =========================
     async function joinRoom() {
-      if (!localStream) throw new Error("Start media first.");
+      if (joinInProgress) return;
+      joinInProgress = true;
+      joinBtn.disabled = true;
 
-      const roomId = roomIdInput.value.trim();
-      if (!roomId) throw new Error("Enter a room ID.");
-      location.hash = roomId;
+      try {
+        setStatus(callStatus, "Connecting…");
 
-      const roomRef = doc(db, "rooms", roomId);
-      const roomSnap = await getDoc(roomRef);
-      if (!roomSnap.exists()) throw new Error("Room not found.");
+        if (!localStream) {
+          setStatus(mediaStatus, "Starting camera/mic…");
+          await startMedia();
+        }
 
-      // ✅ FIX 1: clear stale B-candidates from previous attempts BEFORE new PC/answer
-      await clearSubcollection(collection(roomRef, "calleeCandidates"));
+        const roomId = roomIdInput.value.trim();
+        if (!roomId) throw new Error("Enter a room ID.");
+        location.hash = roomId;
 
-      // ✅ FIX 2: clear old answer to avoid stale SDP being used by A from previous attempts
-      // (merge keeps offer/session intact)
-      await setDoc(roomRef, { answer: null }, { merge: true });
+        const roomRef = doc(db, "rooms", roomId);
+        const roomSnap = await getDoc(roomRef);
+        if (!roomSnap.exists()) throw new Error("Room not found.");
 
-      ensurePeerConnection();
+        // Request A to restart session (new offer) — this is what fixes re-join
+        await setDoc(roomRef, { joinRequest: Date.now() }, { merge: true });
 
-      const callerCandidates = collection(roomRef, "callerCandidates");
-      const calleeCandidates = collection(roomRef, "calleeCandidates");
+        // Stop previous B listeners
+        if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
+        if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
 
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) await addDoc(calleeCandidates, event.candidate.toJSON());
-      };
+        lastAnsweredSessionB = null;
+        setStatus(callStatus, "Connecting… (waiting for offer)");
 
-      const roomData = roomSnap.data();
-      const offerDesc = new RTCSessionDescription(roomData.offer);
-      await pc.setRemoteDescription(offerDesc);
+        unsubRoomB = onSnapshot(roomRef, async (snap) => {
+          const data = snap.data();
+          if (!data?.offer || !data.session) return;
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
+          // If we already answered this session, ignore
+          if (lastAnsweredSessionB === data.session) return;
 
-      await updateDoc(roomRef, {
-        answer: { type: answer.type, sdp: answer.sdp },
-        answeredAt: Date.now()
-      });
+          const session = data.session;
+          setStatus(callStatus, `Connecting… (session ${session})`);
 
-      setStatus(callStatus, "Joined room. Connecting…");
-      copyLinkBtn.disabled = false;
+          // New session => new PC and clean candidate subcollection for B
+          ensurePeerConnection();
+          await clearSubcollection(collection(roomRef, "calleeCandidates"));
 
-      onSnapshot(callerCandidates, (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === "added" && pc) {
-            await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-          }
+          const callerCandidates = collection(roomRef, "callerCandidates");
+          const calleeCandidates = collection(roomRef, "calleeCandidates");
+
+          pc.onicecandidate = async (event) => {
+            if (event.candidate) {
+              await addDoc(calleeCandidates, {
+                session,
+                ...event.candidate.toJSON()
+              });
+            }
+          };
+
+          // Answer the current offer
+          await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+
+          await updateDoc(roomRef, {
+            answer: { type: answer.type, sdp: answer.sdp },
+            session,
+            answeredAt: Date.now()
+          });
+
+          lastAnsweredSessionB = session;
+
+          // (Re)subscribe to caller candidates and only accept matching session
+          if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
+          unsubCallerB = onSnapshot(callerCandidates, (snapshot) => {
+            snapshot.docChanges().forEach(async (change) => {
+              if (change.type !== "added" || !pc) return;
+              const cand = change.doc.data();
+              if (cand.session !== session) return;
+              try { pc.addIceCandidate(new RTCIceCandidate(cand)); } catch {}
+            });
+          });
+
+          pc.onconnectionstatechange = () => {
+            setStatus(callStatus, `Connection state: ${pc.connectionState} (session ${session})`);
+          };
+
+          pc.oniceconnectionstatechange = () => {
+            // useful diagnostic
+            if (!pc) return;
+            if (pc.iceConnectionState === "failed") {
+              setStatus(callStatus, `ICE failed (session ${session}). TURN may be required on this network.`);
+            }
+          };
         });
-      });
+
+      } finally {
+        joinInProgress = false;
+        joinBtn.disabled = false;
+      }
     }
 
     function copyInviteLink() {
@@ -324,7 +444,7 @@
       setStatus(callStatus, "Invite link copied to clipboard.");
     }
 
-    // ---- Wire up UI ----
+    // UI wiring
     startBtn.addEventListener("click", async () => {
       try { await startMedia(); } catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); showError(e); }
     });
