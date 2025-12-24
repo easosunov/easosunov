@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>2-Person Video/Sound Communicator (WebRTC)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; flex: 1 1 320px; }
+    .videos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 720px) { .videos { grid-template-columns: 1fr; } }
+    video { width: 100%; background: #000; border-radius: 12px; aspect-ratio: 16/9; }
+    label { font-size: 12px; color: #444; display: block; margin: 8px 0 6px; }
+    input[type="text"] { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ccc; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .small { font-size: 12px; color: #555; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .status { margin-top: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
+
+  <div class="videos">
+    <div class="card">
+      <div><strong>Person A (You)</strong> — your webcam + mic</div>
+      <video id="localVideo" playsinline autoplay muted></video>
+      <div class="small">Muted so you don’t hear yourself (remote audio will play).</div>
+    </div>
+
+    <div class="card">
+      <div><strong>Person B (Other)</strong> — remote webcam + mic</div>
+      <video id="remoteVideo" playsinline autoplay></video>
+      <div class="small">If audio doesn’t play, click the video once (browser autoplay rules).</div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 12px;">
+    <div class="card">
+      <div><strong>Step 1:</strong> Start camera & mic</div>
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <div class="status" id="mediaStatus">Not started.</div>
+    </div>
+
+    <div class="card">
+      <div><strong>Step 2:</strong> Create or join a room</div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button id="createBtn" disabled>Create Room (Person A)</button>
+        <button id="joinBtn" disabled>Join Room (Person B)</button>
+      </div>
+
+      <label for="roomId">Room ID</label>
+      <input id="roomId" type="text" placeholder="(Create a room or paste one here)" />
+
+      <div style="margin-top:10px;">
+        <button id="copyLinkBtn" disabled>Copy Invite Link</button>
+      </div>
+
+      <div class="status" id="callStatus">No room yet.</div>
+      <div class="small" style="margin-top:8px;">
+        Tip: room ID is also taken from URL hash, like <span class="mono">.../webrtc.html#ROOM_ID</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase (Firestore) used ONLY for signaling -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+      onSnapshot
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+    /**********************
+     * 1) PUT YOUR FIREBASE CONFIG HERE (see step 2 below)
+     **********************/
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT.appspot.com",
+      messagingSenderId: "SENDER_ID",
+      appId: "APP_ID"
+    };
+
+    // ---- UI ----
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const createBtn = document.getElementById("createBtn");
+    const joinBtn = document.getElementById("joinBtn");
+    const copyLinkBtn = document.getElementById("copyLinkBtn");
+    const roomIdInput = document.getElementById("roomId");
+    const mediaStatus = document.getElementById("mediaStatus");
+    const callStatus = document.getElementById("callStatus");
+
+    // ---- WebRTC ----
+    let localStream = null;
+    let pc = null;
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
+      ]
+    };
+
+    // ---- Firestore ----
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Load roomId from URL hash if present
+    if (location.hash && location.hash.length > 1) {
+      roomIdInput.value = location.hash.substring(1);
+    }
+
+    function setStatus(el, msg) { el.textContent = msg; }
+
+    function ensurePeerConnection() {
+      pc = new RTCPeerConnection(rtcConfig);
+
+      // When remote track arrives, show it
+      const remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
+
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+      };
+
+      // Add local tracks
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    async function startMedia() {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+
+      setStatus(mediaStatus, "Camera/mic started.");
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      createBtn.disabled = false;
+      joinBtn.disabled = false;
+
+      // If hash has room id, enable copy link too
+      copyLinkBtn.disabled = !roomIdInput.value.trim();
+    }
+
+    async function stopMedia() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+
+      setStatus(mediaStatus, "Stopped.");
+      setStatus(callStatus, "Call ended.");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      createBtn.disabled = true;
+      joinBtn.disabled = true;
+      copyLinkBtn.disabled = true;
+    }
+
+    async function createRoom() {
+      if (!localStream) throw new Error("Start media first.");
+
+      ensurePeerConnection();
+
+      // Create a new room doc
+      const roomRef = doc(collection(db, "rooms"));
+      const roomId = roomRef.id;
+
+      roomIdInput.value = roomId;
+      location.hash = roomId;
+
+      // ICE candidates subcollections
+      const callerCandidates = collection(roomRef, "callerCandidates");
+      const calleeCandidates = collection(roomRef, "calleeCandidates");
+
+      // Collect local ICE candidates and store
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(callerCandidates, event.candidate.toJSON());
+        }
+      };
+
+      // Create offer
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      await setDoc(roomRef, {
+        offer: { type: offer.type, sdp: offer.sdp },
+        createdAt: Date.now()
+      });
+
+      setStatus(callStatus, `Room created. Share Room ID: ${roomId}`);
+      copyLinkBtn.disabled = false;
+
+      // Listen for answer
+      onSnapshot(roomRef, async (snapshot) => {
+        const data = snapshot.data();
+        if (!pc.currentRemoteDescription && data?.answer) {
+          const answerDesc = new RTCSessionDescription(data.answer);
+          await pc.setRemoteDescription(answerDesc);
+          setStatus(callStatus, "Connected (answer received).");
+        }
+      });
+
+      // Listen for callee ICE candidates
+      onSnapshot(calleeCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === "added") {
+            const candidate = new RTCIceCandidate(change.doc.data());
+            await pc.addIceCandidate(candidate);
+          }
+        });
+      });
+    }
+
+    async function joinRoom() {
+      if (!localStream) throw new Error("Start media first.");
+
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) throw new Error("Enter a room ID.");
+      location.hash = roomId;
+
+      const roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) throw new Error("Room not found.");
+
+      ensurePeerConnection();
+
+      const callerCandidates = collection(roomRef, "callerCandidates");
+      const calleeCandidates = collection(roomRef, "calleeCandidates");
+
+      // Collect local ICE candidates and store
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(calleeCandidates, event.candidate.toJSON());
+        }
+      };
+
+      // Set remote description from offer
+      const roomData = roomSnap.data();
+      const offerDesc = new RTCSessionDescription(roomData.offer);
+      await pc.setRemoteDescription(offerDesc);
+
+      // Create answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      await updateDoc(roomRef, {
+        answer: { type: answer.type, sdp: answer.sdp },
+        answeredAt: Date.now()
+      });
+
+      setStatus(callStatus, "Joined room. Connecting…");
+      copyLinkBtn.disabled = false;
+
+      // Listen for caller ICE candidates
+      onSnapshot(callerCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type === "added") {
+            const candidate = new RTCIceCandidate(change.doc.data());
+            await pc.addIceCandidate(candidate);
+          }
+        });
+      });
+
+      // Once remote description + ICE completes, remote video will appear via ontrack
+      pc.onconnectionstatechange = () => {
+        setStatus(callStatus, `Connection state: ${pc.connectionState}`);
+      };
+    }
+
+    function copyInviteLink() {
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) return;
+      const url = `${location.origin}${location.pathname}#${roomId}`;
+      navigator.clipboard.writeText(url);
+      setStatus(callStatus, "Invite link copied to clipboard.");
+    }
+
+    // ---- Wire up UI ----
+    startBtn.addEventListener("click", async () => {
+      try { await startMedia(); }
+      catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); }
+    });
+
+    stopBtn.addEventListener("click", stopMedia);
+
+    createBtn.addEventListener("click", async () => {
+      try { await createRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); }
+    });
+
+    joinBtn.addEventListener("click", async () => {
+      try { await joinRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); }
+    });
+
+    copyLinkBtn.addEventListener("click", copyInviteLink);
+
+    roomIdInput.addEventListener("input", () => {
+      copyLinkBtn.disabled = !roomIdInput.value.trim();
+    });
+
+    // Helpful: if user already has a hash, enable copy link (after start)
+    if (roomIdInput.value.trim()) {
+      setStatus(callStatus, `Room ID detected in URL: ${roomIdInput.value.trim()}`);
+    }
+  </script>
+</body>
+</html>
+Add WebRTC video communicator
+
