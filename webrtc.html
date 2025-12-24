@@ -160,7 +160,6 @@
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
 
-    // ✅ These MUST be top-level (not inside ensurePeerConnection)
     async function clearSubcollection(colRef) {
       const snap = await getDocs(colRef);
       if (snap.empty) return;
@@ -276,6 +275,13 @@
       const roomRef = doc(db, "rooms", roomId);
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) throw new Error("Room not found.");
+
+      // ✅ FIX 1: clear stale B-candidates from previous attempts BEFORE new PC/answer
+      await clearSubcollection(collection(roomRef, "calleeCandidates"));
+
+      // ✅ FIX 2: clear old answer to avoid stale SDP being used by A from previous attempts
+      // (merge keeps offer/session intact)
+      await setDoc(roomRef, { answer: null }, { merge: true });
 
       ensurePeerConnection();
 
