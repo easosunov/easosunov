@@ -71,10 +71,12 @@
   <!-- Firebase (Firestore) used ONLY for signaling -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-    import {
-      getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-      onSnapshot
-    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+   import {
+  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  onSnapshot,
+  getDocs, deleteDoc, writeBatch
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
 
     /**********************
      * 1) PUT YOUR FIREBASE CONFIG HERE (see step 2 below)
@@ -139,6 +141,19 @@ pc.ontrack = (event) => {
   });
 };
 
+//Additional functions
+      async function clearSubcollection(colRef) {
+  const snap = await getDocs(colRef);
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+}
+
+async function clearRoomCandidates(roomRef) {
+  await clearSubcollection(collection(roomRef, "callerCandidates"));
+  await clearSubcollection(collection(roomRef, "calleeCandidates"));
+}
 
       
       // Add local tracks
@@ -180,61 +195,86 @@ pc.ontrack = (event) => {
       copyLinkBtn.disabled = true;
     }
 
-    async function createRoom() {
-      if (!localStream) throw new Error("Start media first.");
+async function createRoom() {
+  if (!localStream) throw new Error("Start media first.");
 
-      ensurePeerConnection();
+  // Use existing roomId if present; otherwise create a new one
+  let roomRef;
+  const existingId = roomIdInput.value.trim();
 
-      // Create a new room doc
-      const roomRef = doc(collection(db, "rooms"));
-      const roomId = roomRef.id;
+  if (existingId) {
+    roomRef = doc(db, "rooms", existingId);
+  } else {
+    roomRef = doc(collection(db, "rooms"));
+    roomIdInput.value = roomRef.id;
+    location.hash = roomRef.id;
+  }
 
-      roomIdInput.value = roomId;
-      location.hash = roomId;
+  // Reset PC every time we (re)create the room session
+  if (pc) pc.close();
+  ensurePeerConnection();
 
-      // ICE candidates subcollections
-      const callerCandidates = collection(roomRef, "callerCandidates");
-      const calleeCandidates = collection(roomRef, "calleeCandidates");
+  // Clear old ICE candidates so we don't accumulate junk across sessions
+  await clearRoomCandidates(roomRef);
 
-      // Collect local ICE candidates and store
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          await addDoc(callerCandidates, event.candidate.toJSON());
-        }
-      };
+  // Bump session counter (or initialize)
+  const roomSnap = await getDoc(roomRef);
+  const prevSession = roomSnap.exists() ? (roomSnap.data().session || 0) : 0;
+  const session = prevSession + 1;
 
-      // Create offer
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
+  const callerCandidates = collection(roomRef, "callerCandidates");
+  const calleeCandidates = collection(roomRef, "calleeCandidates");
 
-      await setDoc(roomRef, {
-        offer: { type: offer.type, sdp: offer.sdp },
-        createdAt: Date.now()
-      });
+  pc.onicecandidate = async (event) => {
+    if (event.candidate) await addDoc(callerCandidates, event.candidate.toJSON());
+  };
 
-      setStatus(callStatus, `Room created. Share Room ID: ${roomId}`);
-      copyLinkBtn.disabled = false;
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
 
-      // Listen for answer
-      onSnapshot(roomRef, async (snapshot) => {
-        const data = snapshot.data();
-        if (!pc.currentRemoteDescription && data?.answer) {
-          const answerDesc = new RTCSessionDescription(data.answer);
-          await pc.setRemoteDescription(answerDesc);
-          setStatus(callStatus, "Connected (answer received).");
-        }
-      });
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now()
+  }, { merge: true });
 
-      // Listen for callee ICE candidates
-      onSnapshot(calleeCandidates, (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
-          if (change.type === "added") {
-            const candidate = new RTCIceCandidate(change.doc.data());
-            await pc.addIceCandidate(candidate);
-          }
-        });
-      });
+  setStatus(callStatus, `Room active (session ${session}). Share Room ID: ${roomRef.id}`);
+  copyLinkBtn.disabled = false;
+
+  // Listen for answer changes — ONLY accept when session matches
+  onSnapshot(roomRef, async (snapshot) => {
+    const data = snapshot.data();
+    if (!data?.answer || data.session !== session) return;
+
+    const incomingSdp = data.answer.sdp;
+    const currentSdp = pc.currentRemoteDescription?.sdp;
+
+    if (incomingSdp && incomingSdp !== currentSdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      setStatus(callStatus, `Connected (session ${session}).`);
     }
+  });
+
+  // Listen for callee ICE candidates for this session
+  onSnapshot(calleeCandidates, (snapshot) => {
+    snapshot.docChanges().forEach(async (change) => {
+      if (change.type === "added") {
+        await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+      }
+    });
+  });
+
+  // Auto-restart if connection drops (optional but helps “come/go”)
+  pc.onconnectionstatechange = async () => {
+    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      setStatus(callStatus, "Connection lost — restarting room session…");
+      // Small delay avoids flapping
+      setTimeout(() => createRoom().catch(() => {}), 1500);
+    }
+  };
+}
+
 
     async function joinRoom() {
       if (!localStream) throw new Error("Start media first.");
@@ -260,7 +300,9 @@ pc.ontrack = (event) => {
       };
 
       // Set remote description from offer
-      const roomData = roomSnap.data();
+  const roomData = roomSnap.data();
+const session = roomData.session || 0;
+
       const offerDesc = new RTCSessionDescription(roomData.offer);
       await pc.setRemoteDescription(offerDesc);
 
@@ -268,10 +310,12 @@ pc.ontrack = (event) => {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      await updateDoc(roomRef, {
-        answer: { type: answer.type, sdp: answer.sdp },
-        answeredAt: Date.now()
-      });
+await updateDoc(roomRef, {
+  answer: { type: answer.type, sdp: answer.sdp },
+  session,
+  answeredAt: Date.now()
+});
+
 
       setStatus(callStatus, "Joined room. Connecting…");
       copyLinkBtn.disabled = false;
@@ -290,6 +334,19 @@ pc.ontrack = (event) => {
       pc.onconnectionstatechange = () => {
         setStatus(callStatus, `Connection state: ${pc.connectionState}`);
       };
+
+        // Listen for room restarts by Person A
+  onSnapshot(roomRef, async (snap) => {
+    const d = snap.data();
+    if (!d?.offer) return;
+
+    // If Person A restarted the session, rejoin automatically
+    if (d.session && d.session !== session) {
+      setStatus(callStatus, "Room restarted by Person A — rejoining…");
+      location.reload();
+    }
+  });
+
     }
 
     function copyInviteLink() {
