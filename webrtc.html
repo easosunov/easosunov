@@ -137,8 +137,13 @@ async function clearRoomCandidates(roomRef) {
   await clearSubcollection(collection(roomRef, "callerCandidates"));
   await clearSubcollection(collection(roomRef, "calleeCandidates"));
 }
-    
+
+   
     function ensurePeerConnection() {
+        if (pc) {
+    pc.close();
+    pc = null;
+  }
       pc = new RTCPeerConnection(rtcConfig);
 
       // When remote track arrives, show it
