@@ -105,6 +105,7 @@ const firebaseConfig = {
 
     // ---- WebRTC ----
     let localStream = null;
+    let lastSeenJoinRequest = 0;
     let pc = null;
 
     const rtcConfig = {
@@ -251,17 +252,28 @@ async function createRoom() {
 
   // Listen for answer changes — ONLY accept when session matches
   onSnapshot(roomRef, async (snapshot) => {
-    const data = snapshot.data();
-    if (!data?.answer || data.session !== session) return;
+  const data = snapshot.data();
 
-    const incomingSdp = data.answer.sdp;
-    const currentSdp = pc.currentRemoteDescription?.sdp;
+  // ✅ If Person B requests re-join, restart session (new offer)
+  if (data?.joinRequest && data.joinRequest > lastSeenJoinRequest) {
+    lastSeenJoinRequest = data.joinRequest;
+    setStatus(callStatus, "Join request received — restarting room…");
+    setTimeout(() => createRoom().catch(() => {}), 200);
+    return;
+  }
 
-    if (incomingSdp && incomingSdp !== currentSdp) {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      setStatus(callStatus, `Connected (session ${session}).`);
-    }
-  });
+  // Existing logic: accept answer only for this session
+  if (!data?.answer || data.session !== session) return;
+
+  const incomingSdp = data.answer.sdp;
+  const currentSdp = pc.currentRemoteDescription?.sdp;
+
+  if (incomingSdp && incomingSdp !== currentSdp) {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    setStatus(callStatus, `Connected (session ${session}).`);
+  }
+});
+
 
   // Listen for callee ICE candidates for this session
   onSnapshot(calleeCandidates, (snapshot) => {
@@ -294,6 +306,10 @@ async function createRoom() {
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) throw new Error("Room not found.");
 
+// ✅ Ask Person A to refresh offer/session (so re-joining always works)
+await setDoc(roomRef, { joinRequest: Date.now() }, { merge: true });
+
+      
       ensurePeerConnection();
 
       const callerCandidates = collection(roomRef, "callerCandidates");
