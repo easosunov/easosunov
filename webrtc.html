@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>2-Person Video/Sound Communicator (WebRTC) + Diagnostics</title>
+  <title>2-Person Video/Sound Communicator (WebRTC)</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
     h1 { font-size: 20px; margin: 0 0 12px; }
     .row { display: flex; flex-wrap: wrap; gap: 12px; }
     .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; flex: 1 1 320px; }
     .videos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    @media (max-width: 900px) { .videos { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .videos { grid-template-columns: 1fr; } }
     video { width: 100%; background: #000; border-radius: 12px; aspect-ratio: 16/9; }
     label { font-size: 12px; color: #444; display: block; margin: 8px 0 6px; }
     input[type="text"] { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ccc; }
@@ -19,27 +19,15 @@
     .small { font-size: 12px; color: #555; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
     .status { margin-top: 10px; font-size: 13px; }
-    #errorBox{
+    #errorBox {
       display:none; margin: 12px 0; padding: 10px 12px;
       border: 1px solid #f3b5b5; background: #fff5f5; color: #7a1b1b;
       border-radius: 12px; white-space: pre-wrap;
     }
-    #diag {
-      height: 260px;
-      overflow: auto;
-      white-space: pre-wrap;
-      background: #0b1020;
-      color: #e6e6e6;
-      border-radius: 12px;
-      padding: 10px;
-      font-size: 12px;
-      line-height: 1.35;
-    }
-    .diagbar { display:flex; gap:10px; flex-wrap:wrap; margin: 10px 0; }
   </style>
 </head>
 <body>
-  <h1>2-Person Video/Sound Communicator (WebRTC) + Diagnostics</h1>
+  <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
   <div id="errorBox"></div>
 
   <div class="videos">
@@ -84,54 +72,17 @@
         Tip: room ID is also taken from URL hash, like <span class="mono">.../webrtc.html#ROOM_ID</span>
       </div>
     </div>
-
-    <div class="card" style="flex: 1 1 100%;">
-      <div><strong>Diagnostics</strong></div>
-      <div class="diagbar">
-        <button id="clearLogBtn">Clear log</button>
-        <button id="copyLogBtn">Copy log</button>
-        <button id="statsBtn">Get stats now</button>
-      </div>
-      <div id="diag"></div>
-      <div class="small" style="margin-top:8px;">
-        If it says <span class="mono">ICE failed</span> and you only see <span class="mono">host</span> or no remote candidates,
-        you need a TURN server.
-      </div>
-    </div>
   </div>
 
   <script type="module">
     const errorBox = document.getElementById("errorBox");
-    const diagEl = document.getElementById("diag");
-    const clearLogBtn = document.getElementById("clearLogBtn");
-    const copyLogBtn = document.getElementById("copyLogBtn");
-    const statsBtn = document.getElementById("statsBtn");
-
     function showError(e) {
       errorBox.style.display = "block";
       errorBox.textContent = String(e?.stack || e);
       console.error(e);
-      log("ERROR: " + String(e?.stack || e));
     }
     window.addEventListener("error", (e) => showError(e.error || e.message || e));
     window.addEventListener("unhandledrejection", (e) => showError(e.reason || e));
-
-    function ts() {
-      const d = new Date();
-      return d.toISOString().replace("T"," ").replace("Z","");
-    }
-    function log(msg) {
-      const line = `[${ts()}] ${msg}\n`;
-      diagEl.textContent += line;
-      diagEl.scrollTop = diagEl.scrollHeight;
-      console.log(msg);
-    }
-
-    clearLogBtn.addEventListener("click", () => { diagEl.textContent = ""; });
-    copyLogBtn.addEventListener("click", async () => {
-      await navigator.clipboard.writeText(diagEl.textContent);
-      log("Copied log to clipboard.");
-    });
 
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
     import {
@@ -148,7 +99,7 @@
       appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
     };
 
-    // UI
+    // ---- UI ----
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
     const startBtn = document.getElementById("startBtn");
@@ -160,99 +111,45 @@
     const mediaStatus = document.getElementById("mediaStatus");
     const callStatus = document.getElementById("callStatus");
 
-    function setStatus(el, msg) { el.textContent = msg; log(`STATUS(${el.id}): ${msg}`); }
+    function setStatus(el, msg) { el.textContent = msg; }
 
+    // ---- Firestore ----
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
+    // Load roomId from URL hash if present
     if (location.hash && location.hash.length > 1) {
       roomIdInput.value = location.hash.substring(1);
-      log("Room ID from URL hash: " + roomIdInput.value);
     }
 
-    // WebRTC
+    // ---- WebRTC ----
     let localStream = null;
     let pc = null;
 
-    // Firestore listeners
+    // ✅ NEW: keep & unsubscribe snapshot listeners so they don't stack
     let unsubRoom = null;
     let unsubCandidates = null;
 
-    // Candidate counters
-    let sentCandidates = 0;
-    let recvCandidates = 0;
+    // ✅ NEW: prevent applying same answer repeatedly (stale snapshots)
+    let lastAnswerSdp = null;
 
-    // Stats polling
-    let statsTimer = null;
-
-    // IMPORTANT: STUN only. If ICE fails, you need TURN.
     const rtcConfig = {
       iceServers: [
         { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
       ]
     };
 
-    function resetCandidateCounters() {
-      sentCandidates = 0;
-      recvCandidates = 0;
-      log("Candidate counters reset.");
-    }
-
-    function stopStatsPolling() {
-      if (statsTimer) clearInterval(statsTimer);
-      statsTimer = null;
-    }
-
-    async function dumpStatsOnce(label="manual") {
-      if (!pc) { log(`STATS(${label}): no pc`); return; }
-
-      const report = await pc.getStats();
-      let selectedPair = null;
-      let localCandidate = null;
-      let remoteCandidate = null;
-
-      report.forEach(stat => {
-        if (stat.type === "candidate-pair" && stat.nominated && stat.state) {
-          if (!selectedPair || stat.selected) selectedPair = stat;
-        }
-      });
-
-      if (selectedPair) {
-        localCandidate = report.get(selectedPair.localCandidateId);
-        remoteCandidate = report.get(selectedPair.remoteCandidateId);
-
-        log(`STATS(${label}): pairState=${selectedPair.state} nominated=${selectedPair.nominated} selected=${selectedPair.selected ?? false} rtt=${selectedPair.currentRoundTripTime ?? "?"} bytesSent=${selectedPair.bytesSent ?? "?"} bytesRecv=${selectedPair.bytesReceived ?? "?"}`);
-        if (localCandidate) {
-          log(`STATS(${label}): localCand type=${localCandidate.candidateType} proto=${localCandidate.protocol} addr=${localCandidate.address ?? localCandidate.ip ?? "?"}:${localCandidate.port ?? "?"}`);
-        }
-        if (remoteCandidate) {
-          log(`STATS(${label}): remoteCand type=${remoteCandidate.candidateType} proto=${remoteCandidate.protocol} addr=${remoteCandidate.address ?? remoteCandidate.ip ?? "?"}:${remoteCandidate.port ?? "?"}`);
-        }
-      } else {
-        // Still useful: show ICE and PC states
-        log(`STATS(${label}): no nominated candidate pair yet. pc=${pc.connectionState} iceConn=${pc.iceConnectionState} iceGather=${pc.iceGatheringState} sentCand=${sentCandidates} recvCand=${recvCandidates}`);
-      }
-    }
-
-    statsBtn.addEventListener("click", () => dumpStatsOnce("button").catch(showError));
-
-    function startStatsPolling() {
-      stopStatsPolling();
-      statsTimer = setInterval(() => {
-        dumpStatsOnce("poll").catch(() => {});
-      }, 3000);
-    }
-
     function closePeer() {
-      stopStatsPolling();
+      // stop old firestore listeners first (prevents stale callbacks)
+      if (unsubRoom) { unsubRoom(); unsubRoom = null; }
+      if (unsubCandidates) { unsubCandidates(); unsubCandidates = null; }
+
+      lastAnswerSdp = null;
+
       if (pc) {
-        log("Closing RTCPeerConnection");
         pc.onicecandidate = null;
         pc.ontrack = null;
         pc.onconnectionstatechange = null;
-        pc.oniceconnectionstatechange = null;
-        pc.onicegatheringstatechange = null;
-        pc.onsignalingstatechange = null;
         pc.close();
         pc = null;
       }
@@ -260,54 +157,33 @@
     }
 
     function ensurePeerConnection() {
-      closePeer();
-      resetCandidateCounters();
+      closePeer(); // ✅ IMPORTANT: prevents stacking pcs/listeners
 
       pc = new RTCPeerConnection(rtcConfig);
-      log("Created RTCPeerConnection");
-
-      pc.onicegatheringstatechange = () => log(`ICE gathering state: ${pc.iceGatheringState}`);
-      pc.onsignalingstatechange = () => log(`Signaling state: ${pc.signalingState}`);
-      pc.oniceconnectionstatechange = () => log(`ICE connection state: ${pc.iceConnectionState}`);
-      pc.onconnectionstatechange = () => log(`Peer connection state: ${pc.connectionState}`);
 
       const remoteStream = new MediaStream();
       remoteVideo.srcObject = remoteStream;
 
       pc.ontrack = (event) => {
-        log(`ontrack: streams=${event.streams.length} tracks=${event.track.kind}`);
         event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
         remoteVideo.muted = false;
         remoteVideo.play().catch(() => {});
       };
 
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          sentCandidates++;
-          log(`ICE candidate gathered (#${sentCandidates}): ${event.candidate.type} ${event.candidate.protocol} ${event.candidate.address ?? ""}`);
-          // stored by caller/join logic
-        } else {
-          log("ICE candidate gathering complete (null candidate)");
-        }
-      };
-
       if (!localStream) throw new Error("Local media not started yet.");
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-
-      startStatsPolling();
     }
 
+    // Candidate cleanup helper
     async function clearSubcollection(colRef) {
       const snap = await getDocs(colRef);
       if (snap.empty) return;
       const batch = writeBatch(db);
       snap.forEach(d => batch.delete(d.ref));
       await batch.commit();
-      log(`Cleared subcollection ${colRef.path} docs=${snap.size}`);
     }
 
     async function startMedia() {
-      setStatus(mediaStatus, "Requesting camera/mic permission…");
       localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       localVideo.srcObject = localStream;
 
@@ -320,11 +196,7 @@
     }
 
     async function stopMedia() {
-      if (unsubRoom) { unsubRoom(); unsubRoom = null; }
-      if (unsubCandidates) { unsubCandidates(); unsubCandidates = null; }
-
       closePeer();
-
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         localStream = null;
@@ -343,10 +215,6 @@
     async function createRoom() {
       if (!localStream) throw new Error("Start media first.");
 
-      // stop old listeners
-      if (unsubRoom) { unsubRoom(); unsubRoom = null; }
-      if (unsubCandidates) { unsubCandidates(); unsubCandidates = null; }
-
       let roomRef;
       const existingId = roomIdInput.value.trim();
 
@@ -358,32 +226,23 @@
         location.hash = roomRef.id;
       }
 
-      log(`CreateRoom: roomId=${roomRef.id}`);
-
-      // clean old junk
-      await clearSubcollection(collection(roomRef, "callerCandidates"));
-      await clearSubcollection(collection(roomRef, "calleeCandidates"));
-      await setDoc(roomRef, { offer: null, answer: null, updatedAt: Date.now() }, { merge: true });
-
+      // ✅ ensure fresh pc and no old listeners
       ensurePeerConnection();
 
       const callerCandidates = collection(roomRef, "callerCandidates");
       const calleeCandidates = collection(roomRef, "calleeCandidates");
 
-      // store gathered candidates
+      // ✅ clear stale candidates/answer from prior attempts
+      await clearSubcollection(callerCandidates);
+      await clearSubcollection(calleeCandidates);
+      await setDoc(roomRef, { answer: null }, { merge: true });
+
       pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          sentCandidates++;
-          await addDoc(callerCandidates, event.candidate.toJSON());
-          log(`Stored callerCandidate (#${sentCandidates})`);
-        } else {
-          log("Caller ICE complete");
-        }
+        if (event.candidate) await addDoc(callerCandidates, event.candidate.toJSON());
       };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      log("Set localDescription(offer)");
 
       await setDoc(roomRef, {
         offer: { type: offer.type, sdp: offer.sdp },
@@ -394,36 +253,47 @@
       setStatus(callStatus, `Room active. Room ID: ${roomRef.id}`);
       copyLinkBtn.disabled = false;
 
-      // listen for answer
-      unsubRoom = onSnapshot(roomRef, async (snap) => {
-        const data = snap.data();
+      // ✅ IMPORTANT: store unsubscribe and guard the state before setting remote answer
+      unsubRoom = onSnapshot(roomRef, async (snapshot) => {
+        const data = snapshot.data();
         if (!data?.answer) return;
-        if (pc.currentRemoteDescription) return;
+        if (!pc) return;
 
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-        log("Set remoteDescription(answer)");
-        setStatus(callStatus, "Connected (answer received).");
+        // Only apply answer if we're actually waiting for it
+        if (pc.signalingState !== "have-local-offer") return;
+
+        const incomingSdp = data.answer.sdp;
+        if (!incomingSdp) return;
+
+        // prevent double-apply
+        if (lastAnswerSdp === incomingSdp) return;
+        if (pc.currentRemoteDescription?.sdp === incomingSdp) return;
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          lastAnswerSdp = incomingSdp;
+          setStatus(callStatus, "Connected.");
+        } catch (e) {
+          showError(e);
+        }
       });
 
-      // listen for callee candidates
+      // ✅ store unsubscribe (prevents stacking candidates listener)
       unsubCandidates = onSnapshot(calleeCandidates, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-          if (change.type !== "added" || !pc) return;
-          recvCandidates++;
-          const c = change.doc.data();
-          log(`Received calleeCandidate (#${recvCandidates})`);
-          try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
-          catch (e) { log("addIceCandidate error: " + e); }
+          if (change.type === "added" && pc) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            } catch (e) {
+              // ignore occasional duplicate candidate errors
+            }
+          }
         });
       });
     }
 
     async function joinRoom() {
       if (!localStream) throw new Error("Start media first.");
-
-      // stop old listeners
-      if (unsubRoom) { unsubRoom(); unsubRoom = null; }
-      if (unsubCandidates) { unsubCandidates(); unsubCandidates = null; }
 
       const roomId = roomIdInput.value.trim();
       if (!roomId) throw new Error("Enter a room ID.");
@@ -433,39 +303,28 @@
       const roomSnap = await getDoc(roomRef);
       if (!roomSnap.exists()) throw new Error("Room not found.");
 
-      log(`JoinRoom: roomId=${roomId}`);
-
-      // clean stale callee candidates for repeated joins
-      await clearSubcollection(collection(roomRef, "calleeCandidates"));
-      await updateDoc(roomRef, { answer: null, answeredAt: null });
-
+      // ✅ ensure fresh pc and no old listeners
       ensurePeerConnection();
 
       const callerCandidates = collection(roomRef, "callerCandidates");
       const calleeCandidates = collection(roomRef, "calleeCandidates");
 
+      // ✅ clear B-side stale candidates + clear room answer so A doesn't apply old data
+      await clearSubcollection(calleeCandidates);
+      await setDoc(roomRef, { answer: null }, { merge: true });
+
       pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          sentCandidates++;
-          await addDoc(calleeCandidates, event.candidate.toJSON());
-          log(`Stored calleeCandidate (#${sentCandidates})`);
-        } else {
-          log("Callee ICE complete");
-        }
+        if (event.candidate) await addDoc(calleeCandidates, event.candidate.toJSON());
       };
 
       const roomData = roomSnap.data();
-      if (!roomData?.offer) {
-        setStatus(callStatus, "No offer yet. Ask Person A to create the room.");
-        return;
-      }
+      if (!roomData?.offer) throw new Error("No offer found. Person A must Create Room first.");
 
-      await pc.setRemoteDescription(new RTCSessionDescription(roomData.offer));
-      log("Set remoteDescription(offer)");
+      const offerDesc = new RTCSessionDescription(roomData.offer);
+      await pc.setRemoteDescription(offerDesc);
 
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      log("Set localDescription(answer)");
 
       await updateDoc(roomRef, {
         answer: { type: answer.type, sdp: answer.sdp },
@@ -473,28 +332,23 @@
       });
 
       setStatus(callStatus, "Joined room. Connecting…");
+      copyLinkBtn.disabled = false;
 
-      // listen for caller candidates
+      // ✅ store unsubscribe to avoid stacking candidate listeners
       unsubCandidates = onSnapshot(callerCandidates, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
-          if (change.type !== "added" || !pc) return;
-          recvCandidates++;
-          const c = change.doc.data();
-          log(`Received callerCandidate (#${recvCandidates})`);
-          try { await pc.addIceCandidate(new RTCIceCandidate(c)); }
-          catch (e) { log("addIceCandidate error: " + e); }
+          if (change.type === "added" && pc) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            } catch (e) {
+              // ignore occasional duplicate candidate errors
+            }
+          }
         });
       });
 
-      // also listen to pc states to recommend TURN
-      pc.oniceconnectionstatechange = () => {
-        log(`ICE connection state: ${pc.iceConnectionState} (sent=${sentCandidates} recv=${recvCandidates})`);
-        if (pc.iceConnectionState === "failed") {
-          log("DIAG: ICE failed. This usually means you need a TURN server OR candidates are not being exchanged.");
-        }
-        if (pc.iceConnectionState === "checking" && recvCandidates === 0) {
-          log("DIAG: Still checking but received 0 remote candidates so far (signaling issue).");
-        }
+      pc.onconnectionstatechange = () => {
+        setStatus(callStatus, `Connection state: ${pc.connectionState}`);
       };
     }
 
@@ -506,19 +360,22 @@
       setStatus(callStatus, "Invite link copied to clipboard.");
     }
 
-    // UI wiring
+    // ---- Wire up UI ----
     startBtn.addEventListener("click", async () => {
-      try { await startMedia(); } catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); showError(e); }
+      try { await startMedia(); }
+      catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); showError(e); }
     });
 
     stopBtn.addEventListener("click", () => stopMedia().catch(showError));
 
     createBtn.addEventListener("click", async () => {
-      try { await createRoom(); } catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
+      try { await createRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
     });
 
     joinBtn.addEventListener("click", async () => {
-      try { await joinRoom(); } catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
+      try { await joinRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
     });
 
     copyLinkBtn.addEventListener("click", copyInviteLink);
@@ -530,8 +387,6 @@
     if (roomIdInput.value.trim()) {
       setStatus(callStatus, `Room ID detected in URL: ${roomIdInput.value.trim()}`);
     }
-
-    log("Diagnostics ready. If connection fails, click 'Copy log' and send it here.");
   </script>
 </body>
 </html>
