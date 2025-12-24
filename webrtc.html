@@ -124,6 +124,20 @@ const firebaseConfig = {
 
     function setStatus(el, msg) { el.textContent = msg; }
 
+//Additional functions
+      async function clearSubcollection(colRef) {
+  const snap = await getDocs(colRef);
+  if (snap.empty) return;
+  const batch = writeBatch(db);
+  snap.forEach(d => batch.delete(d.ref));
+  await batch.commit();
+}
+
+async function clearRoomCandidates(roomRef) {
+  await clearSubcollection(collection(roomRef, "callerCandidates"));
+  await clearSubcollection(collection(roomRef, "calleeCandidates"));
+}
+    
     function ensurePeerConnection() {
       pc = new RTCPeerConnection(rtcConfig);
 
@@ -141,19 +155,7 @@ pc.ontrack = (event) => {
   });
 };
 
-//Additional functions
-      async function clearSubcollection(colRef) {
-  const snap = await getDocs(colRef);
-  if (snap.empty) return;
-  const batch = writeBatch(db);
-  snap.forEach(d => batch.delete(d.ref));
-  await batch.commit();
-}
 
-async function clearRoomCandidates(roomRef) {
-  await clearSubcollection(collection(roomRef, "callerCandidates"));
-  await clearSubcollection(collection(roomRef, "calleeCandidates"));
-}
 
       
       // Add local tracks
