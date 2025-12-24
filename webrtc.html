@@ -84,7 +84,7 @@
       appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
     };
 
-    // ---- UI ----
+    // UI
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
     const startBtn = document.getElementById("startBtn");
@@ -98,32 +98,30 @@
 
     function setStatus(el, msg) { el.textContent = msg; }
 
-    // ---- Firestore ----
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    // Load roomId from URL hash if present
     if (location.hash && location.hash.length > 1) {
       roomIdInput.value = location.hash.substring(1);
     }
 
-    // ---- WebRTC ----
+    // WebRTC
     let localStream = null;
     let pc = null;
 
-    // Prevent "Join too soon" + double click issues
+    // Start/Join timing safety
     let startingMediaPromise = null;
     let joinInProgress = false;
 
-    // For A-side rejoin requests
+    // A-side: avoid snapshot stacking
+    let unsubRoomA = null;
+    let unsubCalleeCandidatesA = null;
     let lastSeenJoinRequest = 0;
 
-    // B-side subscriptions (so we don't stack listeners)
+    // B-side: follow room (avoid reload loops + avoid snapshot stacking)
     let unsubRoomB = null;
     let unsubCallerCandidatesB = null;
-    
-    let reconnectTimer = null;
-    let currentRoomRefForB = null;
+    let lastAnsweredSessionB = null;
 
     const rtcConfig = {
       iceServers: [
@@ -149,6 +147,7 @@
         pc.onicecandidate = null;
         pc.ontrack = null;
         pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
         pc.close();
         pc = null;
       }
@@ -192,14 +191,14 @@
         copyLinkBtn.disabled = !roomIdInput.value.trim();
       })();
 
-      try {
-        await startingMediaPromise;
-      } finally {
-        startingMediaPromise = null;
-      }
+      try { await startingMediaPromise; }
+      finally { startingMediaPromise = null; }
     }
 
     async function stopMedia() {
+      // stop snapshots
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeCandidatesA) { unsubCalleeCandidatesA(); unsubCalleeCandidatesA = null; }
       if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
       if (unsubCallerCandidatesB) { unsubCallerCandidatesB(); unsubCallerCandidatesB = null; }
 
@@ -218,14 +217,16 @@
       createBtn.disabled = true;
       joinBtn.disabled = true;
       copyLinkBtn.disabled = true;
+
+      lastAnsweredSessionB = null;
     }
 
+    // Person A
     async function createRoom() {
       if (!localStream) throw new Error("Start media first.");
 
       let roomRef;
       const existingId = roomIdInput.value.trim();
-
       if (existingId) {
         roomRef = doc(db, "rooms", existingId);
       } else {
@@ -234,7 +235,13 @@
         location.hash = roomRef.id;
       }
 
+      // prevent stacking A listeners
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeCandidatesA) { unsubCalleeCandidatesA(); unsubCalleeCandidatesA = null; }
+
       ensurePeerConnection();
+
+      // clear old candidates (fresh session)
       await clearRoomCandidates(roomRef);
 
       const roomSnap = await getDoc(roomRef);
@@ -261,13 +268,19 @@
       setStatus(callStatus, `Room active (session ${session}). Share Room ID: ${roomRef.id}`);
       copyLinkBtn.disabled = false;
 
-      // Listen for answer OR rejoin requests
-      onSnapshot(roomRef, async (snapshot) => {
+      // One room listener: handle joinRequest + answer
+      unsubRoomA = onSnapshot(roomRef, async (snapshot) => {
         const data = snapshot.data();
 
-        // If B requests rejoin, restart session (new offer)
+        // Only restart on joinRequest if we are NOT already connected
         if (data?.joinRequest && data.joinRequest > lastSeenJoinRequest) {
           lastSeenJoinRequest = data.joinRequest;
+
+          if (pc && pc.connectionState === "connected") {
+            setStatus(callStatus, "Join request received, but already connected.");
+            return;
+          }
+
           setStatus(callStatus, "Join request received — restarting room…");
           setTimeout(() => createRoom().catch(() => {}), 200);
           return;
@@ -284,45 +297,20 @@
         }
       });
 
-      onSnapshot(calleeCandidates, (snapshot) => {
+      unsubCalleeCandidatesA = onSnapshot(calleeCandidates, (snapshot) => {
         snapshot.docChanges().forEach(async (change) => {
           if (change.type === "added" && pc) {
-            await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
+            try { await pc.addIceCandidate(new RTCIceCandidate(change.doc.data())); } catch {}
           }
         });
       });
 
       pc.onconnectionstatechange = () => {
-        if (!pc) return;
-        if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-          setStatus(callStatus, "Connection lost — restarting room session…");
-          setTimeout(() => createRoom().catch(() => {}), 1500);
-        }
+        setStatus(callStatus, `A connection: ${pc.connectionState} (session ${session})`);
       };
     }
 
-function scheduleReconnectPing(ms = 9000) {
-  if (reconnectTimer) clearTimeout(reconnectTimer);
-
-  reconnectTimer = setTimeout(async () => {
-    if (!pc || !currentRoomRefForB) return;
-
-    // If still not connected after timeout, ask A for a fresh offer/session
-    if (pc.connectionState === "connecting" || pc.iceConnectionState === "checking") {
-      setStatus(callStatus, "Still connecting… retrying (asking Person A to restart) …");
-      try {
-        await setDoc(currentRoomRefForB, { joinRequest: Date.now() }, { merge: true });
-      } catch (e) {
-        // ignore; will retry again on next click or timer
-      }
-      // schedule another retry if needed
-      scheduleReconnectPing(ms);
-    }
-  }, ms);
-}
-
-    
-    // ✅ NEW B-SIDE: follow the room (no reload loop)
+    // Person B (fixed): follow the room and ALWAYS answer latest offer/session
     async function joinRoom() {
       if (joinInProgress) return;
       joinInProgress = true;
@@ -340,22 +328,17 @@ function scheduleReconnectPing(ms = 9000) {
         if (!roomId) throw new Error("Enter a room ID.");
         location.hash = roomId;
 
-        currentRoomRefForB = roomRef;
-
         const roomRef = doc(db, "rooms", roomId);
         const roomSnap = await getDoc(roomRef);
         if (!roomSnap.exists()) throw new Error("Room not found.");
 
-        // Ask A to publish a fresh offer/session (needed for rejoin)
+        // ask A to publish a fresh offer/session
         await setDoc(roomRef, { joinRequest: Date.now() }, { merge: true });
-        setStatus(callStatus, "Connecting… (waiting for offer)");
-        scheduleReconnectPing(9000);
 
-        // Remove any previous B listeners (if user clicks Join twice)
+        // stop previous B listeners
         if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
         if (unsubCallerCandidatesB) { unsubCallerCandidatesB(); unsubCallerCandidatesB = null; }
-
-        let lastAnsweredSession = null;
+        lastAnsweredSessionB = null;
 
         setStatus(callStatus, "Connecting… (waiting for offer)");
 
@@ -363,39 +346,22 @@ function scheduleReconnectPing(ms = 9000) {
           const data = snap.data();
           if (!data?.offer || !data.session) return;
 
-          // If A restarted, answer the new session (no reload)
-          if (lastAnsweredSession === data.session) return;
+          // Only answer each session once
+          if (lastAnsweredSessionB === data.session) return;
 
           setStatus(callStatus, `Connecting… (session ${data.session})`);
 
-          // Fresh peer connection for each new session
+          // New session => new PeerConnection
           ensurePeerConnection();
-// If ICE fails, request a fresh offer and keep trying
-pc.oniceconnectionstatechange = async () => {
-  if (!pc || !currentRoomRefForB) return;
 
-  if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
-    setStatus(callStatus, `ICE ${pc.iceConnectionState} — retrying…`);
-    try {
-      await setDoc(currentRoomRefForB, { joinRequest: Date.now() }, { merge: true });
-    } catch {}
-    scheduleReconnectPing(9000);
-  }
-};
-
-// Restart the "connecting" watchdog timer for this session
-scheduleReconnectPing(9000);
-
-          // Clear B-side candidates so old ones don't interfere
+          // clear B candidates to avoid stale junk
           await clearSubcollection(collection(roomRef, "calleeCandidates"));
 
           const callerCandidates = collection(roomRef, "callerCandidates");
           const calleeCandidates = collection(roomRef, "calleeCandidates");
 
           pc.onicecandidate = async (event) => {
-            if (event.candidate) {
-              await addDoc(calleeCandidates, event.candidate.toJSON());
-            }
+            if (event.candidate) await addDoc(calleeCandidates, event.candidate.toJSON());
           };
 
           await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
@@ -409,27 +375,29 @@ scheduleReconnectPing(9000);
             answeredAt: Date.now()
           });
 
-          lastAnsweredSession = data.session;
+          lastAnsweredSessionB = data.session;
 
-          // (Re)subscribe to caller ICE candidates
+          // (Re)subscribe to caller candidates for this session
           if (unsubCallerCandidatesB) { unsubCallerCandidatesB(); unsubCallerCandidatesB = null; }
           unsubCallerCandidatesB = onSnapshot(callerCandidates, (snapshot) => {
             snapshot.docChanges().forEach(async (change) => {
               if (change.type === "added" && pc) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-                } catch {}
+                try { await pc.addIceCandidate(new RTCIceCandidate(change.doc.data())); } catch {}
               }
             });
           });
 
-pc.onconnectionstatechange = () => {
-  setStatus(callStatus, `Connection state: ${pc.connectionState} (session ${lastAnsweredSession})`);
-  if (pc.connectionState === "connected") {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    setStatus(callStatus, `Connected (session ${lastAnsweredSession}).`);
-  }
-};
+          pc.onconnectionstatechange = () => {
+            setStatus(callStatus, `Connection state: ${pc.connectionState} (session ${lastAnsweredSessionB})`);
+          };
+
+          pc.oniceconnectionstatechange = () => {
+            // This helps you see if ICE is really failing (usually TURN is needed then)
+            const s = pc.iceConnectionState;
+            if (s === "failed") {
+              setStatus(callStatus, "ICE failed (network blocked). You likely need a TURN server.");
+            }
+          };
         });
 
       } finally {
@@ -446,7 +414,7 @@ pc.onconnectionstatechange = () => {
       setStatus(callStatus, "Invite link copied to clipboard.");
     }
 
-    // ---- Wire up UI ----
+    // UI handlers
     startBtn.addEventListener("click", async () => {
       try { await startMedia(); }
       catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); }
