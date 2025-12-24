@@ -121,6 +121,9 @@
     // B-side subscriptions (so we don't stack listeners)
     let unsubRoomB = null;
     let unsubCallerCandidatesB = null;
+    
+    let reconnectTimer = null;
+    let currentRoomRefForB = null;
 
     const rtcConfig = {
       iceServers: [
@@ -298,6 +301,27 @@
       };
     }
 
+function scheduleReconnectPing(ms = 9000) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+
+  reconnectTimer = setTimeout(async () => {
+    if (!pc || !currentRoomRefForB) return;
+
+    // If still not connected after timeout, ask A for a fresh offer/session
+    if (pc.connectionState === "connecting" || pc.iceConnectionState === "checking") {
+      setStatus(callStatus, "Still connecting… retrying (asking Person A to restart) …");
+      try {
+        await setDoc(currentRoomRefForB, { joinRequest: Date.now() }, { merge: true });
+      } catch (e) {
+        // ignore; will retry again on next click or timer
+      }
+      // schedule another retry if needed
+      scheduleReconnectPing(ms);
+    }
+  }, ms);
+}
+
+    
     // ✅ NEW B-SIDE: follow the room (no reload loop)
     async function joinRoom() {
       if (joinInProgress) return;
@@ -316,12 +340,16 @@
         if (!roomId) throw new Error("Enter a room ID.");
         location.hash = roomId;
 
+        currentRoomRefForB = roomRef;
+
         const roomRef = doc(db, "rooms", roomId);
         const roomSnap = await getDoc(roomRef);
         if (!roomSnap.exists()) throw new Error("Room not found.");
 
         // Ask A to publish a fresh offer/session (needed for rejoin)
         await setDoc(roomRef, { joinRequest: Date.now() }, { merge: true });
+        setStatus(callStatus, "Connecting… (waiting for offer)");
+        scheduleReconnectPing(9000);
 
         // Remove any previous B listeners (if user clicks Join twice)
         if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
@@ -342,6 +370,21 @@
 
           // Fresh peer connection for each new session
           ensurePeerConnection();
+// If ICE fails, request a fresh offer and keep trying
+pc.oniceconnectionstatechange = async () => {
+  if (!pc || !currentRoomRefForB) return;
+
+  if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+    setStatus(callStatus, `ICE ${pc.iceConnectionState} — retrying…`);
+    try {
+      await setDoc(currentRoomRefForB, { joinRequest: Date.now() }, { merge: true });
+    } catch {}
+    scheduleReconnectPing(9000);
+  }
+};
+
+// Restart the "connecting" watchdog timer for this session
+scheduleReconnectPing(9000);
 
           // Clear B-side candidates so old ones don't interfere
           await clearSubcollection(collection(roomRef, "calleeCandidates"));
@@ -380,9 +423,13 @@
             });
           });
 
-          pc.onconnectionstatechange = () => {
-            setStatus(callStatus, `Connection state: ${pc.connectionState} (session ${lastAnsweredSession})`);
-          };
+pc.onconnectionstatechange = () => {
+  setStatus(callStatus, `Connection state: ${pc.connectionState} (session ${lastAnsweredSession})`);
+  if (pc.connectionState === "connected") {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    setStatus(callStatus, `Connected (session ${lastAnsweredSession}).`);
+  }
+};
         });
 
       } finally {
