@@ -129,10 +129,18 @@ const firebaseConfig = {
       const remoteStream = new MediaStream();
       remoteVideo.srcObject = remoteStream;
 
-      pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
-      };
+pc.ontrack = (event) => {
+  event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
 
+  // Force audio playback after track arrives
+  remoteVideo.muted = false;
+  remoteVideo.play().catch(() => {
+    console.log("Autoplay blocked — user interaction required");
+  });
+};
+
+
+      
       // Add local tracks
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     }
