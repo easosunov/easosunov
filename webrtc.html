@@ -25,7 +25,6 @@
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
   }
 
-  /* LOGIN OVERLAY */
   #loginOverlay{
     position:fixed; inset:0; z-index:9999;
     background:rgba(0,0,0,.55);
@@ -41,11 +40,10 @@
   #logoutBtn{float:right}
   #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
-  /* DIAGNOSTICS */
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:220px;
+    max-height:260px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -64,7 +62,6 @@
 <h1>2-Person Video/Sound Communicator (WebRTC) <span id="buildBadge" class="badge"></span></h1>
 <div id="errorBox"></div>
 
-<!-- LOGIN -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
@@ -111,11 +108,14 @@
       <b>Step 2</b><br/><br/>
       <button id="createBtn" disabled>Create Room</button>
       <button id="joinBtn" disabled>Join Room</button>
+
       <div class="small" style="margin-top:8px">Room ID</div>
       <input id="roomId" placeholder="Room ID"/>
+
       <div style="margin-top:8px">
         <button id="copyLinkBtn" disabled>Copy Invite</button>
       </div>
+
       <div class="status" id="callStatus">No room yet.</div>
       <div class="small">Invite format: <code>.../webrtc.html?v=BUILD#ROOM_ID</code></div>
     </div>
@@ -124,6 +124,7 @@
   <div class="card" style="margin-top:12px">
     <button id="diagBtn">Diagnostics</button>
     <div class="diagActions">
+      <button id="dumpRoomBtn" disabled>Dump room doc</button>
       <button id="copyDiagBtn" disabled>Copy log</button>
       <button id="clearDiagBtn" disabled>Clear log</button>
     </div>
@@ -133,12 +134,8 @@
 </div>
 
 <script type="module">
-/* ================== BUILD / CACHE ==================
-   This BUILD string MUST appear in:
-   - header badge
-   - diagnostics first line
-*/
-const BUILD = "2025-12-25T18:00Z-cachebust-snapshot-heartbeat";
+/* ================== BUILD ================== */
+const BUILD = "2025-12-25T19:10Z-roomdoc-snapshot-diagnostics";
 document.getElementById("buildBadge").textContent = "BUILD " + BUILD;
 
 /* ================== ELEMENTS ================== */
@@ -165,6 +162,7 @@ const callStatus  = document.getElementById("callStatus");
 
 const diagBtn = document.getElementById("diagBtn");
 const diagBox = document.getElementById("diagBox");
+const dumpRoomBtn = document.getElementById("dumpRoomBtn");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
 
@@ -253,7 +251,6 @@ const auth = getAuth(app);
 
 /* ================== AUTH ================== */
 let isAuthed = false;
-
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
   loginOverlay.style.display = "flex";
@@ -289,7 +286,6 @@ loginBtn.onclick = async () => {
     if (!expected.has(code)) showError(e);
   }
 };
-
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
 /* ================== URL HASH / INVITE MODE ================== */
@@ -348,6 +344,7 @@ async function clearSub(col){
   await b.commit();
   logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
 }
+function safeLen(x){ try{ return (typeof x === "string") ? x.length : JSON.stringify(x||"").length; }catch{ return -1; } }
 
 /* ================== UI HELPERS ================== */
 function refreshCopyInviteState(){
@@ -358,7 +355,6 @@ function refreshCopyInviteState(){
 /* ================== LISTENERS ================== */
 let unsubRoomA=null, unsubCalleeA=null;
 let unsubRoomB=null, unsubCallerB=null;
-
 function stopListeners(){
   if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
   if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
@@ -368,9 +364,9 @@ function stopListeners(){
 
 /* ================== STOP ================== */
 let bRetryTimer = null;
-function clearBRetry(){
-  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
-}
+let offerWaitTimer = null;
+function clearBRetry(){ if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; } }
+function clearOfferWait(){ if(offerWaitTimer){ clearInterval(offerWaitTimer); offerWaitTimer=null; } }
 
 let joinInProgress = false;
 let autoJoinDone = false;
@@ -385,6 +381,7 @@ function setJoiningUI(isJoining){
 function stopAll(){
   stopListeners();
   clearBRetry();
+  clearOfferWait();
   closePeer();
 
   if(localStream){
@@ -410,10 +407,8 @@ stopBtn.onclick = () => stopAll();
 
 /* ================== MEDIA ================== */
 let startingPromise = null;
-
 async function startMedia(){
   if(!requireAuthOrPrompt()) return;
-
   if(localStream) return;
   if(startingPromise) return startingPromise;
 
@@ -444,15 +439,37 @@ async function startMedia(){
 }
 
 /* ================== NUDGE HOST ================== */
-async function nudgeHost(roomRef){
+async function nudgeHost(roomRef, why="manual"){
   try{
     await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
-    logDiag("Nudged host (joinRequest).");
+    logDiag(`Nudged host (joinRequest). reason=${why}`);
   }catch(e){
     logDiag("Nudge failed: " + (e?.message || e));
-    // showError(e); // uncomment if you want pink box on nudge errors
   }
 }
+
+/* ================== ROOM DUMP BUTTON ================== */
+dumpRoomBtn.onclick = async ()=>{
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) return;
+  const roomRef = doc(db,"rooms",roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()){
+    logDiag("DUMP: room doc does not exist.");
+    return;
+  }
+  const d = snap.data();
+  logDiag("DUMP: keys=" + Object.keys(d||{}).join(","));
+  logDiag("DUMP: session=" + (d?.session ?? "null") +
+          " offer=" + (!!d?.offer) +
+          " offerSdpLen=" + safeLen(d?.offer?.sdp) +
+          " answer=" + (!!d?.answer) +
+          " updatedAt=" + (d?.updatedAt ?? "null") +
+          " joinRequest=" + (d?.joinRequest ?? "null"));
+  try{
+    logDiag("DUMP JSON: " + JSON.stringify(d).slice(0, 1200) + (JSON.stringify(d).length>1200 ? "…(truncated)" : ""));
+  }catch{}
+};
 
 /* ================== ROOM A ================== */
 let lastSeenJoinRequestA = 0;
@@ -464,6 +481,7 @@ async function createRoom(){
   setJoiningUI(false);
   stopListeners();
   clearBRetry();
+  clearOfferWait();
 
   await startMedia();
 
@@ -478,6 +496,7 @@ async function createRoom(){
   location.hash = roomRef.id;
 
   refreshCopyInviteState();
+  dumpRoomBtn.disabled = false;
   logDiag("CreateRoom: roomId=" + roomRef.id);
 
   const caller = collection(roomRef,"callerCandidates");
@@ -513,7 +532,7 @@ async function createRoom(){
   }, { merge:true });
 
   setStatus(callStatus, `Room active (session ${session}). Click "Copy Invite" and send it.`);
-  logDiag(`Room written. session=${session}`);
+  logDiag(`Room written. session=${session} offerSdpLen=${offer.sdp?.length || 0}`);
 
   unsubRoomA = onSnapshot(roomRef, async (s)=>{
     if(myAttempt !== createAttemptA) return;
@@ -563,7 +582,7 @@ async function joinRoom({isAuto=false} = {}){
     const roomId = roomIdInput.value.trim();
     if(!roomId) return;
     logDiag("Join pressed while joining => nudging host.");
-    await nudgeHost(doc(db,"rooms", roomId));
+    await nudgeHost(doc(db,"rooms", roomId), "button");
     setStatus(callStatus, "Nudged host. Still waiting for offer…");
     return;
   }
@@ -575,6 +594,7 @@ async function joinRoom({isAuto=false} = {}){
 
   stopListeners();
   clearBRetry();
+  clearOfferWait();
 
   const roomId = roomIdInput.value.trim();
   if(!roomId){
@@ -583,22 +603,20 @@ async function joinRoom({isAuto=false} = {}){
   }
   location.hash = roomId;
 
+  dumpRoomBtn.disabled = false;
   logDiag("JoinRoom: roomId=" + roomId);
 
   const roomRef = doc(db,"rooms", roomId);
 
-  // Install snapshot immediately
   setStatus(callStatus, "Waiting for host / offer…");
   logDiag("Installing onSnapshot(roomRef)...");
   let gotFirstSnapshot = false;
 
-  // Heartbeat: if snapshot never fires, tell us (permissions/offline/cached old code)
-  const hb = setTimeout(()=>{
-    if(!gotFirstSnapshot && myAttempt === joinAttemptB){
-      logDiag("HEARTBEAT: No snapshot callback after 4s (check permissions/offline/cache).");
-      setStatus(callStatus, "No Firestore updates yet… (see diagnostics).");
-    }
-  }, 4000);
+  // Keep nudging while offer missing
+  offerWaitTimer = setInterval(()=>{
+    if(myAttempt !== joinAttemptB) return;
+    nudgeHost(roomRef, "offer-missing-watchdog").catch(()=>{});
+  }, 5000);
 
   unsubRoomB = onSnapshot(
     roomRef,
@@ -607,20 +625,29 @@ async function joinRoom({isAuto=false} = {}){
 
       if(!gotFirstSnapshot){
         gotFirstSnapshot = true;
-        clearTimeout(hb);
         logDiag("onSnapshot callback received (listener is alive). exists=" + snap.exists());
       }
 
       if(!snap.exists()){
         setStatus(callStatus, "Waiting for host to create the room…");
+        logDiag("ROOM SNAPSHOT: exists=false");
         return;
       }
 
-      const d = snap.data();
-      if(!d?.offer || !d.session){
-        setStatus(callStatus, "Room found. Waiting for offer…");
+      const d = snap.data() || {};
+      const keys = Object.keys(d).join(",");
+      const hasOffer = !!d.offer;
+      const hasSession = !!d.session;
+      const offerLen = safeLen(d.offer?.sdp);
+      logDiag(`ROOM SNAPSHOT: keys=[${keys}] session=${d.session ?? "null"} offer=${hasOffer} offerSdpLen=${offerLen} answer=${!!d.answer} updatedAt=${d.updatedAt ?? "null"} joinRequest=${d.joinRequest ?? "null"}`);
+
+      if(!hasOffer || !hasSession){
+        setStatus(callStatus, "Room exists, but host offer is not ready yet… (nudging host)");
         return;
       }
+
+      // Stop the "offer missing" nudger once offer is present
+      clearOfferWait();
 
       if(lastAnsweredSessionB === d.session) return;
 
@@ -680,9 +707,9 @@ async function joinRoom({isAuto=false} = {}){
           if(pc.connectionState === "connected") return;
 
           setStatus(callStatus, "Still connecting… nudging host again…");
-          logDiag("Watchdog: nudging host again.");
+          logDiag("Watchdog: nudging host again (not connected after 10s).");
           lastAnsweredSessionB = null;
-          await nudgeHost(roomRef);
+          await nudgeHost(roomRef, "not-connected-watchdog");
         }, 10000);
 
       }catch(e){
@@ -692,7 +719,6 @@ async function joinRoom({isAuto=false} = {}){
       }
     },
     (err)=>{
-      clearTimeout(hb);
       logDiag("SNAPSHOT ERROR: " + (err?.message || err));
       setStatus(callStatus, "Firestore listener error (see diagnostics).");
       showError(err);
@@ -700,9 +726,7 @@ async function joinRoom({isAuto=false} = {}){
   );
 
   logDiag("onSnapshot installed OK.");
-
-  // Nudge host AFTER listener is installed (non-blocking)
-  nudgeHost(roomRef).catch(()=>{});
+  nudgeHost(roomRef, "join-start").catch(()=>{});
 }
 
 /* ================== COPY INVITE (CACHE BUSTER) ================== */
@@ -718,9 +742,7 @@ copyLinkBtn.onclick = async ()=>{
   const roomId = roomIdInput.value.trim();
   if(!roomId) return;
 
-  // ✅ Cache-busting query makes Person B load latest GitHub Pages HTML
   const invite = `${location.origin}${location.pathname}?v=${encodeURIComponent(BUILD)}#${roomId}`;
-
   const ok = await copyTextRobust(invite);
   setStatus(callStatus, ok ? "Invite copied (with cache-buster)." : "Clipboard blocked — link shown for manual copy.");
   logDiag("Copy invite clicked. Link includes ?v=" + BUILD);
@@ -761,10 +783,9 @@ onAuthStateChanged(auth, (user)=>{
 
     refreshCopyInviteState();
     joinBtn.disabled = false;
+    dumpRoomBtn.disabled = !roomIdInput.value.trim();
 
-    // Auto-join once after auth if opened from invite
     setTimeout(()=> autoJoinIfNeeded().catch(()=>{}), 0);
-
   } else {
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
