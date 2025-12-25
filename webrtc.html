@@ -190,7 +190,6 @@ clearDiagBtn.onclick = () => {
   if (diagVisible) diagBox.textContent = "";
   copyDiagBtn.disabled = true;
   clearDiagBtn.disabled = true;
-  // keep one line so you can see it worked
   logDiag("Diagnostics cleared.");
 };
 copyDiagBtn.onclick = async () => {
@@ -214,12 +213,8 @@ function hideErrorBox(){
   errorBox.style.display = "none";
   errorBox.textContent = "";
 }
-window.addEventListener("error", (e)=> {
-  showError(e.error || e.message || e);
-});
-window.addEventListener("unhandledrejection", (e)=> {
-  showError(e.reason || e);
-});
+window.addEventListener("error", (e)=> showError(e.error || e.message || e));
+window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
 
 emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
@@ -250,7 +245,6 @@ let isAuthed = false;
 
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
-
   loginOverlay.style.display = "flex";
   appRoot.classList.add("locked");
   loginStatus.textContent = "Please sign in first.";
@@ -263,7 +257,6 @@ loginBtn.onclick = async () => {
   try{
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   }catch(e){
-    // no pink box for common login mistakes
     const code = String(e?.code || "");
     const expected = new Set([
       "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
@@ -282,15 +275,11 @@ loginBtn.onclick = async () => {
 
     loginStatus.textContent = msg;
     logDiag(`Login failed (${code || "no-code"}): ${msg}`);
-
     if (!expected.has(code)) showError(e);
   }
 };
 
-logoutBtn.onclick = async () => {
-  try { await signOut(auth); }
-  catch(e){ showError(e); }
-};
+logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
 onAuthStateChanged(auth, (user)=>{
   isAuthed = !!user;
@@ -307,8 +296,7 @@ onAuthStateChanged(auth, (user)=>{
 
     refreshCopyInviteState();
 
-    // browser-safe: don't auto-start camera without user gesture,
-    // but try after first click anywhere
+    // keep browser-safe (no camera without gesture)
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
   } else {
     loginOverlay.style.display = "flex";
@@ -318,13 +306,17 @@ onAuthStateChanged(auth, (user)=>{
   }
 });
 
-/* ================== URL HASH ================== */
-let autoJoinAllowed = false; // ✅ auto-join only if opened from invite (#ROOM_ID)
-if (location.hash.length > 1) {
+/* ================== URL HASH / AUTOJOIN MODE ==================
+   IMPORTANT: only treat it as an invite if it existed on initial page load.
+   (When Person A creates a room, we will change hash, but we must NOT auto-join.)
+*/
+const openedFromInvite = (location.hash.length > 1);
+let suppressAutoJoin = false; // Create Room will turn this on to avoid races
+
+if (openedFromInvite) {
   roomIdInput.value = location.hash.slice(1);
   setStatus(callStatus, "Room ID detected in URL.");
   logDiag("Room ID from URL hash: " + roomIdInput.value);
-  autoJoinAllowed = true; // ✅ only invite links enable auto-join
 }
 
 /* ================== WEBRTC ================== */
@@ -383,7 +375,7 @@ async function clearSub(col){
   logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
 }
 
-/* ================== UI STATE HELPERS ================== */
+/* ================== UI HELPERS ================== */
 function refreshCopyInviteState(){
   const hasRoomId = !!roomIdInput.value.trim();
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
@@ -393,7 +385,7 @@ function refreshCopyInviteState(){
 let startingPromise = null;
 let autoJoinDone = false;
 let autoJoinScheduled = false;
-let autoJoinTimer = null; // ✅ allow canceling pending auto-join
+let autoJoinTimer = null;
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
@@ -413,11 +405,9 @@ async function startMedia(opts={skipAutoJoin:false}){
     localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     localVideo.srcObject = localStream;
 
-    // Update immediately
     setStatus(mediaStatus,"Camera/mic started.");
     logDiag("Camera/mic started (stream attached).");
 
-    // Update again when video starts rendering
     localVideo.onloadedmetadata = async () => {
       try { await localVideo.play(); } catch {}
       setStatus(mediaStatus,"Camera/mic started.");
@@ -436,13 +426,20 @@ async function startMedia(opts={skipAutoJoin:false}){
   if(!opts.skipAutoJoin) scheduleAutoJoin();
 }
 
+function cancelPendingAutoJoin(){
+  autoJoinScheduled = false;
+  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
+}
+
 function scheduleAutoJoin(){
-  if (!autoJoinAllowed) return; // ✅ DO NOTHING unless opened from invite hash
-  if(autoJoinScheduled) return;
+  // Only auto-join if page was opened from invite AND we are not suppressing it
+  if (!openedFromInvite) return;
+  if (suppressAutoJoin) return;
+  if (autoJoinScheduled) return;
 
   autoJoinScheduled = true;
+  cancelPendingAutoJoin(); // clear any older one; keep only the latest
 
-  if (autoJoinTimer) clearTimeout(autoJoinTimer);
   autoJoinTimer = setTimeout(async ()=>{
     autoJoinScheduled = false;
     autoJoinTimer = null;
@@ -470,9 +467,22 @@ async function autoJoinIfNeeded(){
   }
 }
 
+/* ================== LISTENERS ================== */
+let unsubRoomA=null, unsubCalleeA=null;
+let unsubRoomB=null, unsubCallerB=null;
+
+function stopListeners(){
+  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
+  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
+  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
+  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+}
+
+/* ================== STOP ================== */
 function stopAll(){
   stopListeners();
   closePeer();
+
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
     localStream=null;
@@ -486,23 +496,14 @@ function stopAll(){
 
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
+
   autoJoinDone = false;
+  suppressAutoJoin = false;
+  cancelPendingAutoJoin();
 
   refreshCopyInviteState();
 }
-
 stopBtn.onclick = () => stopAll();
-
-/* ================== LISTENERS (avoid stacking) ================== */
-let unsubRoomA=null, unsubCalleeA=null;
-let unsubRoomB=null, unsubCallerB=null;
-
-function stopListeners(){
-  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
-  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
-  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
-  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-}
 
 /* ================== REJOIN SUPPORT ================== */
 let lastSeenJoinRequestA = 0;
@@ -524,17 +525,20 @@ let createAttemptA = 0;
 
 async function createRoom(){
   if(!requireAuthOrPrompt()) return;
-  await startMedia();
 
-  // ✅ Person A is creating a room — never auto-join as Person B
-  autoJoinAllowed = false;
+  // ✅ CRITICAL: stop any auto-join that might be queued from Start/startMedia
+  suppressAutoJoin = true;
   autoJoinDone = true;
-  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
-  autoJoinScheduled = false;
+  cancelPendingAutoJoin();
+
+  // ✅ also stop any join listeners (if user previously joined)
+  stopListeners();
+  clearBRetry();
+
+  // ✅ start media without scheduling auto-join
+  await startMedia({ skipAutoJoin:true });
 
   const myAttempt = ++createAttemptA;
-  stopListeners(); // important: no stacked listeners
-  clearBRetry();
 
   let roomRef;
   const existing = roomIdInput.value.trim();
@@ -544,13 +548,12 @@ async function createRoom(){
   roomIdInput.value = roomRef.id;
   location.hash = roomRef.id;
 
-  refreshCopyInviteState(); // enable Copy Invite
+  refreshCopyInviteState();
   logDiag("CreateRoom: roomId=" + roomRef.id);
 
   const caller = collection(roomRef,"callerCandidates");
   const callee = collection(roomRef,"calleeCandidates");
 
-  // bump numeric session
   const snap = await getDoc(roomRef);
   const prev = snap.exists() ? (snap.data().session || 0) : 0;
   const session = Number(prev) + 1;
@@ -588,7 +591,6 @@ async function createRoom(){
     const d = s.data();
     if(!d) return;
 
-    // rejoin request => restart session (new offer)
     if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
       lastSeenJoinRequestA = d.joinRequest;
       setStatus(callStatus, "Join request received — restarting session…");
@@ -597,7 +599,6 @@ async function createRoom(){
       return;
     }
 
-    // apply answer only if correct session and correct state
     if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
       try{
         await pc.setRemoteDescription(d.answer);
@@ -627,7 +628,9 @@ let joinAttemptB = 0;
 async function joinRoom(){
   if(!requireAuthOrPrompt()) return;
 
-  // start media without triggering autoJoin recursion
+  // Joining is allowed again
+  suppressAutoJoin = false;
+
   await startMedia({ skipAutoJoin:true });
 
   const myAttempt = ++joinAttemptB;
@@ -654,7 +657,6 @@ async function joinRoom(){
     const d = s.data();
     if(!d?.offer || !d.session) return;
 
-    // only answer new sessions
     if(lastAnsweredSessionB === d.session) return;
 
     const session = d.session;
@@ -694,12 +696,12 @@ async function joinRoom(){
         });
       });
 
-      // watchdog retry: if still not connected, request new offer
       clearBRetry();
       bRetryTimer = setTimeout(async ()=>{
         if(myAttempt !== joinAttemptB) return;
         if(!pc) return;
         if(pc.connectionState === "connected") return;
+
         setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
         logDiag("Watchdog: requesting fresh offer again.");
         try{
@@ -764,14 +766,9 @@ startBtn.onclick = async ()=>{
 createBtn.onclick = ()=> createRoom().catch(showError);
 joinBtn.onclick   = ()=> joinRoom().catch(showError);
 
-roomIdInput.addEventListener("input", ()=>{
-  refreshCopyInviteState();
-});
-
-/* enable copy if hash already present AND authed */
+roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
 refreshCopyInviteState();
 
-/* cleanup */
 window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
 </script>
 </body>
