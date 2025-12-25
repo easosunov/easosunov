@@ -34,6 +34,24 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 #loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
+
+/* Diagnostics */
+#diagCard{margin-top:12px}
+#logBox{
+  width:100%;
+  min-height:120px;
+  max-height:280px;
+  resize:vertical;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+  font-size:12px;
+  padding:10px;
+  border-radius:12px;
+  border:1px solid #ddd;
+  background:#fafafa;
+  white-space:pre;
+  overflow:auto;
+}
+.diagRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
 </style>
 </head>
 
@@ -59,7 +77,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     </div>
 
     <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">After login, tap/click once to enable camera/mic (browser permission rule).</div>
+    <div class="small">After login, click/tap once to enable camera/mic (browser permission rule).</div>
   </div>
 </div>
 
@@ -90,7 +108,18 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
       <input id="roomId" placeholder="Room ID"/>
       <button id="copyLinkBtn" disabled>Copy Invite</button>
       <div class="status" id="callStatus">No room yet.</div>
+      <div class="small">Tip: invite looks like …/webrtc.html#ROOM_ID</div>
     </div>
+  </div>
+
+  <div class="card" id="diagCard">
+    <b>Diagnostics</b>
+    <div class="small">If it gets stuck, click <b>Copy log</b> and paste it here.</div>
+    <div class="diagRow">
+      <button id="copyLogBtn">Copy log</button>
+      <button id="clearLogBtn">Clear log</button>
+    </div>
+    <textarea id="logBox" readonly></textarea>
   </div>
 </div>
 
@@ -109,6 +138,41 @@ function hideErrorBox(){
 window.addEventListener("error",e=>showError(e.error||e.message||e));
 window.addEventListener("unhandledrejection",e=>showError(e.reason||e));
 
+/* ---------- DIAGNOSTICS ---------- */
+const logBox = document.getElementById("logBox");
+const copyLogBtn = document.getElementById("copyLogBtn");
+const clearLogBtn = document.getElementById("clearLogBtn");
+
+const LOG_MAX = 400;
+const logs = [];
+function ts(){
+  const d = new Date();
+  const pad = (n, w=2)=>String(n).padStart(w,"0");
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(),3)}`;
+}
+function log(msg, obj){
+  const line = `[${ts()}] ${msg}${obj!==undefined ? " " + safeJson(obj) : ""}`;
+  logs.push(line);
+  if (logs.length > LOG_MAX) logs.shift();
+  logBox.value = logs.join("\n");
+  logBox.scrollTop = logBox.scrollHeight;
+  console.log(line);
+}
+function safeJson(x){
+  try { return JSON.stringify(x); } catch { return String(x); }
+}
+clearLogBtn.onclick = ()=>{ logs.length=0; logBox.value=""; };
+copyLogBtn.onclick = async ()=>{
+  const text = logs.join("\n");
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); log("LOG: copied to clipboard"); return; } catch {}
+  }
+  window.prompt("Copy log:", text);
+};
+
+log("Page loaded", { href: location.href });
+
+/* ---------- Firebase imports ---------- */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
@@ -148,6 +212,8 @@ passInput.addEventListener("input", hideErrorBox);
 loginBtn.onclick = async () => {
   loginStatus.textContent = "Signing in…";
   hideErrorBox();
+  log("AUTH: login button clicked", { email: emailInput.value.trim() });
+
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   } catch (e) {
@@ -161,8 +227,8 @@ loginBtn.onclick = async () => {
       code === "auth/too-many-requests" ? "Too many attempts. Try again later." :
       "Login failed. Please try again.";
     loginStatus.textContent = msg;
+    log("AUTH: login failed", { code, message: String(e?.message||e) });
 
-    // only show pink box for unexpected errors
     const expected = new Set([
       "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
       "auth/invalid-email","auth/missing-password","auth/too-many-requests"
@@ -171,7 +237,10 @@ loginBtn.onclick = async () => {
   }
 };
 
-logoutBtn.onclick=async()=>{ try{ await signOut(auth); }catch(e){ showError(e); } };
+logoutBtn.onclick=async()=>{
+  try{ await signOut(auth); log("AUTH: signed out"); }
+  catch(e){ showError(e); }
+};
 
 /* ---------- UI ---------- */
 const localVideo=document.getElementById("localVideo");
@@ -184,7 +253,7 @@ const copyLinkBtn=document.getElementById("copyLinkBtn");
 const roomIdInput=document.getElementById("roomId");
 const mediaStatus=document.getElementById("mediaStatus");
 const callStatus=document.getElementById("callStatus");
-const setStatus=(el,msg)=>el.textContent=msg;
+const setStatus=(el,msg)=>{ el.textContent=msg; log(`STATUS(${el.id}): ${msg}`); };
 
 /* ---------- STATE ---------- */
 let localStream=null, pc=null;
@@ -200,14 +269,15 @@ let bRetryTimer=null;
 let createAttemptA = 0;
 let joinAttemptB = 0;
 
-/* ✅ Auto-join state machine */
+/* ✅ Auto-join control */
 const hashOnLoad = (location.hash.length > 1);
-let autoJoinWanted = hashOnLoad;  // only if page opened from invite
+let autoJoinWanted = hashOnLoad;
 let autoJoinDone = false;
 
 if (hashOnLoad) {
   roomIdInput.value = location.hash.slice(1);
-  setStatus(callStatus, "Invite detected. Start camera/mic to auto-join.");
+  setStatus(callStatus, "Invite detected. Click/tap once to enable camera/mic and auto-join.");
+  log("Room ID from URL hash", { roomId: roomIdInput.value });
 }
 
 /* ---------- WEBRTC ---------- */
@@ -215,10 +285,13 @@ const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
 
 function closePeer(){
   if(pc){
+    log("Closing RTCPeerConnection");
     pc.onicecandidate=null;
     pc.ontrack=null;
     pc.onconnectionstatechange=null;
     pc.oniceconnectionstatechange=null;
+    pc.onsignalingstatechange=null;
+    pc.onicegatheringstatechange=null;
     pc.close();
     pc=null;
   }
@@ -228,10 +301,19 @@ function closePeer(){
 function ensurePeer(){
   closePeer();
   pc=new RTCPeerConnection(rtcConfig);
+  log("Created RTCPeerConnection");
+
   const rs=new MediaStream();
   remoteVideo.srcObject=rs;
 
-  pc.ontrack=e=>e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
+  pc.ontrack=e=>{
+    log("ontrack", { tracks: e.streams?.[0]?.getTracks?.().map(t=>t.kind) || [] });
+    e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
+  };
+  pc.onconnectionstatechange=()=>log("pc.connectionState", { state: pc?.connectionState });
+  pc.oniceconnectionstatechange=()=>log("pc.iceConnectionState", { state: pc?.iceConnectionState });
+  pc.onsignalingstatechange=()=>log("pc.signalingState", { state: pc?.signalingState });
+  pc.onicegatheringstatechange=()=>log("pc.iceGatheringState", { state: pc?.iceGatheringState });
 
   if(!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
@@ -244,6 +326,7 @@ async function clearSub(col){
   const b=writeBatch(db);
   s.forEach(d=>b.delete(d.ref));
   await b.commit();
+  log("Cleared subcollection", { path: col.path, docs: s.size });
 }
 function requireAuth(){
   if(!isAuthed) throw new Error("Not signed in. Please login first.");
@@ -251,9 +334,12 @@ function requireAuth(){
 function clearBRetry(){
   if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
 }
-async function requestFreshOffer(roomRef){
-  lastAnsweredSessionB = null;
-  await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
+
+function withTimeout(promise, ms, label){
+  return Promise.race([
+    promise,
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error(`Timeout after ${ms}ms: ${label}`)), ms))
+  ]);
 }
 
 /* ---------- MEDIA ---------- */
@@ -264,7 +350,15 @@ async function startMedia(){
 
   startingPromise = (async () => {
     setStatus(mediaStatus, "Requesting camera/mic…");
+    log("getUserMedia() starting");
+
+    // if this hangs, you’ll see it in the log (no further lines)
     localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+
+    log("getUserMedia() success", {
+      tracks: localStream.getTracks().map(t=>({kind:t.kind, enabled:t.enabled, readyState:t.readyState}))
+    });
+
     localVideo.srcObject = localStream;
 
     startBtn.disabled = true;
@@ -278,11 +372,12 @@ async function startMedia(){
   try { await startingPromise; }
   finally { startingPromise = null; }
 
-  // ✅ Auto-join ONLY after media is running
   await maybeAutoJoin();
 }
 
 async function maybeAutoJoin(){
+  log("maybeAutoJoin()", { autoJoinWanted, autoJoinDone, isAuthed, hasStream: !!localStream, roomId: roomIdInput.value.trim() });
+
   if(!autoJoinWanted) return;
   if(autoJoinDone) return;
   if(!isAuthed) return;
@@ -291,14 +386,13 @@ async function maybeAutoJoin(){
 
   autoJoinDone = true;
   setStatus(callStatus, "Auto-joining room…");
+
   try{
     await joinRoom({ fromAutoJoin:true });
   }catch(e){
-    autoJoinDone = false; // allow manual retry
+    autoJoinDone = false;
     setStatus(callStatus, `Auto-join failed: ${e.message || e}`);
-    // don’t show pink box for common “Room not found” while A is not ready
-    if(String(e?.message||e).includes("Room not found")) return;
-    showError(e);
+    log("Auto-join failed", { message: String(e?.message||e) });
   }
 }
 
@@ -327,8 +421,6 @@ function stopAll(){
 
   lastAnsweredSessionB=null;
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
-
-  // reset auto-join (invite pages can try again after restart)
   autoJoinDone = false;
 }
 
@@ -337,11 +429,11 @@ async function createRoom(){
   requireAuth();
   await startMedia();
 
-  // ✅ Creator page should NOT auto-join
   autoJoinWanted = false;
   autoJoinDone = true;
 
   const myAttempt = ++createAttemptA;
+  log("A:createRoom() begin", { myAttempt });
 
   if(unsubRoomA) unsubRoomA();
   if(unsubCalleeA) unsubCalleeA();
@@ -352,49 +444,50 @@ async function createRoom(){
 
   roomIdInput.value=roomRef.id;
   location.hash=roomRef.id;
-
   copyLinkBtn.disabled = false;
+
+  log("A: roomRef", { id: roomRef.id, path: roomRef.path });
 
   const caller=collection(roomRef,"callerCandidates");
   const callee=collection(roomRef,"calleeCandidates");
 
-  const snap = await getDoc(roomRef);
+  const snap = await withTimeout(getDoc(roomRef), 6000, "getDoc(roomRef) A");
   const prev = snap.exists() ? (snap.data().session || 0) : 0;
   const session = Number(prev) + 1;
 
+  log("A: session bump", { prev, session });
+
   if(myAttempt !== createAttemptA) return;
 
-  await clearSub(caller);
-  await clearSub(callee);
-
+  await withTimeout(clearSub(caller), 8000, "clearSub(caller)");
+  await withTimeout(clearSub(callee), 8000, "clearSub(callee)");
   if(myAttempt !== createAttemptA) return;
 
   ensurePeer();
 
   pc.onicecandidate=e=>{
     if(e.candidate){
-      addDoc(caller,{ session, ...e.candidate.toJSON() }).catch(()=>{});
+      addDoc(caller,{ session, ...e.candidate.toJSON() }).catch(err=>log("A: addDoc callerCandidate failed", { err: String(err) }));
     }
   };
 
   const offer=await pc.createOffer();
-  if(myAttempt !== createAttemptA) return;
-
   await pc.setLocalDescription(offer);
-  if(myAttempt !== createAttemptA) return;
 
-  await setDoc(roomRef,{
+  await withTimeout(setDoc(roomRef,{
     session,
     offer:{type:offer.type,sdp:offer.sdp},
     answer:null,
     updatedAt:Date.now()
-  },{merge:true});
+  },{merge:true}), 8000, "setDoc(roomRef offer)");
 
   setStatus(callStatus,`Room active (session ${session}). Click 'Copy Invite' and send it to Person B.`);
 
   unsubRoomA = onSnapshot(roomRef, async (s)=>{
     if(myAttempt !== createAttemptA) return;
     const d=s.data();
+    log("A:onSnapshot(room)", { session: d?.session, hasOffer: !!d?.offer, hasAnswer: !!d?.answer, joinRequest: d?.joinRequest });
+
     if(!d) return;
 
     if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
@@ -425,18 +518,15 @@ async function createRoom(){
       try{ pc.addIceCandidate(c); }catch{}
     });
   });
-
-  pc.onconnectionstatechange=()=>{
-    if(pc && myAttempt === createAttemptA) setStatus(callStatus,`A: ${pc.connectionState} (session ${session})`);
-  };
 }
 
 /* ---------- ROOM B ---------- */
 async function joinRoom({ fromAutoJoin=false } = {}){
   requireAuth();
-  await startMedia(); // if user clicked Join, this counts as gesture and is safe
+  await startMedia();
 
   const myAttempt = ++joinAttemptB;
+  log("B:joinRoom() begin", { myAttempt, fromAutoJoin });
 
   if(unsubRoomB) unsubRoomB();
   if(unsubCallerB) unsubCallerB();
@@ -447,27 +537,22 @@ async function joinRoom({ fromAutoJoin=false } = {}){
 
   const roomRef=doc(db,"rooms",roomId);
 
-  // If A hasn’t written the room yet, avoid pink error spam:
-  const snap=await getDoc(roomRef);
+  const snap=await withTimeout(getDoc(roomRef), 6000, "getDoc(roomRef) B");
+  log("B: getDoc(roomRef) done", { exists: snap.exists() });
+
   if(!snap.exists()){
-    // For auto-join, just show a friendly status and retry via user click/join later
-    if(fromAutoJoin){
-      throw new Error("Room not found yet. Ask Person A to click Create Room, then press Join if needed.");
-    }
-    throw new Error("Room not found. Ask Person A to click Create Room or check the invite link.");
+    throw new Error("Room not found (Person A must click Create Room, or invite is wrong).");
   }
 
-  await requestFreshOffer(roomRef);
-  if(myAttempt !== joinAttemptB) return;
-
+  await withTimeout(setDoc(roomRef,{joinRequest:Date.now()},{merge:true}), 6000, "setDoc(joinRequest)");
   setStatus(callStatus,"Connecting… (requested fresh offer)");
 
   unsubRoomB = onSnapshot(roomRef, async (s)=>{
     if(myAttempt !== joinAttemptB) return;
-
     const d=s.data();
-    if(!d?.offer || !d.session) return;
+    log("B:onSnapshot(room)", { session: d?.session, hasOffer: !!d?.offer, hasAnswer: !!d?.answer });
 
+    if(!d?.offer || !d.session) return;
     if(lastAnsweredSessionB === d.session) return;
 
     const session = d.session;
@@ -479,26 +564,19 @@ async function joinRoom({ fromAutoJoin=false } = {}){
       const caller=collection(roomRef,"callerCandidates");
       const callee=collection(roomRef,"calleeCandidates");
 
-      await clearSub(callee);
-      if(myAttempt !== joinAttemptB) return;
+      await withTimeout(clearSub(callee), 8000, "clearSub(calleeCandidates) B");
 
       pc.onicecandidate=e=>{
         if(e.candidate){
-          addDoc(callee,{ session, ...e.candidate.toJSON() }).catch(()=>{});
+          addDoc(callee,{ session, ...e.candidate.toJSON() }).catch(err=>log("B: addDoc calleeCandidate failed", { err: String(err) }));
         }
       };
 
       await pc.setRemoteDescription(d.offer);
-      if(myAttempt !== joinAttemptB) return;
-
       const ans=await pc.createAnswer();
-      if(myAttempt !== joinAttemptB) return;
-
       await pc.setLocalDescription(ans);
-      if(myAttempt !== joinAttemptB) return;
 
-      await updateDoc(roomRef,{answer:ans,session,answeredAt:Date.now()});
-      if(myAttempt !== joinAttemptB) return;
+      await withTimeout(updateDoc(roomRef,{answer:ans,session,answeredAt:Date.now()}), 8000, "updateDoc(answer) B");
 
       setStatus(callStatus,`Joined room. Connecting… (session ${session})`);
 
@@ -522,34 +600,16 @@ async function joinRoom({ fromAutoJoin=false } = {}){
         setStatus(callStatus,"Still connecting… retrying (requesting new offer)…");
         try{
           lastAnsweredSessionB = null;
-          await requestFreshOffer(roomRef);
+          await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
         }catch(e){ showError(e); }
       }, 10000);
-
-      pc.onconnectionstatechange=async()=>{
-        if(myAttempt !== joinAttemptB || !pc) return;
-
-        setStatus(callStatus,`B: ${pc.connectionState} (session ${session})`);
-
-        if(pc.connectionState === "connected"){
-          clearBRetry();
-        }
-
-        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
-          try{
-            setStatus(callStatus,"Connection lost — requesting new offer…");
-            lastAnsweredSessionB = null;
-            await requestFreshOffer(roomRef);
-          }catch(e){ showError(e); }
-        }
-      };
 
     }catch(e){
       lastAnsweredSessionB = null;
       showError(e);
       setStatus(callStatus,"Join failed — requesting new offer…");
       try{
-        await requestFreshOffer(roomRef);
+        await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
       }catch(err){ showError(err); }
     }
   });
@@ -558,6 +618,7 @@ async function joinRoom({ fromAutoJoin=false } = {}){
 /* ---------- AUTH STATE ---------- */
 onAuthStateChanged(auth,(user)=>{
   isAuthed=!!user;
+  log("AUTH: onAuthStateChanged", { isAuthed });
 
   if(user){
     loginOverlay.style.display="none";
@@ -566,11 +627,16 @@ onAuthStateChanged(auth,(user)=>{
     loginStatus.textContent="Signed in.";
 
     startBtn.disabled=false;
-    setStatus(mediaStatus,"Ready. Tap/click once to enable camera/mic.");
+    stopBtn.disabled=false; // allow user to reset if needed
+    createBtn.disabled=false;
+    joinBtn.disabled=false;
+
     copyLinkBtn.disabled = !roomIdInput.value.trim();
 
-    // ✅ first user interaction starts media; auto-join will happen AFTER that
-    const once = () => startMedia().catch(()=>{});
+    setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
+
+    // first user gesture starts media; auto-join happens AFTER media starts
+    const once = ()=> startMedia().catch(err=>{ log("startMedia() failed", { err: String(err?.message||err) }); showError(err); });
     ["click","keydown","touchstart"].forEach(ev=>{
       window.addEventListener(ev, once, { once:true });
     });
@@ -588,7 +654,7 @@ async function copyTextRobust(text){
   if (navigator.clipboard && window.isSecureContext) {
     try { await navigator.clipboard.writeText(text); return true; } catch {}
   }
-  window.prompt("Copy this invite link:", text);
+  window.prompt("Copy:", text);
   return false;
 }
 
