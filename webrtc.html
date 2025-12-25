@@ -147,6 +147,7 @@ loginBtn.onclick=async()=>{
     showError(e);
   }
 };
+
 logoutBtn.onclick=async()=>{ try{ await signOut(auth); }catch(e){ showError(e); } };
 
 /* ---------- UI ---------- */
@@ -164,20 +165,11 @@ const setStatus=(el,msg)=>el.textContent=msg;
 
 /* ---------- STATE ---------- */
 let localStream=null, pc=null;
-let startingPromise=null;
-
 let unsubRoomA=null, unsubCalleeA=null;
 let unsubRoomB=null, unsubCallerB=null;
-
 let lastAnsweredSessionB=null;
+let startingPromise=null;
 let autoJoinDone=false;
-
-// ✅ NEW: A-side joinRequest tracking so A can restart
-let currentSessionA=0;
-let lastSeenJoinRequestA=0;
-
-// ✅ NEW: B watchdog retry timer
-let bRetryTimer=null;
 
 /* ---------- URL HASH ---------- */
 if (location.hash.length > 1) {
@@ -189,14 +181,7 @@ if (location.hash.length > 1) {
 const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
 
 function closePeer(){
-  if(pc){
-    pc.onicecandidate=null;
-    pc.ontrack=null;
-    pc.onconnectionstatechange=null;
-    pc.oniceconnectionstatechange=null;
-    pc.close();
-    pc=null;
-  }
+  if(pc){pc.close();pc=null}
   remoteVideo.srcObject=null;
 }
 
@@ -205,28 +190,20 @@ function ensurePeer(){
   pc=new RTCPeerConnection(rtcConfig);
   const rs=new MediaStream();
   remoteVideo.srcObject=rs;
-
   pc.ontrack=e=>e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
-
-  if(!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t=>pc.addTrack(t,localStream));
 }
 
 /* ---------- HELPERS ---------- */
 async function clearSub(col){
   const s=await getDocs(col);
-  if(s.empty) return;
   const b=writeBatch(db);
   s.forEach(d=>b.delete(d.ref));
-  await b.commit();
+  if(!s.empty) await b.commit();
 }
 
 function requireAuth(){
   if(!isAuthed) throw new Error("Not signed in. Please login first.");
-}
-
-function clearBRetry(){
-  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
 }
 
 /* ---------- MEDIA ---------- */
@@ -257,10 +234,7 @@ function stopAll(){
   if(unsubCalleeA){unsubCalleeA();unsubCalleeA=null}
   if(unsubRoomB){unsubRoomB();unsubRoomB=null}
   if(unsubCallerB){unsubCallerB();unsubCallerB=null}
-
-  clearBRetry();
   closePeer();
-
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
     localStream=null;
@@ -283,13 +257,13 @@ function stopAll(){
 /* ---------- AUTO JOIN ---------- */
 async function autoJoinIfNeeded(){
   if(autoJoinDone) return;
-  if(!roomIdInput.value.trim()) return;
+  if(!roomIdInput.value) return;
   autoJoinDone=true;
   setStatus(callStatus,"Auto-joining room…");
   await joinRoom();
 }
 
-/* ---------- ROOM A (creates offer; restarts when B requests) ---------- */
+/* ---------- ROOM A ---------- */
 async function createRoom(){
   requireAuth();
   await startMedia();
@@ -297,98 +271,50 @@ async function createRoom(){
   if(unsubRoomA) unsubRoomA();
   if(unsubCalleeA) unsubCalleeA();
 
-  const roomRef=roomIdInput.value.trim()
-    ? doc(db,"rooms",roomIdInput.value.trim())
+  const roomRef=roomIdInput.value
+    ? doc(db,"rooms",roomIdInput.value)
     : doc(collection(db,"rooms"));
 
   roomIdInput.value=roomRef.id;
   location.hash=roomRef.id;
 
-  // enable copy immediately
   copyLinkBtn.disabled = false;
-
-  // bump session reliably (monotonic)
-  const snap = await getDoc(roomRef);
-  const prev = snap.exists() ? (snap.data().session || 0) : 0;
-  const session = Number(prev) + 1;
-  currentSessionA = session;
 
   const caller=collection(roomRef,"callerCandidates");
   const callee=collection(roomRef,"calleeCandidates");
-
-  // Clear candidates for fresh session
-  await clearSub(caller);
-  await clearSub(callee);
+  await clearSub(caller); await clearSub(callee);
 
   ensurePeer();
-
-  pc.onicecandidate=e=>{
-    if(e.candidate){
-      addDoc(caller,{ session, ...e.candidate.toJSON() });
-    }
-  };
+  pc.onicecandidate=e=>e.candidate&&addDoc(caller,e.candidate.toJSON());
 
   const offer=await pc.createOffer();
   await pc.setLocalDescription(offer);
 
   await setDoc(roomRef,{
-    session,
-    offer:{type:offer.type,sdp:offer.sdp},
-    answer:null,
-    updatedAt:Date.now()
-  },{merge:true});
-
-  setStatus(callStatus,`Room active (session ${session}). Click 'Copy Invite' and send it to Person B.`);
-
-  // Listen for join requests + correct-session answers
-  unsubRoomA = onSnapshot(roomRef, async (s)=>{
-    const d=s.data();
-    if(!d) return;
-
-    // ✅ If B asks to rejoin, restart with a new offer
-    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
-      lastSeenJoinRequestA = d.joinRequest;
-      setStatus(callStatus,"Join request received — restarting session…");
-      setTimeout(()=>createRoom().catch(()=>{}),150);
-      return;
-    }
-
-    // Apply answer only if it matches THIS session and we're waiting
-    if(d.answer && d.session === session && pc && pc.signalingState==="have-local-offer" && !pc.currentRemoteDescription){
-      try{
-        await pc.setRemoteDescription(d.answer);
-        setStatus(callStatus,`Connected (session ${session}).`);
-      }catch(e){
-        showError(e);
-        setStatus(callStatus,"Answer failed — restarting session…");
-        setTimeout(()=>createRoom().catch(()=>{}),200);
-      }
-    }
+    session:Date.now(),
+    offer:{type:offer.type,sdp:offer.sdp}
   });
 
-  // Accept callee ICE only for this session
-  unsubCalleeA = onSnapshot(callee,(s)=>{
-    s.docChanges().forEach(ch=>{
-      if(ch.type!=="added" || !pc) return;
-      const c = ch.doc.data();
-      if(c.session !== session) return;
-      try{ pc.addIceCandidate(c); }catch{}
-    });
+  setStatus(callStatus,"Room active. Click 'Copy Invite' and send it to Person B.");
+
+  unsubRoomA=onSnapshot(roomRef,snap=>{
+    const d=snap.data();
+    if(d?.answer && pc && pc.signalingState==="have-local-offer")
+      pc.setRemoteDescription(d.answer);
   });
 
-  pc.onconnectionstatechange=()=>{
-    if(pc) setStatus(callStatus,`A: ${pc.connectionState} (session ${session})`);
-  };
+  unsubCalleeA=onSnapshot(callee,s=>{
+    s.docChanges().forEach(c=>pc && pc.addIceCandidate(c.doc.data()));
+  });
 }
 
-/* ---------- ROOM B (requests fresh offer each time; watchdog retry) ---------- */
+/* ---------- ROOM B ---------- */
 async function joinRoom(){
   requireAuth();
   await startMedia();
 
   if(unsubRoomB) unsubRoomB();
   if(unsubCallerB) unsubCallerB();
-  clearBRetry();
 
   const roomId=roomIdInput.value.trim();
   if(!roomId) throw new Error("Room ID is empty.");
@@ -397,67 +323,30 @@ async function joinRoom(){
   const snap=await getDoc(roomRef);
   if(!snap.exists()) throw new Error("Room not found");
 
-  // ✅ Always request a fresh session from A (this fixes “return/rejoin”)
   await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
-  setStatus(callStatus,"Connecting… (requested fresh offer)");
+  setStatus(callStatus,"Connecting…");
 
-  unsubRoomB = onSnapshot(roomRef, async (s)=>{
+  unsubRoomB=onSnapshot(roomRef,async s=>{
     const d=s.data();
-    if(!d?.offer || !d.session) return;
-
-    // Only answer new session
-    if(lastAnsweredSessionB === d.session) return;
-    lastAnsweredSessionB = d.session;
+    if(!d?.offer||lastAnsweredSessionB===d.session) return;
+    lastAnsweredSessionB=d.session;
 
     ensurePeer();
-
     const caller=collection(roomRef,"callerCandidates");
     const callee=collection(roomRef,"calleeCandidates");
-
-    // Clear B’s candidates for new session
     await clearSub(callee);
 
-    pc.onicecandidate=e=>{
-      if(e.candidate){
-        addDoc(callee,{ session:d.session, ...e.candidate.toJSON() });
-      }
-    };
-
+    pc.onicecandidate=e=>e.candidate&&addDoc(callee,e.candidate.toJSON());
     await pc.setRemoteDescription(d.offer);
     const ans=await pc.createAnswer();
     await pc.setLocalDescription(ans);
+    await updateDoc(roomRef,{answer:ans,session:d.session});
 
-    await updateDoc(roomRef,{answer:ans,session:d.session,answeredAt:Date.now()});
-    setStatus(callStatus,`Joined room. Connecting… (session ${d.session})`);
+    setStatus(callStatus,"Connected.");
 
-    // Subscribe to A candidates for this session only
-    if(unsubCallerB) { unsubCallerB(); unsubCallerB=null; }
-    unsubCallerB = onSnapshot(caller,(ss)=>{
-      ss.docChanges().forEach(ch=>{
-        if(ch.type!=="added" || !pc) return;
-        const c = ch.doc.data();
-        if(c.session !== d.session) return;
-        try{ pc.addIceCandidate(c); }catch{}
-      });
+    unsubCallerB=onSnapshot(caller,s=>{
+      s.docChanges().forEach(c=>pc && pc.addIceCandidate(c.doc.data()));
     });
-
-    // ✅ Watchdog: if still not connected after 10s, re-request a fresh offer
-    clearBRetry();
-    bRetryTimer = setTimeout(async ()=>{
-      if(!pc) return;
-      if(pc.connectionState === "connected") return;
-      setStatus(callStatus,"Still connecting… retrying (requesting new offer) …");
-      try{
-        lastAnsweredSessionB = null; // allow next session
-        await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
-      }catch(e){ showError(e); }
-    }, 10000);
-
-    pc.onconnectionstatechange=()=>{
-      if(!pc) return;
-      setStatus(callStatus,`B: ${pc.connectionState} (session ${d.session})`);
-      if(pc.connectionState === "connected") clearBRetry();
-    };
   });
 }
 
@@ -479,6 +368,7 @@ onAuthStateChanged(auth,(user)=>{
     ["click","keydown","touchstart"].forEach(ev=>{
       window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
     });
+
   }else{
     loginOverlay.style.display="flex";
     appRoot.classList.add("locked");
@@ -487,25 +377,33 @@ onAuthStateChanged(auth,(user)=>{
   }
 });
 
-/* ---------- Robust copy with fallback ---------- */
-async function copyTextRobust(text){
-  if (navigator.clipboard && window.isSecureContext) {
-    try { await navigator.clipboard.writeText(text); return true; } catch {}
-  }
-  window.prompt("Copy this invite link:", text);
-  return false;
-}
-
 /* ---------- UI ---------- */
 startBtn.onclick=()=>startMedia().catch(showError);
 stopBtn.onclick=()=>stopAll();
 createBtn.onclick=()=>createRoom().catch(showError);
 joinBtn.onclick=()=>joinRoom().catch(showError);
 
+/* ✅ Robust copy with fallback */
+async function copyTextRobust(text){
+  // Attempt modern clipboard API
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // fall through
+    }
+  }
+  // Fallback (works everywhere): show a prompt for manual copy
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
 copyLinkBtn.onclick = async () => {
   const roomId = roomIdInput.value.trim();
   if (!roomId) return;
   const invite = `${location.origin}${location.pathname}#${roomId}`;
+
   const ok = await copyTextRobust(invite);
   setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
 };
@@ -513,9 +411,6 @@ copyLinkBtn.onclick = async () => {
 roomIdInput.addEventListener("input", () => {
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 });
-
-// Optional: close peer on tab close (helps avoid weird states)
-window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
 </script>
 </body>
 </html>
