@@ -193,6 +193,8 @@ let unsubRoomB=null, unsubCallerB=null;
 
 let lastAnsweredSessionB=null;
 let autoJoinDone=false;
+let autoJoinInProgress=false;
+let autoJoinScheduled=false;
 
 let lastSeenJoinRequestA=0;
 let bRetryTimer=null;
@@ -200,11 +202,10 @@ let bRetryTimer=null;
 let createAttemptA = 0;
 let joinAttemptB = 0;
 
-/* ✅ NEW: prevent auto-join recursion while joinRoom is running */
-let isJoining = false;
+/* ✅ IMPORTANT: only auto-join if the page was opened with a hash */
+const hashOnLoad = (location.hash.length > 1);
 
-/* ---------- URL HASH ---------- */
-if (location.hash.length > 1) {
+if (hashOnLoad) {
   roomIdInput.value = location.hash.slice(1);
   setStatus(callStatus, "Room ID detected in URL.");
 }
@@ -244,47 +245,43 @@ async function clearSub(col){
   s.forEach(d=>b.delete(d.ref));
   await b.commit();
 }
-
 function requireAuth(){
   if(!isAuthed) throw new Error("Not signed in. Please login first.");
 }
-
 function clearBRetry(){
   if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
 }
-
 async function requestFreshOffer(roomRef){
-  joinAttemptB++;
   lastAnsweredSessionB = null;
   await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
 }
 
 /* ---------- MEDIA ---------- */
-/* ✅ startMedia now supports an option to SKIP auto-join */
-async function startMedia(opts = { skipAutoJoin:false }){
+async function startMedia(opts = { skipAutoJoin:false }) {
   requireAuth();
-  if(localStream) return;
-  if(startingPromise) return startingPromise;
+  if (localStream) {
+    if (!opts.skipAutoJoin) scheduleAutoJoin();
+    return;
+  }
+  if (startingPromise) return startingPromise;
 
-  startingPromise=(async()=>{
-    setStatus(mediaStatus,"Requesting camera/mic…");
-    localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    localVideo.srcObject=localStream;
+  startingPromise = (async () => {
+    setStatus(mediaStatus, "Requesting camera/mic…");
+    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
+    localVideo.srcObject = localStream;
 
-    startBtn.disabled=true;
-    stopBtn.disabled=false;
-    createBtn.disabled=false;
-    joinBtn.disabled=false;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    createBtn.disabled = false;
+    joinBtn.disabled = false;
 
-    setStatus(mediaStatus,"Camera/mic started.");
-
-    // ✅ do not auto-join while joinRoom is running or when explicitly skipped
-    if(!opts.skipAutoJoin && !isJoining){
-      await autoJoinIfNeeded();
-    }
+    setStatus(mediaStatus, "Camera/mic started.");
   })();
 
-  try{await startingPromise}finally{startingPromise=null}
+  try { await startingPromise; }
+  finally { startingPromise = null; }
+
+  if (!opts.skipAutoJoin) scheduleAutoJoin();
 }
 
 function stopAll(){
@@ -309,25 +306,57 @@ function stopAll(){
 
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
+
   autoJoinDone=false;
+  autoJoinInProgress=false;
+  autoJoinScheduled=false;
   lastAnsweredSessionB=null;
 
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 }
 
-/* ---------- AUTO JOIN ---------- */
+function scheduleAutoJoin() {
+  if (!hashOnLoad) return;                 // ✅ only invite-opened pages auto-join
+  if (autoJoinDone || autoJoinInProgress) return;
+  if (!roomIdInput.value.trim()) return;
+  if (autoJoinScheduled) return;
+
+  autoJoinScheduled = true;
+  setTimeout(async () => {
+    autoJoinScheduled = false;
+    try {
+      await autoJoinIfNeeded();
+    } catch (e) {
+      setStatus(callStatus, `${e.message || e}`);
+    }
+  }, 0);
+}
+
 async function autoJoinIfNeeded(){
+  if (!hashOnLoad) return;                 // ✅ only invite-opened pages auto-join
   if(autoJoinDone) return;
+  if(autoJoinInProgress) return;
   if(!roomIdInput.value.trim()) return;
-  autoJoinDone=true;
-  setStatus(callStatus,"Auto-joining room…");
-  await joinRoom(); // safe now (no recursion) because joinRoom will startMedia({skipAutoJoin:true})
+
+  autoJoinInProgress = true;
+  setStatus(callStatus, "Auto-joining room…");
+  try {
+    await joinRoom();
+    autoJoinDone = true;
+  } finally {
+    autoJoinInProgress = false;
+  }
 }
 
 /* ---------- ROOM A ---------- */
 async function createRoom(){
   requireAuth();
-  await startMedia();
+  await startMedia({ skipAutoJoin:true });   // ✅ don’t auto-join while creating
+
+  // ✅ make absolutely sure auto-join won't run on A's page after setting hash
+  autoJoinDone = true;
+  autoJoinScheduled = false;
+  autoJoinInProgress = false;
 
   const myAttempt = ++createAttemptA;
 
@@ -422,124 +451,117 @@ async function createRoom(){
 /* ---------- ROOM B ---------- */
 async function joinRoom(){
   requireAuth();
-  isJoining = true;
-  try{
-    // ✅ IMPORTANT: start media without triggering auto-join again
-    await startMedia({ skipAutoJoin:true });
+  await startMedia({ skipAutoJoin:true });
 
-    const myAttempt = ++joinAttemptB;
+  const myAttempt = ++joinAttemptB;
 
-    if(unsubRoomB) unsubRoomB();
-    if(unsubCallerB) unsubCallerB();
-    clearBRetry();
+  if(unsubRoomB) unsubRoomB();
+  if(unsubCallerB) unsubCallerB();
+  clearBRetry();
 
-    const roomId=roomIdInput.value.trim();
-    if(!roomId) throw new Error("Room ID is empty.");
+  const roomId=roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
 
-    const roomRef=doc(db,"rooms",roomId);
-    const snap=await getDoc(roomRef);
-    if(!snap.exists()) throw new Error("Room not found");
+  const roomRef=doc(db,"rooms",roomId);
+  const snap=await getDoc(roomRef);
+  if(!snap.exists()) throw new Error("Room not found. Ask Person A to create it, or check the invite link.");
 
-    await requestFreshOffer(roomRef);
+  await requestFreshOffer(roomRef);
+  if(myAttempt !== joinAttemptB) return;
+
+  setStatus(callStatus,"Connecting… (requested fresh offer)");
+
+  unsubRoomB = onSnapshot(roomRef, async (s)=>{
     if(myAttempt !== joinAttemptB) return;
 
-    setStatus(callStatus,"Connecting… (requested fresh offer)");
+    const d=s.data();
+    if(!d?.offer || !d.session) return;
 
-    unsubRoomB = onSnapshot(roomRef, async (s)=>{
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+
+    try{
+      ensurePeer();
+
+      const caller=collection(roomRef,"callerCandidates");
+      const callee=collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
       if(myAttempt !== joinAttemptB) return;
 
-      const d=s.data();
-      if(!d?.offer || !d.session) return;
+      pc.onicecandidate=e=>{
+        if(e.candidate){
+          addDoc(callee,{ session, ...e.candidate.toJSON() }).catch(()=>{});
+        }
+      };
 
-      if(lastAnsweredSessionB === d.session) return;
+      await pc.setRemoteDescription(d.offer);
+      if(myAttempt !== joinAttemptB) return;
 
-      const session = d.session;
-      lastAnsweredSessionB = session;
+      const ans=await pc.createAnswer();
+      if(myAttempt !== joinAttemptB) return;
 
-      try{
-        ensurePeer();
+      await pc.setLocalDescription(ans);
+      if(myAttempt !== joinAttemptB) return;
 
-        const caller=collection(roomRef,"callerCandidates");
-        const callee=collection(roomRef,"calleeCandidates");
+      await updateDoc(roomRef,{answer:ans,session,answeredAt:Date.now()});
+      if(myAttempt !== joinAttemptB) return;
 
-        await clearSub(callee);
+      setStatus(callStatus,`Joined room. Connecting… (session ${session})`);
+
+      if(unsubCallerB) { unsubCallerB(); unsubCallerB=null; }
+      unsubCallerB = onSnapshot(caller,(ss)=>{
         if(myAttempt !== joinAttemptB) return;
-
-        pc.onicecandidate=e=>{
-          if(e.candidate){
-            addDoc(callee,{ session, ...e.candidate.toJSON() }).catch(()=>{});
-          }
-        };
-
-        await pc.setRemoteDescription(d.offer);
-        if(myAttempt !== joinAttemptB) return;
-
-        const ans=await pc.createAnswer();
-        if(myAttempt !== joinAttemptB) return;
-
-        await pc.setLocalDescription(ans);
-        if(myAttempt !== joinAttemptB) return;
-
-        await updateDoc(roomRef,{answer:ans,session,answeredAt:Date.now()});
-        if(myAttempt !== joinAttemptB) return;
-
-        setStatus(callStatus,`Joined room. Connecting… (session ${session})`);
-
-        if(unsubCallerB) { unsubCallerB(); unsubCallerB=null; }
-        unsubCallerB = onSnapshot(caller,(ss)=>{
-          if(myAttempt !== joinAttemptB) return;
-          ss.docChanges().forEach(ch=>{
-            if(ch.type!=="added" || !pc) return;
-            const c = ch.doc.data();
-            if(c.session !== session) return;
-            try{ pc.addIceCandidate(c); }catch{}
-          });
+        ss.docChanges().forEach(ch=>{
+          if(ch.type!=="added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
         });
+      });
 
-        clearBRetry();
-        bRetryTimer = setTimeout(async ()=>{
-          if(myAttempt !== joinAttemptB) return;
-          if(!pc) return;
-          if(pc.connectionState === "connected") return;
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
 
-          setStatus(callStatus,"Still connecting… retrying (requesting new offer)…");
+        setStatus(callStatus,"Still connecting… retrying (requesting new offer)…");
+        try{
+          lastAnsweredSessionB = null;
+          await requestFreshOffer(roomRef);
+        }catch(e){ showError(e); }
+      }, 10000);
+
+      pc.onconnectionstatechange=async()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+
+        setStatus(callStatus,`B: ${pc.connectionState} (session ${session})`);
+
+        if(pc.connectionState === "connected"){
+          clearBRetry();
+        }
+
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
           try{
+            setStatus(callStatus,"Connection lost — requesting new offer…");
             lastAnsweredSessionB = null;
             await requestFreshOffer(roomRef);
           }catch(e){ showError(e); }
-        }, 10000);
+        }
+      };
 
-        pc.onconnectionstatechange=async()=>{
-          if(myAttempt !== joinAttemptB || !pc) return;
-
-          setStatus(callStatus,`B: ${pc.connectionState} (session ${session})`);
-
-          if(pc.connectionState === "connected"){
-            clearBRetry();
-          }
-
-          if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
-            try{
-              setStatus(callStatus,"Connection lost — requesting new offer…");
-              lastAnsweredSessionB = null;
-              await requestFreshOffer(roomRef);
-            }catch(e){ showError(e); }
-          }
-        };
-
-      }catch(e){
-        lastAnsweredSessionB = null;
-        showError(e);
-        setStatus(callStatus,"Join failed — requesting new offer…");
-        try{
-          await requestFreshOffer(roomRef);
-        }catch(err){ showError(err); }
-      }
-    });
-
-  } finally {
-    isJoining = false;
-  }
+    }catch(e){
+      lastAnsweredSessionB = null;
+      showError(e);
+      setStatus(callStatus,"Join failed — requesting new offer…");
+      try{
+        await requestFreshOffer(roomRef);
+      }catch(err){ showError(err); }
+    }
+  });
 }
 
 /* ---------- AUTH STATE ---------- */
