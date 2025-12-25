@@ -1,99 +1,3 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>2-Person Video/Sound Communicator (WebRTC)</title>
-
-<style>
-body{font-family:system-ui;margin:16px}
-h1{font-size:20px}
-.row{display:flex;gap:12px;flex-wrap:wrap}
-.card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
-.videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
-button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
-button:disabled{opacity:.6;cursor:not-allowed}
-input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
-.status{font-size:13px;margin-top:8px}
-.small{font-size:12px;color:#555;margin-top:6px}
-#errorBox{display:none;margin:12px 0;padding:10px;border:1px solid #f3b5b5;background:#fff5f5;color:#7a1b1b;border-radius:12px;white-space:pre-wrap}
-
-/* Login overlay */
-#loginOverlay{
-  position:fixed; inset:0; z-index:9999;
-  background:rgba(0,0,0,.55);
-  display:flex; align-items:center; justify-content:center;
-}
-#loginCard{
-  width:min(520px,calc(100% - 24px));
-  background:#fff; border-radius:14px;
-  padding:16px;
-  box-shadow:0 10px 30px rgba(0,0,0,.35);
-}
-#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
-#logoutBtn{float:right}
-#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
-</style>
-</head>
-
-<body>
-<h1>2-Person Video/Sound Communicator (WebRTC)</h1>
-<div id="errorBox"></div>
-
-<!-- LOGIN OVERLAY -->
-<div id="loginOverlay">
-  <div id="loginCard">
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
-    <div class="small">Only approved users can access this communicator.</div>
-
-    <label class="small">Email</label>
-    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username" />
-
-    <label class="small">Password</label>
-    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password" />
-
-    <div id="loginRow">
-      <button id="loginBtn">Login</button>
-    </div>
-
-    <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">If Firestore rules require auth, the app will not work until login succeeds.</div>
-  </div>
-</div>
-
-<div id="app" class="locked">
-  <div class="videos">
-    <div class="card">
-      <b>Person A (You)</b>
-      <video id="localVideo" autoplay muted playsinline></video>
-    </div>
-    <div class="card">
-      <b>Person B (Other)</b>
-      <video id="remoteVideo" autoplay playsinline></video>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="card">
-      <b>Step 1</b><br/>
-      <button id="startBtn" disabled>Start</button>
-      <button id="stopBtn" disabled>Stop</button>
-      <div class="status" id="mediaStatus">Not started.</div>
-    </div>
-
-    <div class="card">
-      <b>Step 2</b><br/>
-      <button id="createBtn" disabled>Create Room</button>
-      <button id="joinBtn" disabled>Join Room</button>
-      <input id="roomId" placeholder="Room ID"/>
-      <button id="copyLinkBtn" disabled>Copy Invite</button>
-      <div class="status" id="callStatus">No room yet.</div>
-    </div>
-  </div>
-</div>
-
 <script type="module">
 /* ---------- ERROR HANDLING ---------- */
 const errorBox=document.getElementById("errorBox");
@@ -163,6 +67,12 @@ const mediaStatus=document.getElementById("mediaStatus");
 const callStatus=document.getElementById("callStatus");
 const setStatus=(el,msg)=>el.textContent=msg;
 
+/* ✅ keep Copy Invite enabled whenever it makes sense */
+function refreshCopyInviteState(){
+  const hasRoomId = !!roomIdInput.value.trim();
+  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
+}
+
 /* ---------- STATE ---------- */
 let localStream=null, pc=null;
 let unsubRoomA=null, unsubCalleeA=null;
@@ -175,9 +85,8 @@ let autoJoinDone=false;
 if (location.hash.length > 1) {
   roomIdInput.value = location.hash.slice(1);
   setStatus(callStatus, "Room ID detected in URL.");
-  copyLinkBtn.disabled = false; // ✅ add this
 }
-
+refreshCopyInviteState();
 
 /* ---------- WEBRTC ---------- */
 const rtcConfig={iceServers:[{urls:"stun:stun.l.google.com:19302"}]};
@@ -247,12 +156,13 @@ function stopAll(){
   stopBtn.disabled=true;
   createBtn.disabled=true;
   joinBtn.disabled=true;
-  copyLinkBtn.disabled=true;
 
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
   autoJoinDone=false;
   lastAnsweredSessionB=null;
+
+  refreshCopyInviteState();
 }
 
 /* ---------- AUTO JOIN ---------- */
@@ -279,9 +189,8 @@ async function createRoom(){
   roomIdInput.value=roomRef.id;
   location.hash=roomRef.id;
 
-  copyLinkBtn.disabled = false;
+  refreshCopyInviteState();  // ✅ enable Copy Invite immediately
 
-  
   const caller=collection(roomRef,"callerCandidates");
   const callee=collection(roomRef,"calleeCandidates");
   await clearSub(caller); await clearSub(callee);
@@ -297,7 +206,7 @@ async function createRoom(){
     offer:{type:offer.type,sdp:offer.sdp}
   });
 
-  setStatus(callStatus,"Room active.");
+  setStatus(callStatus,"Room active. Click 'Copy Invite' and send it to Person B.");
 
   unsubRoomA=onSnapshot(roomRef,snap=>{
     const d=snap.data();
@@ -362,12 +271,11 @@ onAuthStateChanged(auth,(user)=>{
     logoutBtn.style.display="inline-block";
     loginStatus.textContent="Signed in.";
 
-    // Enable Start immediately (user still must interact for camera permission)
     startBtn.disabled=false;
     setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
-    copyLinkBtn.disabled=!roomIdInput.value.trim();
 
-    // After login, first user interaction will start media automatically:
+    refreshCopyInviteState();
+
     ["click","keydown","touchstart"].forEach(ev=>{
       window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
     });
@@ -385,6 +293,7 @@ startBtn.onclick=()=>startMedia().catch(showError);
 stopBtn.onclick=()=>stopAll();
 createBtn.onclick=()=>createRoom().catch(showError);
 joinBtn.onclick=()=>joinRoom().catch(showError);
+
 copyLinkBtn.onclick = () => {
   const roomId = roomIdInput.value.trim();
   if (!roomId) return;
@@ -393,9 +302,8 @@ copyLinkBtn.onclick = () => {
   setStatus(callStatus, "Invite copied.");
 };
 
-
 roomIdInput.addEventListener("input",()=>{
-  copyLinkBtn.disabled=!roomIdInput.value.trim();
+  refreshCopyInviteState(); // ✅ keep it in sync
 });
 </script>
 </body>
