@@ -24,6 +24,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   color:#7a1b1b;border-radius:12px;white-space:pre-wrap
 }
 
+/* LOGIN OVERLAY */
 #loginOverlay{
   position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.55);
@@ -37,6 +38,20 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 }
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none}
+
+/* DIAGNOSTICS */
+#diagBox{
+  display:none;
+  margin-top:8px;
+  max-height:220px;
+  overflow:auto;
+  background:#111;
+  color:#0f0;
+  padding:8px;
+  border-radius:8px;
+  font-size:12px;
+  white-space:pre-wrap;
+}
 </style>
 </head>
 
@@ -90,116 +105,90 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     </div>
   </div>
 
-  <!-- DIAGNOSTICS -->
+  <!-- DIAGNOSTICS CARD -->
   <div class="card">
     <button id="diagBtn">Diagnostics</button>
-    <pre id="diagBox" style="
-      display:none;margin-top:8px;
-      max-height:220px;overflow:auto;
-      background:#111;color:#0f0;
-      padding:8px;border-radius:8px;font-size:12px
-    "></pre>
+    <pre id="diagBox"></pre>
   </div>
 </div>
 
 <script type="module">
-/* ---------- DIAGNOSTICS ---------- */
-const diagBtn=document.getElementById("diagBtn");
-const diagBox=document.getElementById("diagBox");
-let diagVisible=false;
-const diagLog=[];
+/* ================== DIAGNOSTICS ================== */
+const diagBtn = document.getElementById("diagBtn");
+const diagBox = document.getElementById("diagBox");
+
+let diagVisible = false;
+const diagLog = [];
 
 function logDiag(msg){
-  const line=`[${new Date().toLocaleTimeString()}] ${msg}`;
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
   diagLog.push(line);
   console.log(line);
-  if(diagVisible){
-    diagBox.textContent=diagLog.join("\n");
-    diagBox.scrollTop=diagBox.scrollHeight;
+
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
   }
 }
 
-diagBtn.onclick=()=>{
-  diagVisible=!diagVisible;
-  diagBox.style.display=diagVisible?"block":"none";
-  diagBtn.textContent=diagVisible?"Hide diagnostics":"Diagnostics";
-  if(diagVisible){
-    diagBox.textContent=diagLog.join("\n");
-    diagBox.scrollTop=diagBox.scrollHeight;
+diagBtn.onclick = () => {
+  diagVisible = !diagVisible;
+  diagBox.style.display = diagVisible ? "block" : "none";
+  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
   }
 };
 
-/* ---------- ERROR HANDLING ---------- */
-const errorBox=document.getElementById("errorBox");
+/* ================== ERROR HANDLING ================== */
+const errorBox = document.getElementById("errorBox");
 function showError(e){
   errorBox.style.display="block";
-  errorBox.textContent=String(e?.message||e);
-  logDiag("ERROR: "+errorBox.textContent);
+  errorBox.textContent = String(e?.message || e);
+  logDiag("ERROR: " + errorBox.textContent);
 }
 
-/* ---------- FIREBASE ---------- */
+/* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc, onSnapshot, getDocs, writeBatch }
-from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
 from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-const app=initializeApp({
+const app = initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
   projectId:"easosunov-webrtc",
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
-const db=getFirestore(app);
-const auth=getAuth(app);
+const auth = getAuth(app);
 
-/* ---------- AUTH ---------- */
-let isAuthed=false;
-onAuthStateChanged(auth,u=>{
-  isAuthed=!!u;
-  logDiag("Auth: "+(u?"SIGNED IN":"SIGNED OUT"));
-  document.getElementById("loginOverlay").style.display=u?"none":"flex";
-  document.getElementById("app").classList.toggle("locked",!u);
-  document.getElementById("logoutBtn").style.display=u?"inline-block":"none";
-  if(u) document.getElementById("startBtn").disabled=false;
+/* ================== AUTH ================== */
+onAuthStateChanged(auth, user => {
+  logDiag(user ? "Auth: signed in" : "Auth: signed out");
+  document.getElementById("loginOverlay").style.display = user ? "none" : "flex";
+  document.getElementById("app").classList.toggle("locked", !user);
+  document.getElementById("logoutBtn").style.display = user ? "inline-block" : "none";
+  if (user) document.getElementById("startBtn").disabled = false;
 });
 
-/* ---------- UI ---------- */
-const localVideo=document.getElementById("localVideo");
-const remoteVideo=document.getElementById("remoteVideo");
-const startBtn=document.getElementById("startBtn");
-const stopBtn=document.getElementById("stopBtn");
-const createBtn=document.getElementById("createBtn");
-const joinBtn=document.getElementById("joinBtn");
-const copyBtn=document.getElementById("copyLinkBtn");
-const roomInput=document.getElementById("roomId");
-const callStatus=document.getElementById("callStatus");
-
-document.getElementById("loginBtn").onclick=async()=>{
-  try{
-    await signInWithEmailAndPassword(auth,
-      emailInput.value.trim(),passInput.value);
-  }catch(e){ loginStatus.textContent="Login failed"; }
+document.getElementById("loginBtn").onclick = async () => {
+  try {
+    await signInWithEmailAndPassword(
+      auth,
+      emailInput.value.trim(),
+      passInput.value
+    );
+  } catch {
+    loginStatus.textContent = "Login failed";
+  }
 };
-document.getElementById("logoutBtn").onclick=()=>signOut(auth);
+document.getElementById("logoutBtn").onclick = () => signOut(auth);
 
-/* ---------- WEBRTC (unchanged logic) ---------- */
-let pc=null, localStream=null;
-
-async function startMedia(){
-  if(localStream) return;
-  localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-  localVideo.srcObject=localStream;
-  createBtn.disabled=false;
-  joinBtn.disabled=false;
-  logDiag("Media started");
-}
-
-startBtn.onclick=startMedia;
-
-/* (Your proven room / join logic continues here unchanged) */
-/* This diagnostics system does not interfere with signaling */
-
+/* ================== MEDIA (placeholder) ================== */
+document.getElementById("startBtn").onclick = async () => {
+  logDiag("Start clicked (media init placeholder)");
+};
 </script>
 </body>
 </html>
