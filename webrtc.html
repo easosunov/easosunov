@@ -12,53 +12,91 @@ h1{font-size:20px}
 .card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
 .videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
-button{padding:10px 12px;border-radius:10px;border:1px solid #ccc}
-button:disabled{opacity:.6}
+button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
+input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 .status{font-size:13px;margin-top:8px}
+.small{font-size:12px;color:#555;margin-top:6px}
 #errorBox{display:none;margin:12px 0;padding:10px;border:1px solid #f3b5b5;background:#fff5f5;color:#7a1b1b;border-radius:12px;white-space:pre-wrap}
+
+/* --- Login overlay --- */
+#loginOverlay{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center;
+  z-index:9999;
+}
+#loginCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
+#logoutBtn{float:right}
+#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 </style>
 </head>
 
 <body>
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
+
 <div id="errorBox"></div>
 
-<div class="videos">
-  <div class="card">
-    <b>Person A (You)</b>
-    <video id="localVideo" autoplay muted playsinline></video>
-  </div>
-  <div class="card">
-    <b>Person B (Other)</b>
-    <video id="remoteVideo" autoplay playsinline></video>
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay">
+  <div id="loginCard">
+    <button id="logoutBtn" style="display:none;">Logout</button>
+    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
+    <div class="small">Only approved users can access this communicator.</div>
+
+    <label class="small">Email</label>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username" />
+
+    <label class="small">Password</label>
+    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password" />
+
+    <div id="loginRow">
+      <button id="loginBtn">Login</button>
+    </div>
+
+    <div id="loginStatus" class="status">Please sign in.</div>
+    <div class="small">If Firestore rules require auth, the app will not work until login succeeds.</div>
   </div>
 </div>
 
-<div class="row">
-  <div class="card">
-    <b>Step 1</b><br/>
-    <button id="startBtn">Start</button>
-    <button id="stopBtn" disabled>Stop</button>
-    <div class="status" id="mediaStatus">Not started.</div>
+<div id="app" class="locked">
+  <div class="videos">
+    <div class="card">
+      <b>Person A (You)</b>
+      <video id="localVideo" autoplay muted playsinline></video>
+    </div>
+    <div class="card">
+      <b>Person B (Other)</b>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
   </div>
 
-  <div class="card">
-    <b>Step 2</b><br/>
-    <button id="createBtn" disabled>Create Room</button>
-    <button id="joinBtn" disabled>Join Room</button>
-    <input id="roomId" placeholder="Room ID"/>
-    <button id="copyLinkBtn" disabled>Copy Invite</button>
-    <div class="status" id="callStatus">No room yet.</div>
+  <div class="row">
+    <div class="card">
+      <b>Step 1</b><br/>
+      <button id="startBtn">Start</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <div class="status" id="mediaStatus">Not started.</div>
+    </div>
+
+    <div class="card">
+      <b>Step 2</b><br/>
+      <button id="createBtn" disabled>Create Room</button>
+      <button id="joinBtn" disabled>Join Room</button>
+      <input id="roomId" placeholder="Room ID"/>
+      <button id="copyLinkBtn" disabled>Copy Invite</button>
+      <div class="status" id="callStatus">No room yet.</div>
+    </div>
   </div>
 </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
 /* ---------- ERROR HANDLING ---------- */
 const errorBox=document.getElementById("errorBox");
 function showError(e){
@@ -68,6 +106,15 @@ function showError(e){
 }
 window.addEventListener("error",e=>showError(e.error||e.message||e));
 window.addEventListener("unhandledrejection",e=>showError(e.reason||e));
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  onSnapshot, getDocs, writeBatch
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 /* ---------- FIREBASE ---------- */
 const app=initializeApp({
@@ -79,6 +126,45 @@ const app=initializeApp({
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
 const db=getFirestore(app);
+const auth=getAuth(app);
+
+/* ---------- LOGIN UI ---------- */
+const loginOverlay=document.getElementById("loginOverlay");
+const loginBtn=document.getElementById("loginBtn");
+const logoutBtn=document.getElementById("logoutBtn");
+const loginStatus=document.getElementById("loginStatus");
+const emailInput=document.getElementById("emailInput");
+const passInput=document.getElementById("passInput");
+const appRoot=document.getElementById("app");
+
+loginBtn.onclick=async()=>{
+  loginStatus.textContent="Signing in…";
+  try{
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+  }catch(e){
+    loginStatus.textContent="Login failed. Check email/password.";
+    showError(e);
+  }
+};
+
+logoutBtn.onclick=async()=>{
+  try{ await signOut(auth); }catch(e){ showError(e); }
+};
+
+onAuthStateChanged(auth,(user)=>{
+  if(user){
+    loginOverlay.style.display="none";
+    appRoot.classList.remove("locked");
+    logoutBtn.style.display="inline-block";
+    loginStatus.textContent="Signed in.";
+  }else{
+    loginOverlay.style.display="flex";
+    appRoot.classList.add("locked");
+    logoutBtn.style.display="none";
+    // Stop any running media if user logs out
+    try{ stopAll(); }catch{}
+  }
+});
 
 /* ---------- UI ---------- */
 const localVideo=document.getElementById("localVideo");
@@ -153,6 +239,27 @@ async function startMedia(){
   try{await startingPromise}finally{startingPromise=null}
 }
 
+function stopAll(){
+  if(unsubRoomA){unsubRoomA();unsubRoomA=null}
+  if(unsubCalleeA){unsubCalleeA();unsubCalleeA=null}
+  if(unsubRoomB){unsubRoomB();unsubRoomB=null}
+  if(unsubCallerB){unsubCallerB();unsubCallerB=null}
+  closePeer();
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+  localVideo.srcObject=null;
+  startBtn.disabled=false;
+  stopBtn.disabled=true;
+  createBtn.disabled=true;
+  joinBtn.disabled=true;
+  setStatus(mediaStatus,"Not started.");
+  setStatus(callStatus,"No room yet.");
+  autoJoinDone=false;
+  lastAnsweredSessionB=null;
+}
+
 /* ---------- AUTO START + AUTO JOIN ---------- */
 async function autoJoinIfNeeded(){
   if(autoJoinDone) return;
@@ -162,8 +269,12 @@ async function autoJoinIfNeeded(){
   await joinRoom();
 }
 
+// auto-start media on first interaction (after login overlay is gone)
 ["click","keydown","touchstart"].forEach(ev=>{
-  window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
+  window.addEventListener(ev,()=>{
+    if(loginOverlay.style.display !== "none") return; // not logged in yet
+    startMedia().catch(()=>{});
+  },{once:true});
 });
 
 /* ---------- ROOM A ---------- */
@@ -198,12 +309,12 @@ async function createRoom(){
 
   unsubRoomA=onSnapshot(roomRef,snap=>{
     const d=snap.data();
-    if(d?.answer && pc.signalingState==="have-local-offer")
+    if(d?.answer && pc && pc.signalingState==="have-local-offer")
       pc.setRemoteDescription(d.answer);
   });
 
   unsubCalleeA=onSnapshot(callee,s=>{
-    s.docChanges().forEach(c=>pc.addIceCandidate(c.doc.data()));
+    s.docChanges().forEach(c=>pc && pc.addIceCandidate(c.doc.data()));
   });
 }
 
@@ -240,14 +351,14 @@ async function joinRoom(){
     setStatus(callStatus,"Connected.");
 
     unsubCallerB=onSnapshot(caller,s=>{
-      s.docChanges().forEach(c=>pc.addIceCandidate(c.doc.data()));
+      s.docChanges().forEach(c=>pc && pc.addIceCandidate(c.doc.data()));
     });
   });
 }
 
 /* ---------- UI ---------- */
 startBtn.onclick=()=>startMedia().catch(showError);
-stopBtn.onclick=()=>location.reload();
+stopBtn.onclick=()=>stopAll();
 createBtn.onclick=()=>createRoom().catch(showError);
 joinBtn.onclick=()=>joinRoom().catch(showError);
 copyLinkBtn.onclick=()=>{
