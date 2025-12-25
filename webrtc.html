@@ -6,20 +6,15 @@
 <title>2-Person Video/Sound Communicator (WebRTC)</title>
 
 <script>
-/* ===== FORCE LATEST HTML (CACHE-BUST) =====
-   If user opens /webrtc.html#ROOM without ?v=..., force reload to ?v=BUILD#ROOM.
-   This prevents "Person B is on stale cached code" forever.
-*/
-const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
+/* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
+const BUILD = "2025-12-25T19:40Z-FULL-WEBRTC-RESTORE";
 (function forceCacheBust(){
   try{
     const params = new URLSearchParams(location.search);
     const v = params.get("v");
-    // If missing or wrong BUILD, force reload to correct query
     if (v !== BUILD) {
       params.set("v", BUILD);
       const newUrl = `${location.origin}${location.pathname}?${params.toString()}${location.hash || ""}`;
-      // Use replace() so Back doesn't loop
       location.replace(newUrl);
     }
   } catch {}
@@ -39,6 +34,7 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
   input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   .status{font-size:13px;margin-top:8px}
   .small{font-size:12px;color:#555;margin-top:6px}
+  code{background:#f2f2f2;padding:1px 6px;border-radius:6px}
 
   #errorBox{
     display:none;margin:12px 0;padding:10px;
@@ -46,6 +42,7 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
   }
 
+  /* LOGIN OVERLAY */
   #loginOverlay{
     position:fixed; inset:0; z-index:9999;
     background:rgba(0,0,0,.55);
@@ -61,10 +58,11 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
   #logoutBtn{float:right}
   #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
+  /* DIAGNOSTICS */
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:220px;
+    max-height:240px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -74,6 +72,7 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
     white-space:pre-wrap;
   }
   .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+
   .badge{display:inline-block;padding:2px 8px;border:1px solid #ddd;border-radius:999px;font-size:12px;color:#333;background:#fafafa}
 </style>
 </head>
@@ -82,6 +81,7 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
 <h1>2-Person Video/Sound Communicator (WebRTC) <span id="buildBadge" class="badge"></span></h1>
 <div id="errorBox"></div>
 
+<!-- LOGIN -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
@@ -98,19 +98,19 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
       <button id="loginBtn">Login</button>
     </div>
     <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">If you mistype, you’ll see a message here (no pink error box).</div>
+    <div class="small">Login mistakes stay here (no pink box).</div>
   </div>
 </div>
 
 <div id="app" class="locked">
   <div class="videos">
     <div class="card">
-      <b>Person A (You)</b>
+      <b>You</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don’t hear yourself.</div>
     </div>
     <div class="card">
-      <b>Person B (Other)</b>
+      <b>Other</b>
       <video id="remoteVideo" autoplay playsinline></video>
       <div class="small">If audio doesn’t play, click the video once.</div>
     </div>
@@ -145,15 +145,16 @@ const BUILD = "2025-12-25T19:20Z-FORCE-CACHEBUST";
       <button id="clearDiagBtn" disabled>Clear log</button>
     </div>
     <pre id="diagBox"></pre>
-    <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
+    <div class="small">Hidden by default. Click “Diagnostics” to show/hide.</div>
   </div>
 </div>
 
 <script type="module">
-/* ================== BUILD BADGE + DIAG ================== */
+/* ================== UI / DIAGNOSTICS ================== */
 document.getElementById("buildBadge").textContent = "BUILD " + BUILD;
 
 const errorBox = document.getElementById("errorBox");
+
 const loginOverlay = document.getElementById("loginOverlay");
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
@@ -214,12 +215,8 @@ clearDiagBtn.onclick = () => {
 copyDiagBtn.onclick = async () => {
   const text = diagLog.join("\n");
   if (!text) return;
-  try{
-    await navigator.clipboard.writeText(text);
-    logDiag("Copied diagnostics to clipboard.");
-  }catch{
-    window.prompt("Copy diagnostics:", text);
-  }
+  try{ await navigator.clipboard.writeText(text); logDiag("Copied diagnostics to clipboard."); }
+  catch{ window.prompt("Copy diagnostics:", text); }
 };
 
 function showError(e){
@@ -275,13 +272,26 @@ loginBtn.onclick = async () => {
   try{
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   }catch(e){
-    loginStatus.textContent = "Login failed.";
-    logDiag("Login failed: " + (e?.code || e?.message || e));
+    const code = String(e?.code || "");
+    const msg =
+      (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password")
+        ? "Wrong email or password."
+      : (code === "auth/invalid-email")
+        ? "Invalid email address."
+      : (code === "auth/missing-password")
+        ? "Please enter your password."
+      : (code === "auth/too-many-requests")
+        ? "Too many attempts. Try again later."
+      : "Login failed. Please try again.";
+    loginStatus.textContent = msg;
+    logDiag(`Login failed (${code || "no-code"}): ${msg}`);
   }
 };
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
-/* ================== URL HASH / INVITE ================== */
+/* ================== INVITE MODE ==================
+   Only treat as invite if hash existed at initial load.
+*/
 const openedFromInvite = (location.hash.length > 1);
 if (openedFromInvite) {
   roomIdInput.value = location.hash.slice(1);
@@ -289,18 +299,354 @@ if (openedFromInvite) {
   logDiag("Room ID from URL hash: " + roomIdInput.value);
 }
 
-/* ================== MINIMAL RESTORE OF CORE BEHAVIOR ==================
-   (Leaving your existing full WebRTC logic intact would be huge here.
-    The ONLY purpose of this file is to force cache-bust so B runs latest code.)
+/* ================== WEBRTC ================== */
+let localStream = null;
+let pc = null;
+const rtcConfig = { iceServers:[{ urls:"stun:stun.l.google.com:19302" }] };
 
-   So: keep the same UI/controls and invite copy behavior.
-*/
+function closePeer(){
+  if(pc){
+    pc.onicecandidate=null;
+    pc.ontrack=null;
+    pc.onconnectionstatechange=null;
+    pc.oniceconnectionstatechange=null;
+    try{ pc.close(); }catch{}
+    pc=null;
+  }
+  remoteVideo.srcObject = null;
+}
+
+function ensurePeer(){
+  closePeer();
+  pc = new RTCPeerConnection(rtcConfig);
+  logDiag("Created RTCPeerConnection");
+
+  const rs = new MediaStream();
+  remoteVideo.srcObject = rs;
+
+  pc.ontrack = (e)=>{
+    e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(()=>{});
+    logDiag("ontrack: " + e.streams[0].getTracks().map(t=>t.kind).join(","));
+  };
+
+  pc.onconnectionstatechange = ()=> pc && logDiag("pc.connectionState=" + pc.connectionState);
+  pc.oniceconnectionstatechange = ()=> pc && logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
+
+  if(!localStream) throw new Error("Local media not started.");
+  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+}
+
+/* ================== FIRESTORE HELPERS ================== */
+async function clearSub(col){
+  const s = await getDocs(col);
+  if(s.empty) return;
+  const b = writeBatch(db);
+  s.forEach(d=>b.delete(d.ref));
+  await b.commit();
+  logDiag(`Cleared ${col.path} docs=${s.size}`);
+}
+
+/* ================== UI HELPERS ================== */
 function refreshCopyInviteState(){
   const hasRoomId = !!roomIdInput.value.trim();
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
 }
 roomIdInput.addEventListener("input", refreshCopyInviteState);
 
+/* ================== MEDIA ================== */
+let startingPromise = null;
+async function startMedia(){
+  if(!requireAuthOrPrompt()) return;
+
+  if(localStream) return;
+  if(startingPromise) return startingPromise;
+
+  startingPromise = (async()=>{
+    hideErrorBox();
+    setStatus(mediaStatus,"Requesting camera/mic…");
+    logDiag("Requesting getUserMedia…");
+
+    localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    localVideo.srcObject = localStream;
+
+    setStatus(mediaStatus,"Camera/mic started.");
+    logDiag("Camera/mic started.");
+
+    localVideo.onloadedmetadata = async ()=>{
+      try{ await localVideo.play(); }catch{}
+      logDiag("Local video playing.");
+    };
+
+    startBtn.disabled = true;
+    stopBtn.disabled  = false;
+    createBtn.disabled = false;
+    joinBtn.disabled   = false;
+  })();
+
+  try{ await startingPromise; }
+  finally{ startingPromise = null; }
+}
+
+/* ================== LISTENERS ================== */
+let unsubRoomA=null, unsubCalleeA=null;
+let unsubRoomB=null, unsubCallerB=null;
+
+function stopListeners(){
+  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
+  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
+  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
+  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+}
+
+/* ================== STOP ================== */
+function stopAll(){
+  stopListeners();
+  closePeer();
+
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+  localVideo.srcObject=null;
+
+  startBtn.disabled = !isAuthed;
+  stopBtn.disabled = true;
+  createBtn.disabled = true;
+  joinBtn.disabled = true;
+
+  setStatus(mediaStatus,"Not started.");
+  setStatus(callStatus,"No room yet.");
+
+  refreshCopyInviteState();
+}
+stopBtn.onclick = () => stopAll();
+
+/* ================== REJOIN SUPPORT (Host refresh on joinRequest) ================== */
+let lastSeenJoinRequestA = 0;
+let lastAnsweredSessionB = null;
+
+/* ================== ROOM A (HOST) ================== */
+let createAttemptA = 0;
+
+async function createRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  // Host must not have B-listeners active
+  stopListeners();
+  lastAnsweredSessionB = null;
+
+  await startMedia();
+
+  const myAttempt = ++createAttemptA;
+
+  // Use existing ID if provided, else create new
+  let roomRef;
+  const existing = roomIdInput.value.trim();
+  if(existing) roomRef = doc(db,"rooms", existing);
+  else roomRef = doc(collection(db,"rooms"));
+
+  roomIdInput.value = roomRef.id;
+  location.hash = roomRef.id;
+  refreshCopyInviteState();
+
+  logDiag("HOST createRoom: roomId=" + roomRef.id);
+
+  const caller = collection(roomRef,"callerCandidates");
+  const callee = collection(roomRef,"calleeCandidates");
+
+  // bump session number
+  const snap = await getDoc(roomRef);
+  const prev = snap.exists() ? (snap.data().session || 0) : 0;
+  const session = Number(prev) + 1;
+
+  if(myAttempt !== createAttemptA) return;
+
+  await clearSub(caller);
+  await clearSub(callee);
+
+  if(myAttempt !== createAttemptA) return;
+
+  ensurePeer();
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate){
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now()
+  }, { merge:true });
+
+  setStatus(callStatus, `Room active (session ${session}). Send the invite to B.`);
+  logDiag(`HOST wrote offer. session=${session}`);
+
+  unsubRoomA = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== createAttemptA) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+      lastSeenJoinRequestA = d.joinRequest;
+      logDiag("HOST saw joinRequest => restarting session/offer");
+      setStatus(callStatus, "Join request received — restarting session…");
+      setTimeout(()=>createRoom().catch(()=>{}), 150);
+      return;
+    }
+
+    if(d.answer && d.session === session && pc && pc.signalingState==="have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        await pc.setRemoteDescription(d.answer);
+        setStatus(callStatus, `Connected (session ${session}).`);
+        logDiag("HOST applied answer.");
+      }catch(e){
+        logDiag("HOST setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(callStatus, "Answer failed — restarting session…");
+        setTimeout(()=>createRoom().catch(()=>{}), 200);
+      }
+    }
+  });
+
+  unsubCalleeA = onSnapshot(callee, (ss)=>{
+    ss.docChanges().forEach(ch=>{
+      if(ch.type!=="added" || !pc) return;
+      const c = ch.doc.data();
+      if(c.session !== session) return;
+      try{ pc.addIceCandidate(c); }catch{}
+    });
+  });
+}
+
+/* ================== ROOM B (GUEST) ================== */
+let joinAttemptB = 0;
+let joinInProgress = false;
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+
+  if(joinInProgress){
+    // When already joining: just nudge host
+    logDiag("Join clicked while joining => nudging host");
+    await setDoc(doc(db,"rooms",roomId), { joinRequest: Date.now() }, { merge:true }).catch(()=>{});
+    setStatus(callStatus, "Nudged host. Still waiting…");
+    return;
+  }
+
+  joinInProgress = true;
+  const myAttempt = ++joinAttemptB;
+
+  await startMedia();
+  stopListeners();
+
+  const roomRef = doc(db,"rooms", roomId);
+  location.hash = roomId;
+
+  setStatus(callStatus, "Waiting for host / offer…");
+  logDiag("GUEST joinRoom: roomId=" + roomId);
+  logDiag("GUEST installing onSnapshot(roomRef)…");
+
+  // Nudge host once on entry (safe; merge only)
+  setDoc(roomRef, { joinRequest: Date.now() }, { merge:true })
+    .then(()=>logDiag("GUEST nudged host (joinRequest)"))
+    .catch((e)=>logDiag("GUEST nudge failed: " + (e?.message || e)));
+
+  unsubRoomB = onSnapshot(
+    roomRef,
+    async (snap)=>{
+      if(myAttempt !== joinAttemptB) return;
+
+      const exists = snap.exists();
+      logDiag("GUEST room snapshot: exists=" + exists);
+
+      if(!exists){
+        setStatus(callStatus, "Waiting for host to create the room…");
+        return;
+      }
+
+      const d = snap.data() || {};
+      const hasOffer = !!d.offer;
+      const session = d.session;
+      logDiag(`GUEST room data: hasOffer=${hasOffer} session=${session ?? "none"}`);
+
+      if(!d.offer || !d.session){
+        setStatus(callStatus, "Room found. Waiting for offer…");
+        return;
+      }
+
+      if(lastAnsweredSessionB === d.session) return;
+      lastAnsweredSessionB = d.session;
+
+      try{
+        ensurePeer();
+
+        const caller = collection(roomRef,"callerCandidates");
+        const callee = collection(roomRef,"calleeCandidates");
+
+        await clearSub(callee);
+        if(myAttempt !== joinAttemptB) return;
+
+        pc.onicecandidate = (e)=>{
+          if(e.candidate){
+            addDoc(callee, { session: d.session, ...e.candidate.toJSON() }).catch(()=>{});
+          }
+        };
+
+        await pc.setRemoteDescription(d.offer);
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+
+        await updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now() });
+
+        setStatus(callStatus, `Joined room. Connecting… (session ${d.session})`);
+        logDiag("GUEST wrote answer.");
+
+        if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+        unsubCallerB = onSnapshot(caller, (ss)=>{
+          if(myAttempt !== joinAttemptB) return;
+          ss.docChanges().forEach(ch=>{
+            if(ch.type!=="added" || !pc) return;
+            const c = ch.doc.data();
+            if(c.session !== d.session) return;
+            try{ pc.addIceCandidate(c); }catch{}
+          });
+        });
+
+        pc.onconnectionstatechange = ()=>{
+          if(myAttempt !== joinAttemptB || !pc) return;
+          setStatus(callStatus, `B: ${pc.connectionState} (session ${d.session})`);
+          if(pc.connectionState === "connected"){
+            joinInProgress = false;
+            logDiag("GUEST connected => joinInProgress=false");
+          }
+        };
+
+      }catch(e){
+        lastAnsweredSessionB = null;
+        logDiag("GUEST join error: " + (e?.message || e));
+        setStatus(callStatus, "Join error — waiting / retrying…");
+      }
+    },
+    (err)=>{
+      logDiag("GUEST SNAPSHOT ERROR: " + (err?.message || err));
+      setStatus(callStatus, "Firestore listener error (see diagnostics).");
+      showError(err);
+      joinInProgress = false;
+    }
+  );
+}
+
+/* ================== COPY INVITE ================== */
 async function copyTextRobust(text){
   if(navigator.clipboard && window.isSecureContext){
     try{ await navigator.clipboard.writeText(text); return true; }catch{}
@@ -308,43 +654,72 @@ async function copyTextRobust(text){
   window.prompt("Copy this invite link:", text);
   return false;
 }
+
 copyLinkBtn.onclick = async ()=>{
   const roomId = roomIdInput.value.trim();
   if(!roomId) return;
   const invite = `${location.origin}${location.pathname}?v=${encodeURIComponent(BUILD)}#${roomId}`;
   const ok = await copyTextRobust(invite);
-  setStatus(callStatus, ok ? "Invite copied (with cache-buster)." : "Clipboard blocked — link shown for manual copy.");
-  logDiag("Copy invite clicked. Link includes ?v=" + BUILD);
+  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
+  logDiag("Invite copied: includes ?v=" + BUILD);
 };
 
-/* Buttons: we keep them enabled like before after auth. */
+/* ================== BUTTONS ================== */
+startBtn.onclick = async ()=>{
+  try{
+    hideErrorBox();
+    await startMedia();
+  }catch(e){
+    const name = String(e?.name || "");
+    if(name === "NotAllowedError" || name === "NotFoundError") return;
+    showError(e);
+  }
+};
+createBtn.onclick = ()=> createRoom().catch(showError);
+joinBtn.onclick   = ()=> joinRoom().catch(showError);
+
+/* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, (user)=>{
   isAuthed = !!user;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
-  if (isAuthed){
+
+  if(isAuthed){
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
     loginStatus.textContent = "Signed in.";
+
     startBtn.disabled = false;
-    createBtn.disabled = false;
-    joinBtn.disabled = false;
-    stopBtn.disabled = false;
-    setStatus(mediaStatus, "Ready.");
+    stopBtn.disabled = true;
+    createBtn.disabled = true;
+    joinBtn.disabled = true;
+
+    setStatus(mediaStatus, "Ready. Click Start.");
     refreshCopyInviteState();
-    // If you still see old BUILD on B, this redirect is being blocked by caching/proxy.
-  } else {
+
+    // Auto-join only for invite-opened pages (B), after auth, one-shot:
+    if(openedFromInvite){
+      setStatus(callStatus, "Invite detected. Click Start (or Join) to connect.");
+      logDiag("Invite mode: waiting for user gesture to start media.");
+      // Try to help: first click anywhere starts media, then auto-joins once.
+      window.addEventListener("click", async ()=>{
+        try{
+          await startMedia();
+          await joinRoom();
+        }catch(e){
+          logDiag("Auto sequence failed: " + (e?.message || e));
+        }
+      }, { once:true });
+    }
+  }else{
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
+    stopAll();
   }
 });
 
-/* Placeholder handlers (your real WebRTC logic belongs here) */
-startBtn.onclick = ()=> logDiag("Start clicked.");
-createBtn.onclick = ()=> logDiag("Create Room clicked.");
-joinBtn.onclick = ()=> logDiag("Join Room clicked.");
-stopBtn.onclick = ()=> logDiag("Stop clicked.");
+window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
 </script>
 </body>
 </html>
