@@ -103,6 +103,13 @@ function showError(e){
   errorBox.textContent=String(e?.stack||e);
   console.error(e);
 }
+
+function hideErrorBox(){
+  errorBox.style.display = "none";
+  errorBox.textContent = "";
+}
+
+  
 window.addEventListener("error",e=>showError(e.error||e.message||e));
 window.addEventListener("unhandledrejection",e=>showError(e.reason||e));
 
@@ -139,15 +146,40 @@ const emailInput=document.getElementById("emailInput");
 const passInput=document.getElementById("passInput");
 const appRoot=document.getElementById("app");
 
-loginBtn.onclick=async()=>{
-  loginStatus.textContent="Signing in…";
-  try{
+emailInput.addEventListener("input", hideErrorBox);
+passInput.addEventListener("input", hideErrorBox);
+
+  
+loginBtn.onclick = async () => {
+  loginStatus.textContent = "Signing in…";
+  hideErrorBox();
+
+  try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-  }catch(e){
-    loginStatus.textContent="Login failed. Check email/password.";
-    showError(e);
+  } catch (e) {
+    // Suppress the pink error box for common/expected login mistakes
+    const code = String(e?.code || "");
+    const msg =
+      code === "auth/invalid-credential" ? "Wrong email or password." :
+      code === "auth/user-not-found" ? "Wrong email or password." :
+      code === "auth/wrong-password" ? "Wrong email or password." :
+      code === "auth/invalid-email" ? "Invalid email address." :
+      code === "auth/missing-password" ? "Please enter your password." :
+      "Login failed. Please try again.";
+
+    loginStatus.textContent = msg;
+
+    // Only show pink box for unexpected errors
+    const expected = new Set([
+      "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
+      "auth/invalid-email","auth/missing-password","auth/too-many-requests"
+    ]);
+    if (!expected.has(code)) showError(e);
   }
 };
+
+
+  
 logoutBtn.onclick=async()=>{ try{ await signOut(auth); }catch(e){ showError(e); } };
 
 /* ---------- UI ---------- */
