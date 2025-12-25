@@ -173,7 +173,6 @@ function logDiag(msg){
     diagBox.textContent = diagLog.join("\n");
     diagBox.scrollTop = diagBox.scrollHeight;
   }
-  // enable buttons once we have anything
   copyDiagBtn.disabled = diagLog.length === 0;
   clearDiagBtn.disabled = diagLog.length === 0;
 }
@@ -191,6 +190,7 @@ clearDiagBtn.onclick = () => {
   if (diagVisible) diagBox.textContent = "";
   copyDiagBtn.disabled = true;
   clearDiagBtn.disabled = true;
+  // keep one line so you can see it worked
   logDiag("Diagnostics cleared.");
 };
 copyDiagBtn.onclick = async () => {
@@ -215,7 +215,6 @@ function hideErrorBox(){
   errorBox.textContent = "";
 }
 window.addEventListener("error", (e)=> {
-  // keep for real JS bugs
   showError(e.error || e.message || e);
 });
 window.addEventListener("unhandledrejection", (e)=> {
@@ -284,7 +283,6 @@ loginBtn.onclick = async () => {
     loginStatus.textContent = msg;
     logDiag(`Login failed (${code || "no-code"}): ${msg}`);
 
-    // only show pink box for unexpected errors
     if (!expected.has(code)) showError(e);
   }
 };
@@ -307,11 +305,10 @@ onAuthStateChanged(auth, (user)=>{
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    // enable copy if hash already present
     refreshCopyInviteState();
 
-    // keep browser-safe: we *don’t* auto-start camera without user gesture
-    // but we can attempt after first click anywhere
+    // browser-safe: don't auto-start camera without user gesture,
+    // but try after first click anywhere
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
   } else {
     loginOverlay.style.display = "flex";
@@ -322,10 +319,12 @@ onAuthStateChanged(auth, (user)=>{
 });
 
 /* ================== URL HASH ================== */
+let autoJoinAllowed = false; // ✅ auto-join only if opened from invite (#ROOM_ID)
 if (location.hash.length > 1) {
   roomIdInput.value = location.hash.slice(1);
   setStatus(callStatus, "Room ID detected in URL.");
   logDiag("Room ID from URL hash: " + roomIdInput.value);
+  autoJoinAllowed = true; // ✅ only invite links enable auto-join
 }
 
 /* ================== WEBRTC ================== */
@@ -390,10 +389,11 @@ function refreshCopyInviteState(){
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
 }
 
-/* ================== MEDIA ================== */
+/* ================== MEDIA + AUTOJOIN ================== */
 let startingPromise = null;
 let autoJoinDone = false;
 let autoJoinScheduled = false;
+let autoJoinTimer = null; // ✅ allow canceling pending auto-join
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
@@ -413,11 +413,11 @@ async function startMedia(opts={skipAutoJoin:false}){
     localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     localVideo.srcObject = localStream;
 
-    // ✅ Update immediately (this is what you’re missing in practice)
+    // Update immediately
     setStatus(mediaStatus,"Camera/mic started.");
     logDiag("Camera/mic started (stream attached).");
 
-    // ✅ Update again when video actually starts rendering
+    // Update again when video starts rendering
     localVideo.onloadedmetadata = async () => {
       try { await localVideo.play(); } catch {}
       setStatus(mediaStatus,"Camera/mic started.");
@@ -437,14 +437,18 @@ async function startMedia(opts={skipAutoJoin:false}){
 }
 
 function scheduleAutoJoin(){
+  if (!autoJoinAllowed) return; // ✅ DO NOTHING unless opened from invite hash
   if(autoJoinScheduled) return;
+
   autoJoinScheduled = true;
-  setTimeout(async ()=>{
+
+  if (autoJoinTimer) clearTimeout(autoJoinTimer);
+  autoJoinTimer = setTimeout(async ()=>{
     autoJoinScheduled = false;
+    autoJoinTimer = null;
     try{ await autoJoinIfNeeded(); }
     catch(e){
       setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
-      // showError only for unexpected errors; this is helpful for you
       showError(e);
     }
   }, 0);
@@ -522,8 +526,15 @@ async function createRoom(){
   if(!requireAuthOrPrompt()) return;
   await startMedia();
 
+  // ✅ Person A is creating a room — never auto-join as Person B
+  autoJoinAllowed = false;
+  autoJoinDone = true;
+  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
+  autoJoinScheduled = false;
+
   const myAttempt = ++createAttemptA;
   stopListeners(); // important: no stacked listeners
+  clearBRetry();
 
   let roomRef;
   const existing = roomIdInput.value.trim();
@@ -745,7 +756,6 @@ startBtn.onclick = async ()=>{
     await startMedia();
   }catch(e){
     const name = String(e?.name || "");
-    // do not spam pink box for normal permission errors
     if(name === "NotAllowedError" || name === "NotFoundError") return;
     showError(e);
   }
