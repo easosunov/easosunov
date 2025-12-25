@@ -238,7 +238,7 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ================== AUTH GATE ================== */
+/* ================== AUTH ================== */
 let isAuthed = false;
 
 function requireAuthOrPrompt(){
@@ -359,6 +359,20 @@ function clearBRetry(){
   if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
 }
 
+let joinInProgress = false;
+let autoJoinDone = false;
+
+function setJoiningUI(isJoining){
+  joinInProgress = isJoining;
+  joinBtn.disabled = isJoining || !isAuthed;
+  createBtn.disabled = (!isAuthed || !localStream) ? true : false;
+  if(isJoining){
+    logDiag("Join lock ON (prevent re-join spam).");
+  } else {
+    logDiag("Join lock OFF.");
+  }
+}
+
 function stopAll(){
   stopListeners();
   clearBRetry();
@@ -379,7 +393,7 @@ function stopAll(){
   setStatus(callStatus,"No room yet.");
 
   autoJoinDone = false;
-  joinInProgress = false;
+  setJoiningUI(false);
 
   refreshCopyInviteState();
 }
@@ -402,7 +416,7 @@ async function startMedia(){
     localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     localVideo.srcObject = localStream;
 
-    setStatus(mediaStatus,"Camera/mic started.");
+    setStatus(mediaStatus,"Camera/mic started (stream attached).");
     logDiag("Camera/mic started (stream attached).");
 
     localVideo.onloadedmetadata = async () => {
@@ -420,10 +434,7 @@ async function startMedia(){
   finally{ startingPromise = null; }
 }
 
-/* ================== AUTO-JOIN (ONE-SHOT) ================== */
-let autoJoinDone = false;
-let joinInProgress = false;
-
+/* ================== AUTO-JOIN (STRICT ONE-SHOT) ================== */
 async function autoJoinIfNeeded(){
   if(!openedFromInvite) return;
   if(autoJoinDone) return;
@@ -433,15 +444,11 @@ async function autoJoinIfNeeded(){
   autoJoinDone = true;
   setStatus(callStatus,"Auto-joining room…");
   logDiag("Auto-joining triggered.");
-
-  try{
-    await joinRoom({ isAuto:true });
-  }catch(e){
-    // soft fail; allow user to press Join
+  await joinRoom({ isAuto:true }).catch((e)=>{
     autoJoinDone = false;
     logDiag("Auto-join failed: " + (e?.message || e));
     setStatus(callStatus, "Auto-join failed. Click Join Room.");
-  }
+  });
 }
 
 /* ================== REJOIN SUPPORT ================== */
@@ -449,7 +456,6 @@ let lastSeenJoinRequestA = 0;
 let lastAnsweredSessionB = null;
 
 async function requestFreshOffer(roomRef){
-  // IMPORTANT: do not modify joinAttempt / do not do this inside offer handler
   await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
   logDiag("Requested fresh offer (joinRequest).");
 }
@@ -460,10 +466,8 @@ let createAttemptA = 0;
 async function createRoom(){
   if(!requireAuthOrPrompt()) return;
 
-  // Creating should stop any B-side join attempts
-  joinInProgress = false;
-  autoJoinDone = true; // prevent auto-join on A after hash changes
-
+  // Stop any join watcher before becoming host
+  setJoiningUI(false);
   stopListeners();
   clearBRetry();
 
@@ -558,131 +562,133 @@ let joinAttemptB = 0;
 
 async function joinRoom({isAuto=false} = {}){
   if(!requireAuthOrPrompt()) return;
-  if(joinInProgress) { logDiag("Join suppressed: already in progress."); return; }
 
-  joinInProgress = true;
+  // HARD GUARD: do not start another join while snapshot is active
+  if(joinInProgress){
+    logDiag("Join suppressed: already in progress.");
+    return;
+  }
+
+  setJoiningUI(true);
   const myAttempt = ++joinAttemptB;
 
-  try{
-    await startMedia();
+  await startMedia();
 
-    stopListeners();
-    clearBRetry();
+  stopListeners();
+  clearBRetry();
 
-    const roomId = roomIdInput.value.trim();
-    if(!roomId) throw new Error("Room ID is empty.");
-    location.hash = roomId;
+  const roomId = roomIdInput.value.trim();
+  if(!roomId){
+    setJoiningUI(false);
+    throw new Error("Room ID is empty.");
+  }
+  location.hash = roomId;
 
-    logDiag("JoinRoom: roomId=" + roomId);
+  logDiag("JoinRoom: roomId=" + roomId);
 
-    const roomRef = doc(db,"rooms", roomId);
+  const roomRef = doc(db,"rooms", roomId);
 
-    // ✅ request a fresh offer ONCE at start
-    await requestFreshOffer(roomRef);
+  // Request host to restart once at the beginning
+  await requestFreshOffer(roomRef);
 
-    setStatus(callStatus, "Waiting for host offer…");
-    logDiag("Waiting for room doc/offer via onSnapshot.");
+  setStatus(callStatus, "Waiting for host offer…");
+  logDiag("Waiting for room doc/offer via onSnapshot (no getDoc throw).");
 
-    const waitStartedAt = Date.now();
-    const WAIT_LIMIT_MS = 30000;
+  const waitStartedAt = Date.now();
+  const WAIT_LIMIT_MS = 30000;
 
-    unsubRoomB = onSnapshot(roomRef, async (snap)=>{
+  unsubRoomB = onSnapshot(roomRef, async (snap)=>{
+    if(myAttempt !== joinAttemptB) return;
+
+    if(!snap.exists()){
+      const elapsed = Date.now() - waitStartedAt;
+      setStatus(callStatus, elapsed > WAIT_LIMIT_MS
+        ? "Still waiting… host has not created the room yet."
+        : "Waiting for host to create the room…");
+      return;
+    }
+
+    const d = snap.data();
+    if(!d?.offer || !d.session){
+      const elapsed = Date.now() - waitStartedAt;
+      setStatus(callStatus, elapsed > WAIT_LIMIT_MS
+        ? "Room exists, but offer not ready yet…"
+        : "Room found. Waiting for offer…");
+      return;
+    }
+
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+    logDiag("Offer/session detected: " + session);
+
+    try{
+      ensurePeer();
+
+      const caller = collection(roomRef,"callerCandidates");
+      const callee = collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
       if(myAttempt !== joinAttemptB) return;
 
-      if(!snap.exists()){
-        const elapsed = Date.now() - waitStartedAt;
-        setStatus(callStatus, elapsed > WAIT_LIMIT_MS
-          ? "Still waiting… host has not created the room yet."
-          : "Waiting for host to create the room…");
-        return;
-      }
+      pc.onicecandidate = (e)=>{
+        if(e.candidate){
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+        }
+      };
 
-      const d = snap.data();
-      if(!d?.offer || !d.session){
-        const elapsed = Date.now() - waitStartedAt;
-        setStatus(callStatus, elapsed > WAIT_LIMIT_MS
-          ? "Room exists, but offer not ready yet…"
-          : "Room found. Waiting for offer…");
-        return;
-      }
+      await pc.setRemoteDescription(d.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
 
-      if(lastAnsweredSessionB === d.session) return;
+      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
 
-      const session = d.session;
-      lastAnsweredSessionB = session;
-      logDiag("Offer/session detected: " + session);
+      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      logDiag("Answer written to room doc.");
 
-      try{
-        ensurePeer();
-
-        const caller = collection(roomRef,"callerCandidates");
-        const callee = collection(roomRef,"calleeCandidates");
-
-        await clearSub(callee);
+      if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+      unsubCallerB = onSnapshot(caller, (ss)=>{
         if(myAttempt !== joinAttemptB) return;
-
-        pc.onicecandidate = (e)=>{
-          if(e.candidate){
-            addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
-          }
-        };
-
-        await pc.setRemoteDescription(d.offer);
-        const ans = await pc.createAnswer();
-        await pc.setLocalDescription(ans);
-
-        await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
-
-        setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
-        logDiag("Answer written to room doc.");
-
-        if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-        unsubCallerB = onSnapshot(caller, (ss)=>{
-          if(myAttempt !== joinAttemptB) return;
-          ss.docChanges().forEach(ch=>{
-            if(ch.type !== "added" || !pc) return;
-            const c = ch.doc.data();
-            if(c.session !== session) return;
-            try{ pc.addIceCandidate(c); }catch{}
-          });
+        ss.docChanges().forEach(ch=>{
+          if(ch.type !== "added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
         });
+      });
 
-        clearBRetry();
-        bRetryTimer = setTimeout(async ()=>{
-          if(myAttempt !== joinAttemptB) return;
-          if(!pc) return;
-          if(pc.connectionState === "connected") return;
+      // When connected, we can release the join lock
+      pc.onconnectionstatechange = ()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        if(pc.connectionState === "connected"){
+          logDiag("B connected => releasing join lock.");
+          setJoiningUI(false);
+          clearBRetry();
+        }
+      };
 
-          setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
-          logDiag("Watchdog: requesting fresh offer again.");
-          lastAnsweredSessionB = null;
-          try{ await requestFreshOffer(roomRef); }catch(e){ showError(e); }
-        }, 10000);
+      // Watchdog: if not connected, ask again (does NOT restart joinRoom)
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
 
-        pc.onconnectionstatechange = async ()=>{
-          if(myAttempt !== joinAttemptB || !pc) return;
-          setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
-          if(pc.connectionState === "connected"){ clearBRetry(); }
-          if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
-            setStatus(callStatus, "Connection lost — requesting new offer…");
-            logDiag("Connection lost => requesting fresh offer.");
-            lastAnsweredSessionB = null;
-            try{ await requestFreshOffer(roomRef); }catch(e){ showError(e); }
-          }
-        };
-
-      }catch(e){
+        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
+        logDiag("Watchdog: requesting fresh offer again.");
         lastAnsweredSessionB = null;
-        logDiag("Join flow error: " + (e?.message || e));
-        setStatus(callStatus, "Join failed — waiting / retrying…");
-      }
-    });
+        try{ await requestFreshOffer(roomRef); }catch(e){ showError(e); }
+      }, 10000);
 
-  } finally {
-    // keep joinInProgress true while snapshot is active; release only if user stops
-    // But do release if this was a quick error before snapshot setup.
-    setTimeout(()=>{ if(myAttempt === joinAttemptB) joinInProgress = false; }, 1000);
-  }
+    }catch(e){
+      lastAnsweredSessionB = null;
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(callStatus, "Join failed — waiting / retrying…");
+      // do NOT call joinRoom again; keep snapshot alive
+    }
+  });
 }
 
 /* ================== COPY INVITE ================== */
@@ -703,7 +709,7 @@ copyLinkBtn.onclick = async ()=>{
   logDiag("Copy invite clicked.");
 };
 
-/* ================== BUTTON WIRING ================== */
+/* ================== BUTTONS ================== */
 startBtn.onclick = async ()=>{
   try{
     hideErrorBox();
@@ -738,8 +744,7 @@ onAuthStateChanged(auth, (user)=>{
 
     refreshCopyInviteState();
 
-    // ✅ Auto-join after auth if opened from invite:
-    // (No "click anywhere" handler; avoids repeated joins)
+    // Auto-join once after auth (no repeated joins)
     setTimeout(()=> autoJoinIfNeeded().catch(()=>{}), 0);
 
   } else {
@@ -749,9 +754,6 @@ onAuthStateChanged(auth, (user)=>{
     stopAll();
   }
 });
-
-/* ================== LOGOUT ================== */
-logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
 /* cleanup */
 window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
