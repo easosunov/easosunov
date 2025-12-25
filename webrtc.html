@@ -6,18 +6,19 @@
 <title>2-Person Video/Sound Communicator (WebRTC)</title>
 
 <script>
-/* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
-const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
-(function forceCacheBust(){
+/* ========= HARD FORCE LATEST BUILD ========= */
+const BUILD = "2025-12-26T00:05Z-MEMORY-CACHE-WRITE-TEST";
+(function hardForceLatest(){
   try{
-    const params = new URLSearchParams(location.search);
-    const v = params.get("v");
-    if (v !== BUILD) {
-      params.set("v", BUILD);
-      const newUrl = `${location.origin}${location.pathname}?${params.toString()}${location.hash || ""}`;
-      location.replace(newUrl);
+    const u = new URL(location.href);
+    const v = u.searchParams.get("v");
+    const r = u.searchParams.get("r");
+    if (v !== BUILD || !r) {
+      u.searchParams.set("v", BUILD);
+      u.searchParams.set("r", String(Date.now()));
+      location.replace(u.toString());
     }
-  } catch {}
+  }catch{}
 })();
 </script>
 
@@ -35,11 +36,17 @@ const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
   .status{font-size:13px;margin-top:8px}
   .small{font-size:12px;color:#555;margin-top:6px}
   code{background:#f2f2f2;padding:1px 6px;border-radius:6px}
+  .badge{display:inline-block;padding:2px 8px;border:1px solid #ddd;border-radius:999px;font-size:12px;color:#333;background:#fafafa}
 
   #errorBox{
     display:none;margin:12px 0;padding:10px;
     border:1px solid #f3b5b5;background:#fff5f5;
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
+  }
+  #warnBox{
+    display:none;margin:12px 0;padding:10px;
+    border:2px solid #c50000;background:#fff0f0;
+    color:#7a0000;border-radius:12px;white-space:pre-wrap
   }
 
   #loginOverlay{
@@ -60,7 +67,7 @@ const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:300px;
+    max-height:320px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -70,12 +77,12 @@ const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
     white-space:pre-wrap;
   }
   .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-  .badge{display:inline-block;padding:2px 8px;border:1px solid #ddd;border-radius:999px;font-size:12px;color:#333;background:#fafafa}
 </style>
 </head>
 
 <body>
 <h1>2-Person Video/Sound Communicator (WebRTC) <span id="buildBadge" class="badge"></span></h1>
+<div id="warnBox"></div>
 <div id="errorBox"></div>
 
 <!-- LOGIN -->
@@ -131,7 +138,7 @@ const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
         <button id="copyLinkBtn" disabled>Copy Invite</button>
       </div>
       <div class="status" id="callStatus">No room yet.</div>
-      <div class="small">Invite format: <code>.../webrtc.html?v=BUILD#ROOM_ID</code></div>
+      <div class="small">Invite format: <code>.../webrtc.html?v=BUILD&r=RANDOM#ROOM_ID</code></div>
     </div>
   </div>
 
@@ -147,9 +154,25 @@ const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
 </div>
 
 <script type="module">
-/* ================== UI / DIAGNOSTICS ================== */
+/* ================== BUILD / WRONG BUILD WARNING ================== */
 document.getElementById("buildBadge").textContent = "BUILD " + BUILD;
+const warnBox = document.getElementById("warnBox");
+(function showWrongBuild(){
+  try{
+    const u = new URL(location.href);
+    const v = u.searchParams.get("v");
+    const r = u.searchParams.get("r");
+    if (v !== BUILD || !r) {
+      warnBox.style.display = "block";
+      warnBox.textContent =
+        "WRONG BUILD (should not happen after redirect)\n" +
+        "Expected v=" + BUILD + " with r=<random>\n" +
+        "Actual   v=" + (v ?? "(missing)") + " r=" + (r ?? "(missing)");
+    }
+  }catch{}
+})();
 
+/* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
 const loginOverlay = document.getElementById("loginOverlay");
 const loginBtn = document.getElementById("loginBtn");
@@ -176,6 +199,7 @@ const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
 const setStatus = (el,msg)=> el.textContent = msg;
 
+/* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
 const diagLog = [];
 function logDiag(msg){
@@ -219,6 +243,7 @@ copyDiagBtn.onclick = async () => {
   catch{ window.prompt("Copy diagnostics:", text); }
 };
 
+/* ================== ERROR HANDLING ================== */
 function showError(e){
   errorBox.style.display = "block";
   errorBox.textContent = String(e?.stack || e?.message || e);
@@ -240,10 +265,11 @@ function withTimeout(promise, ms, label){
   ]);
 }
 
-/* ================== FIREBASE (FORCE LONG POLLING) ================== */
+/* ================== FIREBASE (MEMORY CACHE + LONG POLLING) ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  initializeFirestore, getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  initializeFirestore, memoryLocalCache,
+  doc, collection, addDoc, setDoc, getDoc, updateDoc,
   onSnapshot, getDocs, writeBatch,
   getDocFromServer, enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
@@ -260,12 +286,12 @@ const fbApp = initializeApp({
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
 
-// Force long-polling (helps in many “writes hang / snapshots weird” environments)
 const db = initializeFirestore(fbApp, {
+  localCache: memoryLocalCache(),            // ✅ no IndexedDB
   experimentalForceLongPolling: true,
   useFetchStreams: false
 });
-logDiag("Firestore init: experimentalForceLongPolling=true");
+logDiag("Firestore init: memoryLocalCache + experimentalForceLongPolling=true");
 
 const auth = getAuth(fbApp);
 
@@ -424,6 +450,54 @@ function stopAll(){
 }
 stopBtn.onclick = ()=> stopAll();
 
+/* ================== WRITE TEST (AUTO) ==================
+   This is the crucial probe. If THIS still times out, you have a network block
+   or an environment that cannot reach Firestore write endpoints.
+*/
+async function runWriteTest(){
+  if(!auth.currentUser) return;
+  const uid = auth.currentUser.uid;
+  const pingRef = doc(db, "diag", "ping_" + uid);
+  try{
+    logDiag("WRITE TEST: setDoc(diag/ping_<uid>)...");
+    await withTimeout(setDoc(pingRef, { t: Date.now(), build: BUILD }, { merge:true }), 8000, "writeTest:setDoc");
+    logDiag("WRITE TEST: setDoc resolved.");
+  }catch(e){
+    logDiag("WRITE TEST FAILED: " + (e?.message || e));
+    warnBox.style.display = "block";
+    warnBox.textContent =
+      "🚫 Firestore WRITES are failing/hanging in this browser/network.\n\n" +
+      "We tried to write diag/ping_<uid> and it timed out.\n\n" +
+      "Common causes:\n" +
+      "• Safari private mode / blocked storage (IndexedDB)\n" +
+      "• VPN / firewall / adblock blocking Google Firestore endpoints\n" +
+      "• Corporate network restrictions\n\n" +
+      "Try: different browser (Chrome), disable VPN/adblock, or different network/hotspot.\n\n" +
+      "Details: " + (e?.message || e);
+    return;
+  }
+
+  try{
+    logDiag("WRITE TEST: getDocFromServer(diag/ping_<uid>)...");
+    const s = await withTimeout(getDocFromServer(pingRef), 8000, "writeTest:getDocFromServer");
+    logDiag("WRITE TEST: server verify exists=" + s.exists());
+    if(!s.exists()){
+      warnBox.style.display = "block";
+      warnBox.textContent =
+        "⚠️ Firestore write resolved locally but server verify says doc does NOT exist.\n" +
+        "This indicates the client cannot reach Firestore servers reliably.";
+    }
+  }catch(e){
+    logDiag("WRITE TEST server verify FAILED: " + (e?.message || e));
+    warnBox.style.display = "block";
+    warnBox.textContent =
+      "⚠️ Firestore server verify failed.\n\n" +
+      "Writes may be queued locally, but server is unreachable.\n\n" +
+      "Try: disable VPN/adblock or use another network.\n\n" +
+      "Details: " + (e?.message || e);
+  }
+}
+
 /* ================== Guest nudge (must not create) ================== */
 async function nudgeHostUpdateOnly(roomRef){
   try{
@@ -431,7 +505,7 @@ async function nudgeHostUpdateOnly(roomRef){
     logDiag("Nudged host (joinRequest via updateDoc).");
     return true;
   }catch(e){
-    logDiag("Nudge skipped (room not created yet): " + (e?.code || e?.message || e));
+    logDiag("Nudge skipped (room not created yet): " + (e?.message || e));
     return false;
   }
 }
@@ -462,15 +536,14 @@ async function createRoom(){
   const caller = collection(roomRef,"callerCandidates");
   const callee = collection(roomRef,"calleeCandidates");
 
-  // Force Firestore network on
   try{
     await withTimeout(enableNetwork(db), 6000, "enableNetwork()");
     logDiag("enableNetwork() OK");
   }catch(e){
-    logDiag("WARN: enableNetwork failed: " + (e?.code || e?.message || e));
+    logDiag("WARN: enableNetwork failed: " + (e?.message || e));
   }
 
-  // EARLY room doc write + server verify (this is where you are currently hanging)
+  // EARLY room doc write + server verify
   try{
     logDiag("HOST writing early room doc...");
     await withTimeout(setDoc(roomRef, {
@@ -478,17 +551,15 @@ async function createRoom(){
       build: BUILD,
       updatedAt: Date.now(),
       hostUid: auth.currentUser?.uid || null
-    }, { merge:true }), 8000, "setDoc(room early)");
+    }, { merge:true }), 12000, "setDoc(room early)");
 
     logDiag("HOST early setDoc resolved.");
 
-    // Verify it exists on server (NOT just local cache)
     logDiag("HOST verifying room exists on SERVER...");
-    const s = await withTimeout(getDocFromServer(roomRef), 8000, "getDocFromServer(room)");
+    const s = await withTimeout(getDocFromServer(roomRef), 12000, "getDocFromServer(room)");
     logDiag("HOST server verify: exists=" + s.exists());
-
   }catch(e){
-    logDiag("HOST FAILED early room write/verify: " + (e?.code || e?.message || e));
+    logDiag("HOST FAILED early room write/verify: " + (e?.message || e));
     showError(e);
     return;
   }
@@ -501,7 +572,7 @@ async function createRoom(){
     session = Number(prev) + 1;
     logDiag("HOST computed session=" + session);
   }catch(e){
-    logDiag("WARN: HOST getDoc(session) failed: " + (e?.code || e?.message || e));
+    logDiag("WARN: HOST getDoc(session) failed: " + (e?.message || e));
   }
 
   await clearSubBestEffort(caller);
@@ -512,7 +583,7 @@ async function createRoom(){
   pc.onicecandidate = (e)=>{
     if(e.candidate){
       addDoc(caller, { session, ...e.candidate.toJSON() }).catch((err)=>{
-        logDiag("WARN: addDoc(callerCandidate) failed: " + (err?.code || err?.message || err));
+        logDiag("WARN: addDoc(callerCandidate) failed: " + (err?.message || err));
       });
     }
   };
@@ -530,12 +601,12 @@ async function createRoom(){
       offer: { type: offer.type, sdp: offer.sdp },
       answer: null,
       updatedAt: Date.now()
-    }, { merge:true }), 8000, "setDoc(room offer)");
+    }, { merge:true }), 12000, "setDoc(room offer)");
 
     logDiag("HOST wrote offer+session to room doc. session=" + session);
     setStatus(callStatus, `Room active (session ${session}). Send invite to B.`);
   }catch(e){
-    logDiag("HOST FAILED writing offer/session: " + (e?.code || e?.message || e));
+    logDiag("HOST FAILED writing offer/session: " + (e?.message || e));
     showError(e);
     return;
   }
@@ -565,7 +636,7 @@ async function createRoom(){
         }
       }
     },
-    (err)=>{ logDiag("HOST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err)); showError(err); }
+    (err)=>{ logDiag("HOST SNAPSHOT ERROR(room): " + (err?.message || err)); showError(err); }
   );
 
   unsubCalleeA = onSnapshot(
@@ -578,7 +649,7 @@ async function createRoom(){
         try{ pc.addIceCandidate(c); }catch{}
       });
     },
-    (err)=>{ logDiag("HOST SNAPSHOT ERROR(calleeCandidates): " + (err?.code || err?.message || err)); showError(err); }
+    (err)=>{ logDiag("HOST SNAPSHOT ERROR(calleeCandidates): " + (err?.message || err)); showError(err); }
   );
 }
 
@@ -645,7 +716,7 @@ async function joinRoom(){
         pc.onicecandidate = (e)=>{
           if(e.candidate){
             addDoc(callee, { session: d.session, ...e.candidate.toJSON() }).catch((err)=>{
-              logDiag("WARN: addDoc(calleeCandidate) failed: " + (err?.code || err?.message || err));
+              logDiag("WARN: addDoc(calleeCandidate) failed: " + (err?.message || err));
             });
           }
         };
@@ -654,7 +725,7 @@ async function joinRoom(){
         const ans = await pc.createAnswer();
         await pc.setLocalDescription(ans);
 
-        await withTimeout(updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now(), state:"answered" }), 8000, "updateDoc(answer)");
+        await withTimeout(updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now(), state:"answered" }), 12000, "updateDoc(answer)");
 
         setStatus(callStatus, `Joined room. Connecting… (session ${d.session})`);
         logDiag("GUEST wrote answer.");
@@ -670,7 +741,7 @@ async function joinRoom(){
               try{ pc.addIceCandidate(c); }catch{}
             });
           },
-          (err)=>{ logDiag("GUEST SNAPSHOT ERROR(callerCandidates): " + (err?.code || err?.message || err)); showError(err); }
+          (err)=>{ logDiag("GUEST SNAPSHOT ERROR(callerCandidates): " + (err?.message || err)); showError(err); }
         );
 
         pc.onconnectionstatechange = ()=>{
@@ -684,12 +755,12 @@ async function joinRoom(){
 
       }catch(e){
         lastAnsweredSessionB = null;
-        logDiag("GUEST join error: " + (e?.code || e?.message || e));
+        logDiag("GUEST join error: " + (e?.message || e));
         setStatus(callStatus, "Join error — waiting / retrying…");
       }
     },
     (err)=>{
-      logDiag("GUEST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err));
+      logDiag("GUEST SNAPSHOT ERROR(room): " + (err?.message || err));
       setStatus(callStatus, "Firestore listener error (see diagnostics).");
       showError(err);
       joinInProgress = false;
@@ -699,7 +770,7 @@ async function joinRoom(){
   nudgeHostUpdateOnly(roomRef).catch(()=>{});
 }
 
-/* ================== COPY INVITE ================== */
+/* ================== COPY INVITE (ALWAYS FRESH) ================== */
 async function copyTextRobust(text){
   if(navigator.clipboard && window.isSecureContext){
     try{ await navigator.clipboard.writeText(text); return true; }catch{}
@@ -710,10 +781,10 @@ async function copyTextRobust(text){
 copyLinkBtn.onclick = async ()=>{
   const roomId = roomIdInput.value.trim();
   if(!roomId) return;
-  const invite = `${location.origin}${location.pathname}?v=${encodeURIComponent(BUILD)}#${roomId}`;
+  const invite = `${location.origin}${location.pathname}?v=${encodeURIComponent(BUILD)}&r=${Date.now()}#${roomId}`;
   const ok = await copyTextRobust(invite);
-  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
-  logDiag("Invite copied: includes ?v=" + BUILD);
+  setStatus(callStatus, ok ? "Invite copied (fresh cache-bust)." : "Clipboard blocked — link shown for manual copy.");
+  logDiag("Invite copied: v=" + BUILD + " r=<now>");
 };
 
 /* ================== BUTTONS ================== */
@@ -739,6 +810,9 @@ onAuthStateChanged(auth, (user)=>{
 
     setStatus(mediaStatus, "Ready. Click Start.");
     refreshCopyInviteState();
+
+    // 🔥 auto write test right after auth
+    setTimeout(()=>runWriteTest().catch(()=>{}), 0);
 
     if(openedFromInvite){
       setStatus(callStatus, "Invite detected. Click Start (or Join) to connect.");
