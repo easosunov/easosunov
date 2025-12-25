@@ -6,10 +6,8 @@
 <title>2-Person Video/Sound Communicator (WebRTC)</title>
 
 <script>
-/* ===== FORCE LATEST HTML (CACHE-BUST) =====
-   If someone opens without the right ?v=BUILD, we force-reload.
-*/
-const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
+/* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
+const BUILD = "2025-12-25T23:10Z-HOST-EARLY-ROOMDOC-LOG-WRITES";
 (function forceCacheBust(){
   try{
     const params = new URLSearchParams(location.search);
@@ -44,12 +42,6 @@ const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
   }
 
-  #cacheWarn{
-    display:none;margin:12px 0;padding:10px;
-    border:2px solid #c50000;background:#fff0f0;
-    color:#7a0000;border-radius:12px;white-space:pre-wrap
-  }
-
   #loginOverlay{
     position:fixed; inset:0; z-index:9999;
     background:rgba(0,0,0,.55);
@@ -68,7 +60,7 @@ const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:260px;
+    max-height:280px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -84,8 +76,6 @@ const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
 
 <body>
 <h1>2-Person Video/Sound Communicator (WebRTC) <span id="buildBadge" class="badge"></span></h1>
-
-<div id="cacheWarn"></div>
 <div id="errorBox"></div>
 
 <!-- LOGIN -->
@@ -157,27 +147,10 @@ const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
 </div>
 
 <script type="module">
-/* ================== BUILD / CACHE WARNING ================== */
+/* ================== UI / DIAGNOSTICS ================== */
 document.getElementById("buildBadge").textContent = "BUILD " + BUILD;
 
-const cacheWarn = document.getElementById("cacheWarn");
-(function showCacheWarningIfNeeded(){
-  try{
-    const v = new URLSearchParams(location.search).get("v");
-    if (v !== BUILD){
-      cacheWarn.style.display = "block";
-      cacheWarn.textContent =
-        "WARNING: This tab is NOT on the latest build.\n" +
-        "Expected ?v=" + BUILD + "\n" +
-        "Actual   ?v=" + (v ?? "(missing)") + "\n\n" +
-        "Close all tabs and open the invite link again.";
-    }
-  }catch{}
-})();
-
-/* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
-
 const loginOverlay = document.getElementById("loginOverlay");
 const loginBtn = document.getElementById("loginBtn");
 const logoutBtn = document.getElementById("logoutBtn");
@@ -201,10 +174,8 @@ const diagBtn = document.getElementById("diagBtn");
 const diagBox = document.getElementById("diagBox");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
-
 const setStatus = (el,msg)=> el.textContent = msg;
 
-/* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
 const diagLog = [];
 function logDiag(msg){
@@ -244,16 +215,12 @@ copyDiagBtn.onclick = async () => {
   catch{ window.prompt("Copy diagnostics:", text); }
 };
 
-/* ================== ERROR HANDLING ================== */
 function showError(e){
   errorBox.style.display = "block";
   errorBox.textContent = String(e?.stack || e?.message || e);
-  logDiag("ERROR: " + String(e?.message || e));
+  logDiag("ERROR: " + String(e?.code || e?.message || e));
 }
-function hideErrorBox(){
-  errorBox.style.display = "none";
-  errorBox.textContent = "";
-}
+function hideErrorBox(){ errorBox.style.display="none"; errorBox.textContent=""; }
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
 
@@ -261,7 +228,7 @@ window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch
+  onSnapshot, getDocs, writeBatch, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
@@ -347,13 +314,18 @@ function ensurePeer(){
 }
 
 /* ================== FIRESTORE HELPERS ================== */
-async function clearSub(col){
-  const s = await getDocs(col);
-  if(s.empty) return;
-  const b = writeBatch(db);
-  s.forEach(d=>b.delete(d.ref));
-  await b.commit();
-  logDiag(`Cleared ${col.path} docs=${s.size}`);
+async function clearSubBestEffort(col){
+  try{
+    const s = await getDocs(col);
+    if(s.empty) return;
+    const b = writeBatch(db);
+    s.forEach(d=>b.delete(d.ref));
+    await b.commit();
+    logDiag(`Cleared ${col.path} docs=${s.size}`);
+  }catch(e){
+    logDiag(`WARN: clearSub blocked for ${col.path}: ` + (e?.code || e?.message || e));
+    // continue
+  }
 }
 
 /* ================== UI HELPERS ================== */
@@ -467,69 +439,119 @@ async function createRoom(){
   const caller = collection(roomRef,"callerCandidates");
   const callee = collection(roomRef,"calleeCandidates");
 
-  const snap = await getDoc(roomRef);
-  const prev = snap.exists() ? (snap.data().session || 0) : 0;
-  const session = Number(prev) + 1;
+  // Create room doc EARLY so guest sees exists=true immediately
+  try{
+    await setDoc(roomRef, {
+      state: "creating",
+      build: BUILD,
+      updatedAt: Date.now(),
+      createdAt: serverTimestamp(),
+      hostUid: auth.currentUser?.uid || null
+    }, { merge:true });
+    logDiag("HOST wrote early room doc (state=creating).");
+  }catch(e){
+    logDiag("HOST FAILED early setDoc(room): " + (e?.code || e?.message || e));
+    showError(e);
+    return;
+  }
 
-  if(myAttempt !== createAttemptA) return;
+  // Bump session number (best effort)
+  let session = 1;
+  try{
+    const snap = await getDoc(roomRef);
+    const prev = snap.exists() ? (snap.data().session || 0) : 0;
+    session = Number(prev) + 1;
+    logDiag("HOST computed session=" + session);
+  }catch(e){
+    logDiag("WARN: HOST getDoc(session) failed: " + (e?.code || e?.message || e));
+  }
 
-  await clearSub(caller);
-  await clearSub(callee);
+  await clearSubBestEffort(caller);
+  await clearSubBestEffort(callee);
 
-  ensurePeer();
+  try{
+    ensurePeer();
+  }catch(e){
+    showError(e);
+    return;
+  }
 
   pc.onicecandidate = (e)=>{
     if(e.candidate){
-      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch((err)=>{
+        logDiag("WARN: addDoc(callerCandidate) failed: " + (err?.code || err?.message || err));
+      });
     }
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
+  try{
+    logDiag("HOST creating offer…");
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    logDiag("HOST setLocalDescription(offer) OK.");
 
-  // Overwrite/merge: either way, offer+session MUST exist after this.
-  await setDoc(roomRef, {
-    session,
-    offer: { type: offer.type, sdp: offer.sdp },
-    answer: null,
-    updatedAt: Date.now()
-  }, { merge:true });
+    await setDoc(roomRef, {
+      state: "offered",
+      session,
+      offer: { type: offer.type, sdp: offer.sdp },
+      answer: null,
+      updatedAt: Date.now()
+    }, { merge:true });
 
-  setStatus(callStatus, `Room active (session ${session}). Send invite to B.`);
-  logDiag("HOST wrote offer. session=" + session);
+    logDiag("HOST wrote offer+session to room doc. session=" + session);
+    setStatus(callStatus, `Room active (session ${session}). Send invite to B.`);
+  }catch(e){
+    logDiag("HOST FAILED writing offer/session: " + (e?.code || e?.message || e));
+    showError(e);
+    return;
+  }
 
-  unsubRoomA = onSnapshot(roomRef, async (s)=>{
-    if(myAttempt !== createAttemptA) return;
-    const d = s.data();
-    if(!d) return;
+  unsubRoomA = onSnapshot(
+    roomRef,
+    async (s)=>{
+      if(myAttempt !== createAttemptA) return;
+      const d = s.data();
+      if(!d) return;
 
-    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
-      lastSeenJoinRequestA = d.joinRequest;
-      setStatus(callStatus, "Join request received — restarting session…");
-      logDiag("HOST saw joinRequest => restarting offer/session.");
-      setTimeout(()=>createRoom().catch(()=>{}), 150);
-      return;
-    }
-
-    if(d.answer && d.session === session && pc && pc.signalingState==="have-local-offer" && !pc.currentRemoteDescription){
-      try{
-        await pc.setRemoteDescription(d.answer);
-        setStatus(callStatus, `Connected (session ${session}).`);
-        logDiag("HOST applied answer.");
-      }catch(e){
-        logDiag("HOST apply answer failed: " + (e?.message || e));
+      if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+        lastSeenJoinRequestA = d.joinRequest;
+        setStatus(callStatus, "Join request received — restarting session…");
+        logDiag("HOST saw joinRequest => restarting offer/session.");
+        setTimeout(()=>createRoom().catch(()=>{}), 150);
+        return;
       }
-    }
-  });
 
-  unsubCalleeA = onSnapshot(callee, (ss)=>{
-    ss.docChanges().forEach(ch=>{
-      if(ch.type!=="added" || !pc) return;
-      const c = ch.doc.data();
-      if(c.session !== session) return;
-      try{ pc.addIceCandidate(c); }catch{}
-    });
-  });
+      if(d.answer && d.session === session && pc && pc.signalingState==="have-local-offer" && !pc.currentRemoteDescription){
+        try{
+          await pc.setRemoteDescription(d.answer);
+          setStatus(callStatus, `Connected (session ${session}).`);
+          logDiag("HOST applied answer.");
+        }catch(e){
+          logDiag("HOST apply answer failed: " + (e?.message || e));
+        }
+      }
+    },
+    (err)=>{
+      logDiag("HOST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err));
+      showError(err);
+    }
+  );
+
+  unsubCalleeA = onSnapshot(
+    callee,
+    (ss)=>{
+      ss.docChanges().forEach(ch=>{
+        if(ch.type!=="added" || !pc) return;
+        const c = ch.doc.data();
+        if(c.session !== session) return;
+        try{ pc.addIceCandidate(c); }catch{}
+      });
+    },
+    (err)=>{
+      logDiag("HOST SNAPSHOT ERROR(calleeCandidates): " + (err?.code || err?.message || err));
+      showError(err);
+    }
+  );
 }
 
 /* ================== GUEST ================== */
@@ -558,7 +580,7 @@ async function joinRoom(){
   stopListeners();
   location.hash = roomId;
 
-  setStatus(callStatus, "Waiting for host to create the room…");
+  setStatus(callStatus, "Waiting for host / offer…");
   logDiag("GUEST joinRoom: roomId=" + roomId);
   logDiag("GUEST installing onSnapshot(roomRef)…");
 
@@ -568,17 +590,16 @@ async function joinRoom(){
       if(myAttempt !== joinAttemptB) return;
 
       logDiag("GUEST room snapshot: exists=" + snap.exists());
-
       if(!snap.exists()){
         setStatus(callStatus, "Waiting for host to create the room…");
         return;
       }
 
       const d = snap.data() || {};
-      logDiag(`GUEST room data: hasOffer=${!!d.offer} session=${d.session ?? "none"}`);
+      logDiag(`GUEST room data: state=${d.state ?? "none"} hasOffer=${!!d.offer} session=${d.session ?? "none"}`);
 
       if(!d.offer || !d.session){
-        setStatus(callStatus, "Room exists but has NO offer/session. Host must click Start then Create Room.");
+        setStatus(callStatus, "Room exists. Waiting for host offer/session…");
         return;
       }
 
@@ -591,12 +612,14 @@ async function joinRoom(){
         const caller = collection(roomRef,"callerCandidates");
         const callee = collection(roomRef,"calleeCandidates");
 
-        await clearSub(callee);
+        await clearSubBestEffort(callee);
         if(myAttempt !== joinAttemptB) return;
 
         pc.onicecandidate = (e)=>{
           if(e.candidate){
-            addDoc(callee, { session: d.session, ...e.candidate.toJSON() }).catch(()=>{});
+            addDoc(callee, { session: d.session, ...e.candidate.toJSON() }).catch((err)=>{
+              logDiag("WARN: addDoc(calleeCandidate) failed: " + (err?.code || err?.message || err));
+            });
           }
         };
 
@@ -604,21 +627,27 @@ async function joinRoom(){
         const ans = await pc.createAnswer();
         await pc.setLocalDescription(ans);
 
-        await updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now() });
+        await updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now(), state:"answered" });
 
         setStatus(callStatus, `Joined room. Connecting… (session ${d.session})`);
         logDiag("GUEST wrote answer.");
 
         if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-        unsubCallerB = onSnapshot(caller, (ss)=>{
-          if(myAttempt !== joinAttemptB) return;
-          ss.docChanges().forEach(ch=>{
-            if(ch.type!=="added" || !pc) return;
-            const c = ch.doc.data();
-            if(c.session !== d.session) return;
-            try{ pc.addIceCandidate(c); }catch{}
-          });
-        });
+        unsubCallerB = onSnapshot(
+          caller,
+          (ss)=>{
+            ss.docChanges().forEach(ch=>{
+              if(ch.type!=="added" || !pc) return;
+              const c = ch.doc.data();
+              if(c.session !== d.session) return;
+              try{ pc.addIceCandidate(c); }catch{}
+            });
+          },
+          (err)=>{
+            logDiag("GUEST SNAPSHOT ERROR(callerCandidates): " + (err?.code || err?.message || err));
+            showError(err);
+          }
+        );
 
         pc.onconnectionstatechange = ()=>{
           if(myAttempt !== joinAttemptB || !pc) return;
@@ -631,19 +660,19 @@ async function joinRoom(){
 
       }catch(e){
         lastAnsweredSessionB = null;
-        logDiag("GUEST join error: " + (e?.message || e));
+        logDiag("GUEST join error: " + (e?.code || e?.message || e));
         setStatus(callStatus, "Join error — waiting / retrying…");
       }
     },
     (err)=>{
-      logDiag("GUEST SNAPSHOT ERROR: " + (err?.message || err));
+      logDiag("GUEST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err));
       setStatus(callStatus, "Firestore listener error (see diagnostics).");
       showError(err);
       joinInProgress = false;
     }
   );
 
-  // Try nudge, but updateDoc-only (will NOT create doc)
+  // Nudge host (updateDoc-only). Now that host creates doc early, this should usually succeed.
   nudgeHostUpdateOnly(roomRef).catch(()=>{});
 }
 
@@ -692,12 +721,8 @@ onAuthStateChanged(auth, (user)=>{
       setStatus(callStatus, "Invite detected. Click Start (or Join) to connect.");
       logDiag("Invite mode: waiting for user gesture to start media.");
       window.addEventListener("click", async ()=>{
-        try{
-          await startMedia();
-          await joinRoom();
-        }catch(e){
-          logDiag("Auto sequence failed: " + (e?.message || e));
-        }
+        try{ await startMedia(); await joinRoom(); }
+        catch(e){ logDiag("Auto sequence failed: " + (e?.message || e)); }
       }, { once:true });
     }
   }else{
