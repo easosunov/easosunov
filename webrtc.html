@@ -19,12 +19,11 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 .small{font-size:12px;color:#555;margin-top:6px}
 #errorBox{display:none;margin:12px 0;padding:10px;border:1px solid #f3b5b5;background:#fff5f5;color:#7a1b1b;border-radius:12px;white-space:pre-wrap}
 
-/* --- Login overlay --- */
+/* Login overlay */
 #loginOverlay{
-  position:fixed; inset:0;
+  position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.55);
   display:flex; align-items:center; justify-content:center;
-  z-index:9999;
 }
 #loginCard{
   width:min(520px,calc(100% - 24px));
@@ -40,7 +39,6 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 
 <body>
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
-
 <div id="errorBox"></div>
 
 <!-- LOGIN OVERLAY -->
@@ -80,7 +78,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   <div class="row">
     <div class="card">
       <b>Step 1</b><br/>
-      <button id="startBtn">Start</button>
+      <button id="startBtn" disabled>Start</button>
       <button id="stopBtn" disabled>Stop</button>
       <div class="status" id="mediaStatus">Not started.</div>
     </div>
@@ -128,6 +126,9 @@ const app=initializeApp({
 const db=getFirestore(app);
 const auth=getAuth(app);
 
+/* ---------- AUTH GATE ---------- */
+let isAuthed=false;
+
 /* ---------- LOGIN UI ---------- */
 const loginOverlay=document.getElementById("loginOverlay");
 const loginBtn=document.getElementById("loginBtn");
@@ -147,24 +148,7 @@ loginBtn.onclick=async()=>{
   }
 };
 
-logoutBtn.onclick=async()=>{
-  try{ await signOut(auth); }catch(e){ showError(e); }
-};
-
-onAuthStateChanged(auth,(user)=>{
-  if(user){
-    loginOverlay.style.display="none";
-    appRoot.classList.remove("locked");
-    logoutBtn.style.display="inline-block";
-    loginStatus.textContent="Signed in.";
-  }else{
-    loginOverlay.style.display="flex";
-    appRoot.classList.add("locked");
-    logoutBtn.style.display="none";
-    // Stop any running media if user logs out
-    try{ stopAll(); }catch{}
-  }
-});
+logoutBtn.onclick=async()=>{ try{ await signOut(auth); }catch(e){ showError(e); } };
 
 /* ---------- UI ---------- */
 const localVideo=document.getElementById("localVideo");
@@ -177,7 +161,6 @@ const copyLinkBtn=document.getElementById("copyLinkBtn");
 const roomIdInput=document.getElementById("roomId");
 const mediaStatus=document.getElementById("mediaStatus");
 const callStatus=document.getElementById("callStatus");
-
 const setStatus=(el,msg)=>el.textContent=msg;
 
 /* ---------- STATE ---------- */
@@ -219,8 +202,13 @@ async function clearSub(col){
   if(!s.empty) await b.commit();
 }
 
+function requireAuth(){
+  if(!isAuthed) throw new Error("Not signed in. Please login first.");
+}
+
 /* ---------- MEDIA ---------- */
 async function startMedia(){
+  requireAuth();
   if(localStream) return;
   if(startingPromise) return startingPromise;
 
@@ -228,10 +216,12 @@ async function startMedia(){
     setStatus(mediaStatus,"Requesting camera/mic…");
     localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     localVideo.srcObject=localStream;
+
     startBtn.disabled=true;
     stopBtn.disabled=false;
     createBtn.disabled=false;
     joinBtn.disabled=false;
+
     setStatus(mediaStatus,"Camera/mic started.");
     await autoJoinIfNeeded();
   })();
@@ -250,17 +240,20 @@ function stopAll(){
     localStream=null;
   }
   localVideo.srcObject=null;
-  startBtn.disabled=false;
+
+  startBtn.disabled=!isAuthed;
   stopBtn.disabled=true;
   createBtn.disabled=true;
   joinBtn.disabled=true;
+  copyLinkBtn.disabled=true;
+
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
   autoJoinDone=false;
   lastAnsweredSessionB=null;
 }
 
-/* ---------- AUTO START + AUTO JOIN ---------- */
+/* ---------- AUTO JOIN ---------- */
 async function autoJoinIfNeeded(){
   if(autoJoinDone) return;
   if(!roomIdInput.value) return;
@@ -269,17 +262,11 @@ async function autoJoinIfNeeded(){
   await joinRoom();
 }
 
-// auto-start media on first interaction (after login overlay is gone)
-["click","keydown","touchstart"].forEach(ev=>{
-  window.addEventListener(ev,()=>{
-    if(loginOverlay.style.display !== "none") return; // not logged in yet
-    startMedia().catch(()=>{});
-  },{once:true});
-});
-
 /* ---------- ROOM A ---------- */
 async function createRoom(){
+  requireAuth();
   await startMedia();
+
   if(unsubRoomA) unsubRoomA();
   if(unsubCalleeA) unsubCalleeA();
 
@@ -320,14 +307,18 @@ async function createRoom(){
 
 /* ---------- ROOM B ---------- */
 async function joinRoom(){
+  requireAuth();
   await startMedia();
 
   if(unsubRoomB) unsubRoomB();
   if(unsubCallerB) unsubCallerB();
 
-  const roomRef=doc(db,"rooms",roomIdInput.value);
+  const roomId=roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+
+  const roomRef=doc(db,"rooms",roomId);
   const snap=await getDoc(roomRef);
-  if(!snap.exists()) throw "Room not found";
+  if(!snap.exists()) throw new Error("Room not found");
 
   await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
   setStatus(callStatus,"Connecting…");
@@ -356,6 +347,34 @@ async function joinRoom(){
   });
 }
 
+/* ---------- AUTH STATE ---------- */
+onAuthStateChanged(auth,(user)=>{
+  isAuthed=!!user;
+
+  if(user){
+    loginOverlay.style.display="none";
+    appRoot.classList.remove("locked");
+    logoutBtn.style.display="inline-block";
+    loginStatus.textContent="Signed in.";
+
+    // Enable Start immediately (user still must interact for camera permission)
+    startBtn.disabled=false;
+    setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
+    copyLinkBtn.disabled=!roomIdInput.value.trim();
+
+    // After login, first user interaction will start media automatically:
+    ["click","keydown","touchstart"].forEach(ev=>{
+      window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
+    });
+
+  }else{
+    loginOverlay.style.display="flex";
+    appRoot.classList.add("locked");
+    logoutBtn.style.display="none";
+    stopAll();
+  }
+});
+
 /* ---------- UI ---------- */
 startBtn.onclick=()=>startMedia().catch(showError);
 stopBtn.onclick=()=>stopAll();
@@ -365,6 +384,10 @@ copyLinkBtn.onclick=()=>{
   navigator.clipboard.writeText(location.href);
   setStatus(callStatus,"Invite copied.");
 };
+
+roomIdInput.addEventListener("input",()=>{
+  copyLinkBtn.disabled=!roomIdInput.value.trim();
+});
 </script>
 </body>
 </html>
