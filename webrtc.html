@@ -6,8 +6,10 @@
 <title>2-Person Video/Sound Communicator (WebRTC)</title>
 
 <script>
-/* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
-const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
+/* ===== FORCE LATEST HTML (CACHE-BUST) =====
+   If someone opens without the right ?v=BUILD, we force-reload.
+*/
+const BUILD = "2025-12-25T22:45Z-FORCE-LATEST-NO-GUEST-DOC";
 (function forceCacheBust(){
   try{
     const params = new URLSearchParams(location.search);
@@ -20,7 +22,7 @@ const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
   } catch {}
 })();
 </script>
- 
+
 <style>
   body{font-family:system-ui;margin:16px}
   h1{font-size:20px;margin:0 0 10px}
@@ -40,6 +42,12 @@ const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
     display:none;margin:12px 0;padding:10px;
     border:1px solid #f3b5b5;background:#fff5f5;
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
+  }
+
+  #cacheWarn{
+    display:none;margin:12px 0;padding:10px;
+    border:2px solid #c50000;background:#fff0f0;
+    color:#7a0000;border-radius:12px;white-space:pre-wrap
   }
 
   #loginOverlay{
@@ -76,6 +84,8 @@ const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
 
 <body>
 <h1>2-Person Video/Sound Communicator (WebRTC) <span id="buildBadge" class="badge"></span></h1>
+
+<div id="cacheWarn"></div>
 <div id="errorBox"></div>
 
 <!-- LOGIN -->
@@ -147,9 +157,25 @@ const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
 </div>
 
 <script type="module">
-/* ================== UI / DIAGNOSTICS ================== */
+/* ================== BUILD / CACHE WARNING ================== */
 document.getElementById("buildBadge").textContent = "BUILD " + BUILD;
 
+const cacheWarn = document.getElementById("cacheWarn");
+(function showCacheWarningIfNeeded(){
+  try{
+    const v = new URLSearchParams(location.search).get("v");
+    if (v !== BUILD){
+      cacheWarn.style.display = "block";
+      cacheWarn.textContent =
+        "WARNING: This tab is NOT on the latest build.\n" +
+        "Expected ?v=" + BUILD + "\n" +
+        "Actual   ?v=" + (v ?? "(missing)") + "\n\n" +
+        "Close all tabs and open the invite link again.";
+    }
+  }catch{}
+})();
+
+/* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
 
 const loginOverlay = document.getElementById("loginOverlay");
@@ -175,8 +201,10 @@ const diagBtn = document.getElementById("diagBtn");
 const diagBox = document.getElementById("diagBox");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
+
 const setStatus = (el,msg)=> el.textContent = msg;
 
+/* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
 const diagLog = [];
 function logDiag(msg){
@@ -216,6 +244,7 @@ copyDiagBtn.onclick = async () => {
   catch{ window.prompt("Copy diagnostics:", text); }
 };
 
+/* ================== ERROR HANDLING ================== */
 function showError(e){
   errorBox.style.display = "block";
   errorBox.textContent = String(e?.stack || e?.message || e);
@@ -401,10 +430,7 @@ function stopAll(){
 }
 stopBtn.onclick = ()=> stopAll();
 
-/* ================== IMPORTANT CHANGE ==================
-   Guest must NOT create the room doc.
-   So "nudge host" uses updateDoc (fails if room doesn't exist yet).
-*/
+/* ================== KEY: Guest must NOT create room doc ================== */
 async function nudgeHostUpdateOnly(roomRef){
   try{
     await updateDoc(roomRef, { joinRequest: Date.now() });
@@ -424,7 +450,6 @@ async function createRoom(){
   if(!requireAuthOrPrompt()) return;
 
   stopListeners();
-
   await startMedia();
 
   const myAttempt = ++createAttemptA;
@@ -462,7 +487,7 @@ async function createRoom(){
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  // NOTE: merge:true is fine, but now guest won't create doc anyway.
+  // Overwrite/merge: either way, offer+session MUST exist after this.
   await setDoc(roomRef, {
     session,
     offer: { type: offer.type, sdp: offer.sdp },
@@ -517,7 +542,6 @@ async function joinRoom(){
 
   const roomId = roomIdInput.value.trim();
   if(!roomId) throw new Error("Room ID is empty.");
-
   const roomRef = doc(db,"rooms", roomId);
 
   if(joinInProgress){
@@ -551,12 +575,10 @@ async function joinRoom(){
       }
 
       const d = snap.data() || {};
-      const hasOffer = !!d.offer;
-      logDiag(`GUEST room data: hasOffer=${hasOffer} session=${d.session ?? "none"}`);
+      logDiag(`GUEST room data: hasOffer=${!!d.offer} session=${d.session ?? "none"}`);
 
       if(!d.offer || !d.session){
-        // IMPORTANT: doc exists but host hasn't created offer yet
-        setStatus(callStatus, "Room exists, but host has not created offer yet. Ask host to click Create Room.");
+        setStatus(callStatus, "Room exists but has NO offer/session. Host must click Start then Create Room.");
         return;
       }
 
@@ -621,8 +643,7 @@ async function joinRoom(){
     }
   );
 
-  // Nudge (updateDoc only) AFTER listener is installed.
-  // If host hasn't created room doc yet, this will just log "skipped".
+  // Try nudge, but updateDoc-only (will NOT create doc)
   nudgeHostUpdateOnly(roomRef).catch(()=>{});
 }
 
