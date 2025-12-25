@@ -251,7 +251,6 @@ function stopAll(){
   autoJoinDone=false;
   lastAnsweredSessionB=null;
 
-  // Keep copy disabled unless logged-in AND roomId exists
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 }
 
@@ -279,7 +278,6 @@ async function createRoom(){
   roomIdInput.value=roomRef.id;
   location.hash=roomRef.id;
 
-  // ✅ FORCE enable Copy Invite immediately after room creation
   copyLinkBtn.disabled = false;
 
   const caller=collection(roomRef,"callerCandidates");
@@ -365,10 +363,8 @@ onAuthStateChanged(auth,(user)=>{
     startBtn.disabled=false;
     setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
 
-    // ✅ if roomId exists (hash or typed), enable Copy Invite
     copyLinkBtn.disabled = !roomIdInput.value.trim();
 
-    // After login, first user interaction will start media automatically:
     ["click","keydown","touchstart"].forEach(ev=>{
       window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
     });
@@ -387,12 +383,29 @@ stopBtn.onclick=()=>stopAll();
 createBtn.onclick=()=>createRoom().catch(showError);
 joinBtn.onclick=()=>joinRoom().catch(showError);
 
-copyLinkBtn.onclick = () => {
+/* ✅ Robust copy with fallback */
+async function copyTextRobust(text){
+  // Attempt modern clipboard API
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      // fall through
+    }
+  }
+  // Fallback (works everywhere): show a prompt for manual copy
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
+copyLinkBtn.onclick = async () => {
   const roomId = roomIdInput.value.trim();
   if (!roomId) return;
   const invite = `${location.origin}${location.pathname}#${roomId}`;
-  navigator.clipboard.writeText(invite);
-  setStatus(callStatus, "Invite copied.");
+
+  const ok = await copyTextRobust(invite);
+  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
 };
 
 roomIdInput.addEventListener("input", () => {
