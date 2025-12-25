@@ -59,7 +59,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     </div>
 
     <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">If Firestore rules require auth, the app will not work until login succeeds.</div>
+    <div class="small">After login, tap/click once to enable camera/mic (browser permission rule).</div>
   </div>
 </div>
 
@@ -158,9 +158,11 @@ loginBtn.onclick = async () => {
       code === "auth/wrong-password" ? "Wrong email or password." :
       code === "auth/invalid-email" ? "Invalid email address." :
       code === "auth/missing-password" ? "Please enter your password." :
+      code === "auth/too-many-requests" ? "Too many attempts. Try again later." :
       "Login failed. Please try again.";
     loginStatus.textContent = msg;
 
+    // only show pink box for unexpected errors
     const expected = new Set([
       "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
       "auth/invalid-email","auth/missing-password","auth/too-many-requests"
@@ -192,22 +194,20 @@ let unsubRoomA=null, unsubCalleeA=null;
 let unsubRoomB=null, unsubCallerB=null;
 
 let lastAnsweredSessionB=null;
-let autoJoinDone=false;
-let autoJoinInProgress=false;
-let autoJoinScheduled=false;
-
 let lastSeenJoinRequestA=0;
 let bRetryTimer=null;
 
 let createAttemptA = 0;
 let joinAttemptB = 0;
 
-/* ✅ IMPORTANT: only auto-join if the page was opened with a hash */
+/* ✅ Auto-join state machine */
 const hashOnLoad = (location.hash.length > 1);
+let autoJoinWanted = hashOnLoad;  // only if page opened from invite
+let autoJoinDone = false;
 
 if (hashOnLoad) {
   roomIdInput.value = location.hash.slice(1);
-  setStatus(callStatus, "Room ID detected in URL.");
+  setStatus(callStatus, "Invite detected. Start camera/mic to auto-join.");
 }
 
 /* ---------- WEBRTC ---------- */
@@ -257,13 +257,10 @@ async function requestFreshOffer(roomRef){
 }
 
 /* ---------- MEDIA ---------- */
-async function startMedia(opts = { skipAutoJoin:false }) {
+async function startMedia(){
   requireAuth();
-  if (localStream) {
-    if (!opts.skipAutoJoin) scheduleAutoJoin();
-    return;
-  }
-  if (startingPromise) return startingPromise;
+  if(localStream) return;
+  if(startingPromise) return startingPromise;
 
   startingPromise = (async () => {
     setStatus(mediaStatus, "Requesting camera/mic…");
@@ -281,7 +278,28 @@ async function startMedia(opts = { skipAutoJoin:false }) {
   try { await startingPromise; }
   finally { startingPromise = null; }
 
-  if (!opts.skipAutoJoin) scheduleAutoJoin();
+  // ✅ Auto-join ONLY after media is running
+  await maybeAutoJoin();
+}
+
+async function maybeAutoJoin(){
+  if(!autoJoinWanted) return;
+  if(autoJoinDone) return;
+  if(!isAuthed) return;
+  if(!localStream) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus, "Auto-joining room…");
+  try{
+    await joinRoom({ fromAutoJoin:true });
+  }catch(e){
+    autoJoinDone = false; // allow manual retry
+    setStatus(callStatus, `Auto-join failed: ${e.message || e}`);
+    // don’t show pink box for common “Room not found” while A is not ready
+    if(String(e?.message||e).includes("Room not found")) return;
+    showError(e);
+  }
 }
 
 function stopAll(){
@@ -307,56 +325,21 @@ function stopAll(){
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
 
-  autoJoinDone=false;
-  autoJoinInProgress=false;
-  autoJoinScheduled=false;
   lastAnsweredSessionB=null;
-
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
-}
 
-function scheduleAutoJoin() {
-  if (!hashOnLoad) return;                 // ✅ only invite-opened pages auto-join
-  if (autoJoinDone || autoJoinInProgress) return;
-  if (!roomIdInput.value.trim()) return;
-  if (autoJoinScheduled) return;
-
-  autoJoinScheduled = true;
-  setTimeout(async () => {
-    autoJoinScheduled = false;
-    try {
-      await autoJoinIfNeeded();
-    } catch (e) {
-      setStatus(callStatus, `${e.message || e}`);
-    }
-  }, 0);
-}
-
-async function autoJoinIfNeeded(){
-  if (!hashOnLoad) return;                 // ✅ only invite-opened pages auto-join
-  if(autoJoinDone) return;
-  if(autoJoinInProgress) return;
-  if(!roomIdInput.value.trim()) return;
-
-  autoJoinInProgress = true;
-  setStatus(callStatus, "Auto-joining room…");
-  try {
-    await joinRoom();
-    autoJoinDone = true;
-  } finally {
-    autoJoinInProgress = false;
-  }
+  // reset auto-join (invite pages can try again after restart)
+  autoJoinDone = false;
 }
 
 /* ---------- ROOM A ---------- */
 async function createRoom(){
   requireAuth();
-  await startMedia({ skipAutoJoin:true });   // ✅ don’t auto-join while creating
+  await startMedia();
 
-  // ✅ make absolutely sure auto-join won't run on A's page after setting hash
+  // ✅ Creator page should NOT auto-join
+  autoJoinWanted = false;
   autoJoinDone = true;
-  autoJoinScheduled = false;
-  autoJoinInProgress = false;
 
   const myAttempt = ++createAttemptA;
 
@@ -449,9 +432,9 @@ async function createRoom(){
 }
 
 /* ---------- ROOM B ---------- */
-async function joinRoom(){
+async function joinRoom({ fromAutoJoin=false } = {}){
   requireAuth();
-  await startMedia({ skipAutoJoin:true });
+  await startMedia(); // if user clicked Join, this counts as gesture and is safe
 
   const myAttempt = ++joinAttemptB;
 
@@ -463,8 +446,16 @@ async function joinRoom(){
   if(!roomId) throw new Error("Room ID is empty.");
 
   const roomRef=doc(db,"rooms",roomId);
+
+  // If A hasn’t written the room yet, avoid pink error spam:
   const snap=await getDoc(roomRef);
-  if(!snap.exists()) throw new Error("Room not found. Ask Person A to create it, or check the invite link.");
+  if(!snap.exists()){
+    // For auto-join, just show a friendly status and retry via user click/join later
+    if(fromAutoJoin){
+      throw new Error("Room not found yet. Ask Person A to click Create Room, then press Join if needed.");
+    }
+    throw new Error("Room not found. Ask Person A to click Create Room or check the invite link.");
+  }
 
   await requestFreshOffer(roomRef);
   if(myAttempt !== joinAttemptB) return;
@@ -575,12 +566,15 @@ onAuthStateChanged(auth,(user)=>{
     loginStatus.textContent="Signed in.";
 
     startBtn.disabled=false;
-    setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
+    setStatus(mediaStatus,"Ready. Tap/click once to enable camera/mic.");
     copyLinkBtn.disabled = !roomIdInput.value.trim();
 
+    // ✅ first user interaction starts media; auto-join will happen AFTER that
+    const once = () => startMedia().catch(()=>{});
     ["click","keydown","touchstart"].forEach(ev=>{
-      window.addEventListener(ev,()=>startMedia().catch(()=>{}),{once:true});
+      window.addEventListener(ev, once, { once:true });
     });
+
   }else{
     loginOverlay.style.display="flex";
     appRoot.classList.add("locked");
