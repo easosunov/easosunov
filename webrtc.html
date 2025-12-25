@@ -406,24 +406,28 @@ async function startMedia(opts={skipAutoJoin:false}){
 
   startingPromise = (async()=>{
     hideErrorBox();
+
     setStatus(mediaStatus,"Requesting camera/mic…");
     logDiag("Requesting getUserMedia…");
-    try{
-      localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    }catch(e){
-      setStatus(mediaStatus,"Camera/mic blocked. Allow permissions and reload.");
-      logDiag("getUserMedia failed: " + (e?.name || e));
-      throw e;
-    }
+
+    localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
     localVideo.srcObject = localStream;
+
+    // ✅ Update immediately (this is what you’re missing in practice)
+    setStatus(mediaStatus,"Camera/mic started.");
+    logDiag("Camera/mic started (stream attached).");
+
+    // ✅ Update again when video actually starts rendering
+    localVideo.onloadedmetadata = async () => {
+      try { await localVideo.play(); } catch {}
+      setStatus(mediaStatus,"Camera/mic started.");
+      logDiag("Local video playing.");
+    };
 
     startBtn.disabled = true;
     stopBtn.disabled  = false;
     createBtn.disabled = false;
     joinBtn.disabled   = false;
-
-    setStatus(mediaStatus,"Camera/mic started.");
-    logDiag("Camera/mic started.");
   })();
 
   try{ await startingPromise; }
