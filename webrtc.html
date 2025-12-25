@@ -261,39 +261,31 @@ async function requestFreshOffer(roomRef){
 
 /* ---------- MEDIA ---------- */
 /* ✅ startMedia now supports an option to SKIP auto-join */
-async function startMedia(opts = { skipAutoJoin:false }) {
+async function startMedia(opts = { skipAutoJoin:false }){
   requireAuth();
-  if (localStream) {
-    // If media already started, we can auto-join (but only if not skipped)
-    if (!opts.skipAutoJoin) scheduleAutoJoin();
-    return;
-  }
+  if(localStream) return;
+  if(startingPromise) return startingPromise;
 
-  if (startingPromise) return startingPromise;
+  startingPromise=(async()=>{
+    setStatus(mediaStatus,"Requesting camera/mic…");
+    localStream=await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    localVideo.srcObject=localStream;
 
-  startingPromise = (async () => {
-    setStatus(mediaStatus, "Requesting camera/mic…");
-    localStream = await navigator.mediaDevices.getUserMedia({ video:true, audio:true });
-    localVideo.srcObject = localStream;
+    startBtn.disabled=true;
+    stopBtn.disabled=false;
+    createBtn.disabled=false;
+    joinBtn.disabled=false;
 
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    createBtn.disabled = false;
-    joinBtn.disabled = false;
+    setStatus(mediaStatus,"Camera/mic started.");
 
-    setStatus(mediaStatus, "Camera/mic started.");
+    // ✅ do not auto-join while joinRoom is running or when explicitly skipped
+    if(!opts.skipAutoJoin && !isJoining){
+      await autoJoinIfNeeded();
+    }
   })();
 
-  try {
-    await startingPromise;
-  } finally {
-    startingPromise = null; // ✅ release the promise BEFORE any auto-join
-  }
-
-  // ✅ schedule auto-join only after startMedia fully finished
-  if (!opts.skipAutoJoin) scheduleAutoJoin();
+  try{await startingPromise}finally{startingPromise=null}
 }
-
 
 function stopAll(){
   if(unsubRoomA){unsubRoomA();unsubRoomA=null}
@@ -323,42 +315,14 @@ function stopAll(){
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 }
 
-let autoJoinScheduled = false;
-
-function scheduleAutoJoin() {
-  if (autoJoinScheduled) return;
-  autoJoinScheduled = true;
-
-  // Run after current call stack so we never deadlock startMedia()
-  setTimeout(async () => {
-    autoJoinScheduled = false;
-    try {
-      await autoJoinIfNeeded();
-    } catch (e) {
-      // Don’t leave user stuck on “Auto-joining…”
-      setStatus(callStatus, `Auto-join failed: ${e.message || e}`);
-      showError(e);
-    }
-  }, 0);
-}
-
-  
 /* ---------- AUTO JOIN ---------- */
 async function autoJoinIfNeeded(){
   if(autoJoinDone) return;
   if(!roomIdInput.value.trim()) return;
-
-  autoJoinDone = true;
-  setStatus(callStatus, "Auto-joining room…");
-
-  try {
-    await joinRoom();
-  } catch (e) {
-    autoJoinDone = false; // allow retry
-    throw e;
-  }
+  autoJoinDone=true;
+  setStatus(callStatus,"Auto-joining room…");
+  await joinRoom(); // safe now (no recursion) because joinRoom will startMedia({skipAutoJoin:true})
 }
-
 
 /* ---------- ROOM A ---------- */
 async function createRoom(){
