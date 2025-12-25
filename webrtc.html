@@ -172,9 +172,9 @@ let startingPromise=null;
 let autoJoinDone=false;
 
 /* ---------- URL HASH ---------- */
-if (location.hash.length > 1) {
-  roomIdInput.value = location.hash.slice(1);
-  setStatus(callStatus, "Room ID detected in URL.");
+if(location.hash.length>1){
+  roomIdInput.value=location.hash.slice(1);
+  setStatus(callStatus,"Room ID detected in URL.");
 }
 
 /* ---------- WEBRTC ---------- */
@@ -245,14 +245,12 @@ function stopAll(){
   stopBtn.disabled=true;
   createBtn.disabled=true;
   joinBtn.disabled=true;
+  copyLinkBtn.disabled=true;
 
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
   autoJoinDone=false;
   lastAnsweredSessionB=null;
-
-  // Keep copy disabled unless logged-in AND roomId exists
-  copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 }
 
 /* ---------- AUTO JOIN ---------- */
@@ -279,9 +277,6 @@ async function createRoom(){
   roomIdInput.value=roomRef.id;
   location.hash=roomRef.id;
 
-  // ✅ FORCE enable Copy Invite immediately after room creation
-  copyLinkBtn.disabled = false;
-
   const caller=collection(roomRef,"callerCandidates");
   const callee=collection(roomRef,"calleeCandidates");
   await clearSub(caller); await clearSub(callee);
@@ -297,7 +292,7 @@ async function createRoom(){
     offer:{type:offer.type,sdp:offer.sdp}
   });
 
-  setStatus(callStatus,"Room active. Click 'Copy Invite' and send it to Person B.");
+  setStatus(callStatus,"Room active.");
 
   unsubRoomA=onSnapshot(roomRef,snap=>{
     const d=snap.data();
@@ -362,11 +357,10 @@ onAuthStateChanged(auth,(user)=>{
     logoutBtn.style.display="inline-block";
     loginStatus.textContent="Signed in.";
 
+    // Enable Start immediately (user still must interact for camera permission)
     startBtn.disabled=false;
     setStatus(mediaStatus,"Ready. Click Start (or tap page) to enable camera/mic.");
-
-    // ✅ if roomId exists (hash or typed), enable Copy Invite
-    copyLinkBtn.disabled = !roomIdInput.value.trim();
+    copyLinkBtn.disabled=!roomIdInput.value.trim();
 
     // After login, first user interaction will start media automatically:
     ["click","keydown","touchstart"].forEach(ev=>{
@@ -386,17 +380,13 @@ startBtn.onclick=()=>startMedia().catch(showError);
 stopBtn.onclick=()=>stopAll();
 createBtn.onclick=()=>createRoom().catch(showError);
 joinBtn.onclick=()=>joinRoom().catch(showError);
-
-copyLinkBtn.onclick = () => {
-  const roomId = roomIdInput.value.trim();
-  if (!roomId) return;
-  const invite = `${location.origin}${location.pathname}#${roomId}`;
-  navigator.clipboard.writeText(invite);
-  setStatus(callStatus, "Invite copied.");
+copyLinkBtn.onclick=()=>{
+  navigator.clipboard.writeText(location.href);
+  setStatus(callStatus,"Invite copied.");
 };
 
-roomIdInput.addEventListener("input", () => {
-  copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
+roomIdInput.addEventListener("input",()=>{
+  copyLinkBtn.disabled=!roomIdInput.value.trim();
 });
 </script>
 </body>
