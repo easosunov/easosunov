@@ -7,7 +7,7 @@
 
 <script>
 /* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
-const BUILD = "2025-12-25T19:40Z-FULL-WEBRTC-RESTORE";
+const BUILD = "2025-12-25T22:30Z-NO-GUEST-DOC-CREATE";
 (function forceCacheBust(){
   try{
     const params = new URLSearchParams(location.search);
@@ -42,7 +42,6 @@ const BUILD = "2025-12-25T19:40Z-FULL-WEBRTC-RESTORE";
     color:#7a1b1b;border-radius:12px;white-space:pre-wrap
   }
 
-  /* LOGIN OVERLAY */
   #loginOverlay{
     position:fixed; inset:0; z-index:9999;
     background:rgba(0,0,0,.55);
@@ -58,11 +57,10 @@ const BUILD = "2025-12-25T19:40Z-FULL-WEBRTC-RESTORE";
   #logoutBtn{float:right}
   #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
-  /* DIAGNOSTICS */
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:240px;
+    max-height:260px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -72,7 +70,6 @@ const BUILD = "2025-12-25T19:40Z-FULL-WEBRTC-RESTORE";
     white-space:pre-wrap;
   }
   .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-
   .badge{display:inline-block;padding:2px 8px;border:1px solid #ddd;border-radius:999px;font-size:12px;color:#333;background:#fafafa}
 </style>
 </head>
@@ -231,9 +228,6 @@ function hideErrorBox(){
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
 
-emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
@@ -272,26 +266,13 @@ loginBtn.onclick = async () => {
   try{
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   }catch(e){
-    const code = String(e?.code || "");
-    const msg =
-      (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password")
-        ? "Wrong email or password."
-      : (code === "auth/invalid-email")
-        ? "Invalid email address."
-      : (code === "auth/missing-password")
-        ? "Please enter your password."
-      : (code === "auth/too-many-requests")
-        ? "Too many attempts. Try again later."
-      : "Login failed. Please try again.";
-    loginStatus.textContent = msg;
-    logDiag(`Login failed (${code || "no-code"}): ${msg}`);
+    loginStatus.textContent = "Login failed.";
+    logDiag("Login failed: " + (e?.code || e?.message || e));
   }
 };
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
-/* ================== INVITE MODE ==================
-   Only treat as invite if hash existed at initial load.
-*/
+/* ================== INVITE MODE ================== */
 const openedFromInvite = (location.hash.length > 1);
 if (openedFromInvite) {
   roomIdInput.value = location.hash.slice(1);
@@ -306,10 +287,8 @@ const rtcConfig = { iceServers:[{ urls:"stun:stun.l.google.com:19302" }] };
 
 function closePeer(){
   if(pc){
-    pc.onicecandidate=null;
-    pc.ontrack=null;
-    pc.onconnectionstatechange=null;
-    pc.oniceconnectionstatechange=null;
+    pc.onicecandidate=null; pc.ontrack=null;
+    pc.onconnectionstatechange=null; pc.oniceconnectionstatechange=null;
     try{ pc.close(); }catch{}
     pc=null;
   }
@@ -359,7 +338,6 @@ roomIdInput.addEventListener("input", refreshCopyInviteState);
 let startingPromise = null;
 async function startMedia(){
   if(!requireAuthOrPrompt()) return;
-
   if(localStream) return;
   if(startingPromise) return startingPromise;
 
@@ -421,27 +399,36 @@ function stopAll(){
 
   refreshCopyInviteState();
 }
-stopBtn.onclick = () => stopAll();
+stopBtn.onclick = ()=> stopAll();
 
-/* ================== REJOIN SUPPORT (Host refresh on joinRequest) ================== */
+/* ================== IMPORTANT CHANGE ==================
+   Guest must NOT create the room doc.
+   So "nudge host" uses updateDoc (fails if room doesn't exist yet).
+*/
+async function nudgeHostUpdateOnly(roomRef){
+  try{
+    await updateDoc(roomRef, { joinRequest: Date.now() });
+    logDiag("Nudged host (joinRequest via updateDoc).");
+    return true;
+  }catch(e){
+    logDiag("Nudge skipped (room not created yet): " + (e?.code || e?.message || e));
+    return false;
+  }
+}
+
+/* ================== HOST ================== */
 let lastSeenJoinRequestA = 0;
-let lastAnsweredSessionB = null;
-
-/* ================== ROOM A (HOST) ================== */
 let createAttemptA = 0;
 
 async function createRoom(){
   if(!requireAuthOrPrompt()) return;
 
-  // Host must not have B-listeners active
   stopListeners();
-  lastAnsweredSessionB = null;
 
   await startMedia();
 
   const myAttempt = ++createAttemptA;
 
-  // Use existing ID if provided, else create new
   let roomRef;
   const existing = roomIdInput.value.trim();
   if(existing) roomRef = doc(db,"rooms", existing);
@@ -450,13 +437,11 @@ async function createRoom(){
   roomIdInput.value = roomRef.id;
   location.hash = roomRef.id;
   refreshCopyInviteState();
-
   logDiag("HOST createRoom: roomId=" + roomRef.id);
 
   const caller = collection(roomRef,"callerCandidates");
   const callee = collection(roomRef,"calleeCandidates");
 
-  // bump session number
   const snap = await getDoc(roomRef);
   const prev = snap.exists() ? (snap.data().session || 0) : 0;
   const session = Number(prev) + 1;
@@ -465,8 +450,6 @@ async function createRoom(){
 
   await clearSub(caller);
   await clearSub(callee);
-
-  if(myAttempt !== createAttemptA) return;
 
   ensurePeer();
 
@@ -479,6 +462,7 @@ async function createRoom(){
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
+  // NOTE: merge:true is fine, but now guest won't create doc anyway.
   await setDoc(roomRef, {
     session,
     offer: { type: offer.type, sdp: offer.sdp },
@@ -486,8 +470,8 @@ async function createRoom(){
     updatedAt: Date.now()
   }, { merge:true });
 
-  setStatus(callStatus, `Room active (session ${session}). Send the invite to B.`);
-  logDiag(`HOST wrote offer. session=${session}`);
+  setStatus(callStatus, `Room active (session ${session}). Send invite to B.`);
+  logDiag("HOST wrote offer. session=" + session);
 
   unsubRoomA = onSnapshot(roomRef, async (s)=>{
     if(myAttempt !== createAttemptA) return;
@@ -496,8 +480,8 @@ async function createRoom(){
 
     if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
       lastSeenJoinRequestA = d.joinRequest;
-      logDiag("HOST saw joinRequest => restarting session/offer");
       setStatus(callStatus, "Join request received — restarting session…");
+      logDiag("HOST saw joinRequest => restarting offer/session.");
       setTimeout(()=>createRoom().catch(()=>{}), 150);
       return;
     }
@@ -508,9 +492,7 @@ async function createRoom(){
         setStatus(callStatus, `Connected (session ${session}).`);
         logDiag("HOST applied answer.");
       }catch(e){
-        logDiag("HOST setRemoteDescription(answer) failed: " + (e?.message || e));
-        setStatus(callStatus, "Answer failed — restarting session…");
-        setTimeout(()=>createRoom().catch(()=>{}), 200);
+        logDiag("HOST apply answer failed: " + (e?.message || e));
       }
     }
   });
@@ -525,9 +507,10 @@ async function createRoom(){
   });
 }
 
-/* ================== ROOM B (GUEST) ================== */
+/* ================== GUEST ================== */
 let joinAttemptB = 0;
 let joinInProgress = false;
+let lastAnsweredSessionB = null;
 
 async function joinRoom(){
   if(!requireAuthOrPrompt()) return;
@@ -535,11 +518,12 @@ async function joinRoom(){
   const roomId = roomIdInput.value.trim();
   if(!roomId) throw new Error("Room ID is empty.");
 
+  const roomRef = doc(db,"rooms", roomId);
+
   if(joinInProgress){
-    // When already joining: just nudge host
-    logDiag("Join clicked while joining => nudging host");
-    await setDoc(doc(db,"rooms",roomId), { joinRequest: Date.now() }, { merge:true }).catch(()=>{});
-    setStatus(callStatus, "Nudged host. Still waiting…");
+    logDiag("Join clicked while joining => nudge host (updateDoc only)");
+    const ok = await nudgeHostUpdateOnly(roomRef);
+    setStatus(callStatus, ok ? "Nudged host. Still waiting…" : "Host has not created the room yet.");
     return;
   }
 
@@ -548,39 +532,31 @@ async function joinRoom(){
 
   await startMedia();
   stopListeners();
-
-  const roomRef = doc(db,"rooms", roomId);
   location.hash = roomId;
 
-  setStatus(callStatus, "Waiting for host / offer…");
+  setStatus(callStatus, "Waiting for host to create the room…");
   logDiag("GUEST joinRoom: roomId=" + roomId);
   logDiag("GUEST installing onSnapshot(roomRef)…");
-
-  // Nudge host once on entry (safe; merge only)
-  setDoc(roomRef, { joinRequest: Date.now() }, { merge:true })
-    .then(()=>logDiag("GUEST nudged host (joinRequest)"))
-    .catch((e)=>logDiag("GUEST nudge failed: " + (e?.message || e)));
 
   unsubRoomB = onSnapshot(
     roomRef,
     async (snap)=>{
       if(myAttempt !== joinAttemptB) return;
 
-      const exists = snap.exists();
-      logDiag("GUEST room snapshot: exists=" + exists);
+      logDiag("GUEST room snapshot: exists=" + snap.exists());
 
-      if(!exists){
+      if(!snap.exists()){
         setStatus(callStatus, "Waiting for host to create the room…");
         return;
       }
 
       const d = snap.data() || {};
       const hasOffer = !!d.offer;
-      const session = d.session;
-      logDiag(`GUEST room data: hasOffer=${hasOffer} session=${session ?? "none"}`);
+      logDiag(`GUEST room data: hasOffer=${hasOffer} session=${d.session ?? "none"}`);
 
       if(!d.offer || !d.session){
-        setStatus(callStatus, "Room found. Waiting for offer…");
+        // IMPORTANT: doc exists but host hasn't created offer yet
+        setStatus(callStatus, "Room exists, but host has not created offer yet. Ask host to click Create Room.");
         return;
       }
 
@@ -644,6 +620,10 @@ async function joinRoom(){
       joinInProgress = false;
     }
   );
+
+  // Nudge (updateDoc only) AFTER listener is installed.
+  // If host hasn't created room doc yet, this will just log "skipped".
+  nudgeHostUpdateOnly(roomRef).catch(()=>{});
 }
 
 /* ================== COPY INVITE ================== */
@@ -654,7 +634,6 @@ async function copyTextRobust(text){
   window.prompt("Copy this invite link:", text);
   return false;
 }
-
 copyLinkBtn.onclick = async ()=>{
   const roomId = roomIdInput.value.trim();
   if(!roomId) return;
@@ -665,16 +644,7 @@ copyLinkBtn.onclick = async ()=>{
 };
 
 /* ================== BUTTONS ================== */
-startBtn.onclick = async ()=>{
-  try{
-    hideErrorBox();
-    await startMedia();
-  }catch(e){
-    const name = String(e?.name || "");
-    if(name === "NotAllowedError" || name === "NotFoundError") return;
-    showError(e);
-  }
-};
+startBtn.onclick = ()=> startMedia().catch(showError);
 createBtn.onclick = ()=> createRoom().catch(showError);
 joinBtn.onclick   = ()=> joinRoom().catch(showError);
 
@@ -697,11 +667,9 @@ onAuthStateChanged(auth, (user)=>{
     setStatus(mediaStatus, "Ready. Click Start.");
     refreshCopyInviteState();
 
-    // Auto-join only for invite-opened pages (B), after auth, one-shot:
     if(openedFromInvite){
       setStatus(callStatus, "Invite detected. Click Start (or Join) to connect.");
       logDiag("Invite mode: waiting for user gesture to start media.");
-      // Try to help: first click anywhere starts media, then auto-joins once.
       window.addEventListener("click", async ()=>{
         try{
           await startMedia();
