@@ -200,9 +200,6 @@ let bRetryTimer=null;
 let createAttemptA = 0;
 let joinAttemptB = 0;
 
-/* ✅ NEW: single-flight lock for auto-join */
-let autoJoinInProgress = false;
-
 /* ---------- URL HASH ---------- */
 if (location.hash.length > 1) {
   roomIdInput.value = location.hash.slice(1);
@@ -253,7 +250,7 @@ function clearBRetry(){
   if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
 }
 
-/* ✅ requestFreshOffer MUST NOT change joinAttemptB */
+/* ✅ FIXED: requestFreshOffer MUST NOT change joinAttemptB */
 async function requestFreshOffer(roomRef){
   lastAnsweredSessionB = null;
   await setDoc(roomRef,{joinRequest:Date.now()},{merge:true});
@@ -311,7 +308,6 @@ function stopAll(){
   setStatus(callStatus,"No room yet.");
   autoJoinDone=false;
   lastAnsweredSessionB=null;
-  autoJoinInProgress=false;
 
   copyLinkBtn.disabled = !isAuthed || !roomIdInput.value.trim();
 }
@@ -319,10 +315,6 @@ function stopAll(){
 let autoJoinScheduled = false;
 function scheduleAutoJoin() {
   if (autoJoinScheduled) return;
-  if (autoJoinDone) return;
-  if (autoJoinInProgress) return;
-  if (!roomIdInput.value.trim()) return;
-
   autoJoinScheduled = true;
   setTimeout(async () => {
     autoJoinScheduled = false;
@@ -338,20 +330,16 @@ function scheduleAutoJoin() {
 /* ---------- AUTO JOIN ---------- */
 async function autoJoinIfNeeded(){
   if(autoJoinDone) return;
-  if(autoJoinInProgress) return;
   if(!roomIdInput.value.trim()) return;
 
-  autoJoinInProgress = true;
+  autoJoinDone = true;
   setStatus(callStatus, "Auto-joining room…");
 
   try {
-    await joinRoom({ fromAuto:true });
-    autoJoinDone = true;
+    await joinRoom();
   } catch (e) {
-    autoJoinDone = false; // allow retry
+    autoJoinDone = false;
     throw e;
-  } finally {
-    autoJoinInProgress = false;
   }
 }
 
@@ -451,7 +439,7 @@ async function createRoom(){
 }
 
 /* ---------- ROOM B ---------- */
-async function joinRoom(_opts = {}){
+async function joinRoom(){
   requireAuth();
   await startMedia({ skipAutoJoin:true });
 
@@ -461,9 +449,6 @@ async function joinRoom(_opts = {}){
   if(unsubCallerB) unsubCallerB();
   clearBRetry();
 
-  // ✅ ensure UI never stays on "Auto-joining…"
-  setStatus(callStatus, "Connecting…");
-
   const roomId=roomIdInput.value.trim();
   if(!roomId) throw new Error("Room ID is empty.");
 
@@ -472,6 +457,8 @@ async function joinRoom(_opts = {}){
   if(!snap.exists()) throw new Error("Room not found");
 
   await requestFreshOffer(roomRef);
+
+  // ✅ This check now works correctly (no hidden joinAttemptB++ anymore)
   if(myAttempt !== joinAttemptB) return;
 
   setStatus(callStatus,"Connecting… (requested fresh offer)");
