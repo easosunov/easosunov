@@ -207,6 +207,27 @@
       try { await startingPromise; }
       finally { startingPromise = null; }
     }
+    
+    // Auto-start media on first user interaction (browser-safe)
+let autoStarted = false;
+
+async function autoStartMediaOnce() {
+  if (autoStarted) return;
+  autoStarted = true;
+
+  try {
+    setStatus(mediaStatus, "Auto-starting camera/mic…");
+    await startMedia();
+  } catch (e) {
+    autoStarted = false; // allow retry
+    setStatus(mediaStatus, "Click Start to enable camera/mic.");
+  }
+}
+
+// Any user interaction triggers auto-start
+["click", "keydown", "touchstart"].forEach(evt => {
+  window.addEventListener(evt, autoStartMediaOnce, { once: true });
+});
 
     async function stopMedia() {
       stopListeners();
