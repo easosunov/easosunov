@@ -7,10 +7,11 @@
 
 <style>
 body{font-family:system-ui;margin:16px}
-h1{font-size:20px}
+h1{font-size:20px;margin:0 0 10px}
 .row{display:flex;gap:12px;flex-wrap:wrap}
 .card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
 .videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width: 720px){ .videos{grid-template-columns:1fr} }
 video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
 button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
 button:disabled{opacity:.6;cursor:not-allowed}
@@ -36,8 +37,9 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
+#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
-#app.locked{filter:blur(2px);opacity:.35;pointer-events:none}
+#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
 /* DIAGNOSTICS */
 #diagBox{
@@ -52,6 +54,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   font-size:12px;
   white-space:pre-wrap;
 }
+.diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 </style>
 </head>
 
@@ -65,130 +68,697 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
     <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
+    <div class="small">Only approved users can access this communicator.</div>
 
     <label class="small">Email</label>
-    <input id="emailInput" type="email"/>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
 
     <label class="small">Password</label>
-    <input id="passInput" type="password"/>
+    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
 
-    <button id="loginBtn">Login</button>
+    <div id="loginRow">
+      <button id="loginBtn">Login</button>
+    </div>
     <div id="loginStatus" class="status">Please sign in.</div>
+    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
   </div>
 </div>
 
 <div id="app" class="locked">
+
   <div class="videos">
     <div class="card">
-      <b>Person A</b>
+      <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
+      <div class="small">Muted so you don’t hear yourself.</div>
     </div>
     <div class="card">
-      <b>Person B</b>
+      <b>Person B (Other)</b>
       <video id="remoteVideo" autoplay playsinline></video>
+      <div class="small">If audio doesn’t play, click the video once.</div>
     </div>
   </div>
 
-  <div class="row">
+  <div class="row" style="margin-top:12px">
     <div class="card">
+      <b>Step 1</b><br/><br/>
       <button id="startBtn" disabled>Start</button>
       <button id="stopBtn" disabled>Stop</button>
       <div class="status" id="mediaStatus">Not started.</div>
     </div>
 
     <div class="card">
+      <b>Step 2</b><br/><br/>
       <button id="createBtn" disabled>Create Room</button>
       <button id="joinBtn" disabled>Join Room</button>
+      <div class="small" style="margin-top:8px">Room ID</div>
       <input id="roomId" placeholder="Room ID"/>
-      <button id="copyLinkBtn" disabled>Copy Invite</button>
+      <div style="margin-top:8px">
+        <button id="copyLinkBtn" disabled>Copy Invite</button>
+      </div>
       <div class="status" id="callStatus">No room yet.</div>
+      <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
     </div>
   </div>
 
-  <!-- DIAGNOSTICS CARD -->
-  <div class="card">
+  <div class="card" style="margin-top:12px">
     <button id="diagBtn">Diagnostics</button>
+    <div class="diagActions">
+      <button id="copyDiagBtn" disabled>Copy log</button>
+      <button id="clearDiagBtn" disabled>Clear log</button>
+    </div>
     <pre id="diagBox"></pre>
+    <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
   </div>
 </div>
 
 <script type="module">
-/* ================== DIAGNOSTICS ================== */
+/* ================== ELEMENTS ================== */
+const errorBox = document.getElementById("errorBox");
+
+const loginOverlay = document.getElementById("loginOverlay");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const loginStatus = document.getElementById("loginStatus");
+const emailInput = document.getElementById("emailInput");
+const passInput = document.getElementById("passInput");
+const appRoot = document.getElementById("app");
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+const startBtn = document.getElementById("startBtn");
+const stopBtn  = document.getElementById("stopBtn");
+const createBtn= document.getElementById("createBtn");
+const joinBtn  = document.getElementById("joinBtn");
+const copyLinkBtn = document.getElementById("copyLinkBtn");
+const roomIdInput = document.getElementById("roomId");
+const mediaStatus = document.getElementById("mediaStatus");
+const callStatus  = document.getElementById("callStatus");
+
 const diagBtn = document.getElementById("diagBtn");
 const diagBox = document.getElementById("diagBox");
+const copyDiagBtn = document.getElementById("copyDiagBtn");
+const clearDiagBtn = document.getElementById("clearDiagBtn");
 
+const setStatus = (el,msg)=> el.textContent = msg;
+
+/* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
 const diagLog = [];
-
 function logDiag(msg){
   const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
   diagLog.push(line);
   console.log(line);
-
   if (diagVisible) {
     diagBox.textContent = diagLog.join("\n");
     diagBox.scrollTop = diagBox.scrollHeight;
   }
+  // enable buttons once we have anything
+  copyDiagBtn.disabled = diagLog.length === 0;
+  clearDiagBtn.disabled = diagLog.length === 0;
 }
-
 diagBtn.onclick = () => {
   diagVisible = !diagVisible;
   diagBox.style.display = diagVisible ? "block" : "none";
   diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
-
   if (diagVisible) {
     diagBox.textContent = diagLog.join("\n");
     diagBox.scrollTop = diagBox.scrollHeight;
   }
 };
+clearDiagBtn.onclick = () => {
+  diagLog.length = 0;
+  if (diagVisible) diagBox.textContent = "";
+  copyDiagBtn.disabled = true;
+  clearDiagBtn.disabled = true;
+  logDiag("Diagnostics cleared.");
+};
+copyDiagBtn.onclick = async () => {
+  const text = diagLog.join("\n");
+  if (!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    logDiag("Copied diagnostics to clipboard.");
+  }catch{
+    window.prompt("Copy diagnostics:", text);
+  }
+};
 
 /* ================== ERROR HANDLING ================== */
-const errorBox = document.getElementById("errorBox");
 function showError(e){
-  errorBox.style.display="block";
-  errorBox.textContent = String(e?.message || e);
-  logDiag("ERROR: " + errorBox.textContent);
+  errorBox.style.display = "block";
+  errorBox.textContent = String(e?.stack || e?.message || e);
+  logDiag("ERROR: " + String(e?.message || e));
 }
+function hideErrorBox(){
+  errorBox.style.display = "none";
+  errorBox.textContent = "";
+}
+window.addEventListener("error", (e)=> {
+  // keep for real JS bugs
+  showError(e.error || e.message || e);
+});
+window.addEventListener("unhandledrejection", (e)=> {
+  showError(e.reason || e);
+});
+
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut }
-from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import {
+  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  onSnapshot, getDocs, writeBatch
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
   projectId:"easosunov-webrtc",
+  storageBucket:"easosunov-webrtc.firebasestorage.app",
+  messagingSenderId:"100169991412",
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
+const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ================== AUTH ================== */
-onAuthStateChanged(auth, user => {
-  logDiag(user ? "Auth: signed in" : "Auth: signed out");
-  document.getElementById("loginOverlay").style.display = user ? "none" : "flex";
-  document.getElementById("app").classList.toggle("locked", !user);
-  document.getElementById("logoutBtn").style.display = user ? "inline-block" : "none";
-  if (user) document.getElementById("startBtn").disabled = false;
-});
+/* ================== AUTH GATE ================== */
+let isAuthed = false;
 
-document.getElementById("loginBtn").onclick = async () => {
-  try {
-    await signInWithEmailAndPassword(
-      auth,
-      emailInput.value.trim(),
-      passInput.value
-    );
-  } catch {
-    loginStatus.textContent = "Login failed";
+function requireAuthOrPrompt(){
+  if (isAuthed) return true;
+
+  loginOverlay.style.display = "flex";
+  appRoot.classList.add("locked");
+  loginStatus.textContent = "Please sign in first.";
+  return false;
+}
+
+loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Signing in…";
+  try{
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+  }catch(e){
+    // no pink box for common login mistakes
+    const code = String(e?.code || "");
+    const expected = new Set([
+      "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
+      "auth/invalid-email","auth/missing-password","auth/too-many-requests"
+    ]);
+    const msg =
+      (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password")
+        ? "Wrong email or password."
+      : (code === "auth/invalid-email")
+        ? "Invalid email address."
+      : (code === "auth/missing-password")
+        ? "Please enter your password."
+      : (code === "auth/too-many-requests")
+        ? "Too many attempts. Try again later."
+      : "Login failed. Please try again.";
+
+    loginStatus.textContent = msg;
+    logDiag(`Login failed (${code || "no-code"}): ${msg}`);
+
+    // only show pink box for unexpected errors
+    if (!expected.has(code)) showError(e);
   }
 };
-document.getElementById("logoutBtn").onclick = () => signOut(auth);
 
-/* ================== MEDIA (placeholder) ================== */
-document.getElementById("startBtn").onclick = async () => {
-  logDiag("Start clicked (media init placeholder)");
+logoutBtn.onclick = async () => {
+  try { await signOut(auth); }
+  catch(e){ showError(e); }
 };
+
+onAuthStateChanged(auth, (user)=>{
+  isAuthed = !!user;
+  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
+
+  if (isAuthed){
+    loginOverlay.style.display = "none";
+    appRoot.classList.remove("locked");
+    logoutBtn.style.display = "inline-block";
+    loginStatus.textContent = "Signed in.";
+
+    startBtn.disabled = false;
+    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
+
+    // enable copy if hash already present
+    refreshCopyInviteState();
+
+    // keep browser-safe: we *don’t* auto-start camera without user gesture
+    // but we can attempt after first click anywhere
+    window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
+  } else {
+    loginOverlay.style.display = "flex";
+    appRoot.classList.add("locked");
+    logoutBtn.style.display = "none";
+    stopAll();
+  }
+});
+
+/* ================== URL HASH ================== */
+if (location.hash.length > 1) {
+  roomIdInput.value = location.hash.slice(1);
+  setStatus(callStatus, "Room ID detected in URL.");
+  logDiag("Room ID from URL hash: " + roomIdInput.value);
+}
+
+/* ================== WEBRTC ================== */
+let localStream = null;
+let pc = null;
+
+const rtcConfig = { iceServers:[{urls:"stun:stun.l.google.com:19302"}] };
+
+function closePeer(){
+  if(pc){
+    pc.onicecandidate=null;
+    pc.ontrack=null;
+    pc.onconnectionstatechange=null;
+    pc.oniceconnectionstatechange=null;
+    try{ pc.close(); }catch{}
+    pc=null;
+  }
+  remoteVideo.srcObject = null;
+}
+
+function ensurePeer(){
+  closePeer();
+  pc = new RTCPeerConnection(rtcConfig);
+  logDiag("Created RTCPeerConnection");
+
+  const rs = new MediaStream();
+  remoteVideo.srcObject = rs;
+
+  pc.ontrack = (e)=>{
+    e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(()=>{});
+    logDiag(`ontrack: tracks=${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+  };
+
+  pc.onconnectionstatechange = ()=>{
+    if (!pc) return;
+    logDiag("pc.connectionState=" + pc.connectionState);
+  };
+  pc.oniceconnectionstatechange = ()=>{
+    if (!pc) return;
+    logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
+  };
+
+  if(!localStream) throw new Error("Local media not started.");
+  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+}
+
+/* ================== FIRESTORE HELPERS ================== */
+async function clearSub(col){
+  const s = await getDocs(col);
+  if(s.empty) return;
+  const b = writeBatch(db);
+  s.forEach(d=>b.delete(d.ref));
+  await b.commit();
+  logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
+}
+
+/* ================== UI STATE HELPERS ================== */
+function refreshCopyInviteState(){
+  const hasRoomId = !!roomIdInput.value.trim();
+  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
+}
+
+/* ================== MEDIA ================== */
+let startingPromise = null;
+let autoJoinDone = false;
+let autoJoinScheduled = false;
+
+async function startMedia(opts={skipAutoJoin:false}){
+  if(!requireAuthOrPrompt()) return;
+
+  if(localStream){
+    if(!opts.skipAutoJoin) scheduleAutoJoin();
+    return;
+  }
+  if(startingPromise) return startingPromise;
+
+  startingPromise = (async()=>{
+    hideErrorBox();
+    setStatus(mediaStatus,"Requesting camera/mic…");
+    logDiag("Requesting getUserMedia…");
+    try{
+      localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    }catch(e){
+      setStatus(mediaStatus,"Camera/mic blocked. Allow permissions and reload.");
+      logDiag("getUserMedia failed: " + (e?.name || e));
+      throw e;
+    }
+    localVideo.srcObject = localStream;
+
+    startBtn.disabled = true;
+    stopBtn.disabled  = false;
+    createBtn.disabled = false;
+    joinBtn.disabled   = false;
+
+    setStatus(mediaStatus,"Camera/mic started.");
+    logDiag("Camera/mic started.");
+  })();
+
+  try{ await startingPromise; }
+  finally{ startingPromise = null; }
+
+  if(!opts.skipAutoJoin) scheduleAutoJoin();
+}
+
+function scheduleAutoJoin(){
+  if(autoJoinScheduled) return;
+  autoJoinScheduled = true;
+  setTimeout(async ()=>{
+    autoJoinScheduled = false;
+    try{ await autoJoinIfNeeded(); }
+    catch(e){
+      setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
+      // showError only for unexpected errors; this is helpful for you
+      showError(e);
+    }
+  }, 0);
+}
+
+async function autoJoinIfNeeded(){
+  if(autoJoinDone) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus,"Auto-joining room…");
+  logDiag("Auto-joining triggered.");
+
+  try{
+    await joinRoom();
+  }catch(e){
+    autoJoinDone = false;
+    throw e;
+  }
+}
+
+function stopAll(){
+  stopListeners();
+  closePeer();
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+  localVideo.srcObject=null;
+
+  startBtn.disabled = !isAuthed;
+  stopBtn.disabled = true;
+  createBtn.disabled = true;
+  joinBtn.disabled = true;
+
+  setStatus(mediaStatus,"Not started.");
+  setStatus(callStatus,"No room yet.");
+  autoJoinDone = false;
+
+  refreshCopyInviteState();
+}
+
+stopBtn.onclick = () => stopAll();
+
+/* ================== LISTENERS (avoid stacking) ================== */
+let unsubRoomA=null, unsubCalleeA=null;
+let unsubRoomB=null, unsubCallerB=null;
+
+function stopListeners(){
+  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
+  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
+  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
+  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+}
+
+/* ================== REJOIN SUPPORT ================== */
+let lastSeenJoinRequestA = 0;
+let lastAnsweredSessionB = null;
+let bRetryTimer = null;
+
+function clearBRetry(){
+  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
+}
+
+async function requestFreshOffer(roomRef){
+  lastAnsweredSessionB = null;
+  await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
+  logDiag("Requested fresh offer (joinRequest).");
+}
+
+/* ================== ROOM A ================== */
+let createAttemptA = 0;
+
+async function createRoom(){
+  if(!requireAuthOrPrompt()) return;
+  await startMedia();
+
+  const myAttempt = ++createAttemptA;
+  stopListeners(); // important: no stacked listeners
+
+  let roomRef;
+  const existing = roomIdInput.value.trim();
+  if(existing) roomRef = doc(db,"rooms", existing);
+  else roomRef = doc(collection(db,"rooms"));
+
+  roomIdInput.value = roomRef.id;
+  location.hash = roomRef.id;
+
+  refreshCopyInviteState(); // enable Copy Invite
+  logDiag("CreateRoom: roomId=" + roomRef.id);
+
+  const caller = collection(roomRef,"callerCandidates");
+  const callee = collection(roomRef,"calleeCandidates");
+
+  // bump numeric session
+  const snap = await getDoc(roomRef);
+  const prev = snap.exists() ? (snap.data().session || 0) : 0;
+  const session = Number(prev) + 1;
+
+  if(myAttempt !== createAttemptA) return;
+
+  await clearSub(caller);
+  await clearSub(callee);
+
+  if(myAttempt !== createAttemptA) return;
+
+  ensurePeer();
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate){
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now()
+  }, { merge:true });
+
+  setStatus(callStatus, `Room active (session ${session}). Click "Copy Invite" and send it.`);
+  logDiag(`Room written. session=${session}`);
+
+  unsubRoomA = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== createAttemptA) return;
+    const d = s.data();
+    if(!d) return;
+
+    // rejoin request => restart session (new offer)
+    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+      lastSeenJoinRequestA = d.joinRequest;
+      setStatus(callStatus, "Join request received — restarting session…");
+      logDiag("JoinRequest seen => restarting offer/session.");
+      setTimeout(()=>createRoom().catch(()=>{}), 150);
+      return;
+    }
+
+    // apply answer only if correct session and correct state
+    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        await pc.setRemoteDescription(d.answer);
+        setStatus(callStatus, `Connected (session ${session}).`);
+        logDiag("Applied remote answer.");
+      }catch(e){
+        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(callStatus, "Answer failed — restarting session…");
+        setTimeout(()=>createRoom().catch(()=>{}), 200);
+      }
+    }
+  });
+
+  unsubCalleeA = onSnapshot(callee, (ss)=>{
+    ss.docChanges().forEach(ch=>{
+      if(ch.type !== "added" || !pc) return;
+      const c = ch.doc.data();
+      if(c.session !== session) return;
+      try{ pc.addIceCandidate(c); }catch{}
+    });
+  });
+}
+
+/* ================== ROOM B ================== */
+let joinAttemptB = 0;
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  // start media without triggering autoJoin recursion
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++joinAttemptB;
+  stopListeners();
+  clearBRetry();
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+  location.hash = roomId;
+
+  logDiag("JoinRoom: roomId=" + roomId);
+
+  const roomRef = doc(db,"rooms", roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()) throw new Error("Room not found");
+
+  await requestFreshOffer(roomRef);
+  if(myAttempt !== joinAttemptB) return;
+
+  setStatus(callStatus, "Connecting… (requested fresh offer)");
+
+  unsubRoomB = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== joinAttemptB) return;
+    const d = s.data();
+    if(!d?.offer || !d.session) return;
+
+    // only answer new sessions
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+    logDiag("New offer/session detected: " + session);
+
+    try{
+      ensurePeer();
+
+      const caller = collection(roomRef,"callerCandidates");
+      const callee = collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
+      if(myAttempt !== joinAttemptB) return;
+
+      pc.onicecandidate = (e)=>{
+        if(e.candidate){
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+        }
+      };
+
+      await pc.setRemoteDescription(d.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+
+      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
+      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      logDiag("Answer written to room doc.");
+
+      unsubCallerB = onSnapshot(caller, (ss)=>{
+        if(myAttempt !== joinAttemptB) return;
+        ss.docChanges().forEach(ch=>{
+          if(ch.type !== "added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
+        });
+      });
+
+      // watchdog retry: if still not connected, request new offer
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
+        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
+        logDiag("Watchdog: requesting fresh offer again.");
+        try{
+          lastAnsweredSessionB = null;
+          await requestFreshOffer(roomRef);
+        }catch(e){ showError(e); }
+      }, 10000);
+
+      pc.onconnectionstatechange = async ()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        if(pc.connectionState === "connected"){ clearBRetry(); }
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
+          setStatus(callStatus, "Connection lost — requesting new offer…");
+          logDiag("Connection lost => requesting fresh offer.");
+          try{
+            lastAnsweredSessionB = null;
+            await requestFreshOffer(roomRef);
+          }catch(e){ showError(e); }
+        }
+      };
+
+    }catch(e){
+      lastAnsweredSessionB = null;
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(callStatus, "Join failed — requesting new offer…");
+      try{ await requestFreshOffer(roomRef); }catch(err){ showError(err); }
+    }
+  });
+}
+
+/* ================== COPY INVITE ================== */
+async function copyTextRobust(text){
+  if(navigator.clipboard && window.isSecureContext){
+    try{ await navigator.clipboard.writeText(text); return true; }catch{}
+  }
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
+copyLinkBtn.onclick = async ()=>{
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) return;
+  const invite = `${location.origin}${location.pathname}#${roomId}`;
+  const ok = await copyTextRobust(invite);
+  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
+  logDiag("Copy invite clicked.");
+};
+
+/* ================== BUTTON WIRING ================== */
+startBtn.onclick = async ()=>{
+  try{
+    hideErrorBox();
+    await startMedia();
+  }catch(e){
+    const name = String(e?.name || "");
+    // do not spam pink box for normal permission errors
+    if(name === "NotAllowedError" || name === "NotFoundError") return;
+    showError(e);
+  }
+};
+
+createBtn.onclick = ()=> createRoom().catch(showError);
+joinBtn.onclick   = ()=> joinRoom().catch(showError);
+
+roomIdInput.addEventListener("input", ()=>{
+  refreshCopyInviteState();
+});
+
+/* enable copy if hash already present AND authed */
+refreshCopyInviteState();
+
+/* cleanup */
+window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
 </script>
 </body>
 </html>
