@@ -7,7 +7,7 @@
 
 <script>
 /* ===== FORCE LATEST HTML (CACHE-BUST) ===== */
-const BUILD = "2025-12-25T23:10Z-HOST-EARLY-ROOMDOC-LOG-WRITES";
+const BUILD = "2025-12-25T23:40Z-TIMEOUTS-LONGPOLL-SERVER-VERIFY";
 (function forceCacheBust(){
   try{
     const params = new URLSearchParams(location.search);
@@ -60,7 +60,7 @@ const BUILD = "2025-12-25T23:10Z-HOST-EARLY-ROOMDOC-LOG-WRITES";
   #diagBox{
     display:none;
     margin-top:8px;
-    max-height:280px;
+    max-height:300px;
     overflow:auto;
     background:#111;
     color:#0f0;
@@ -191,6 +191,10 @@ function logDiag(msg){
 }
 logDiag("BOOT: " + BUILD);
 logDiag("URL: " + location.href);
+logDiag("navigator.onLine=" + navigator.onLine);
+
+window.addEventListener("online", ()=>logDiag("Browser ONLINE event"));
+window.addEventListener("offline", ()=>logDiag("Browser OFFLINE event"));
 
 diagBtn.onclick = () => {
   diagVisible = !diagVisible;
@@ -224,11 +228,24 @@ function hideErrorBox(){ errorBox.style.display="none"; errorBox.textContent="";
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
 
-/* ================== FIREBASE ================== */
+/* ================== TIMEOUT WRAPPER ================== */
+function withTimeout(promise, ms, label){
+  let t;
+  const timeout = new Promise((_, rej)=>{
+    t = setTimeout(()=> rej(new Error(`TIMEOUT after ${ms}ms: ${label}`)), ms);
+  });
+  return Promise.race([
+    promise.finally(()=>clearTimeout(t)),
+    timeout
+  ]);
+}
+
+/* ================== FIREBASE (FORCE LONG POLLING) ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
-  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch, serverTimestamp
+  initializeFirestore, getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  onSnapshot, getDocs, writeBatch,
+  getDocFromServer, enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
@@ -242,7 +259,14 @@ const fbApp = initializeApp({
   messagingSenderId:"100169991412",
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
-const db = getFirestore(fbApp);
+
+// Force long-polling (helps in many “writes hang / snapshots weird” environments)
+const db = initializeFirestore(fbApp, {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false
+});
+logDiag("Firestore init: experimentalForceLongPolling=true");
+
 const auth = getAuth(fbApp);
 
 /* ================== AUTH ================== */
@@ -316,15 +340,14 @@ function ensurePeer(){
 /* ================== FIRESTORE HELPERS ================== */
 async function clearSubBestEffort(col){
   try{
-    const s = await getDocs(col);
+    const s = await withTimeout(getDocs(col), 6000, "getDocs(" + col.path + ")");
     if(s.empty) return;
     const b = writeBatch(db);
     s.forEach(d=>b.delete(d.ref));
-    await b.commit();
+    await withTimeout(b.commit(), 6000, "batch.commit(" + col.path + ")");
     logDiag(`Cleared ${col.path} docs=${s.size}`);
   }catch(e){
     logDiag(`WARN: clearSub blocked for ${col.path}: ` + (e?.code || e?.message || e));
-    // continue
   }
 }
 
@@ -397,15 +420,14 @@ function stopAll(){
 
   setStatus(mediaStatus,"Not started.");
   setStatus(callStatus,"No room yet.");
-
   refreshCopyInviteState();
 }
 stopBtn.onclick = ()=> stopAll();
 
-/* ================== KEY: Guest must NOT create room doc ================== */
+/* ================== Guest nudge (must not create) ================== */
 async function nudgeHostUpdateOnly(roomRef){
   try{
-    await updateDoc(roomRef, { joinRequest: Date.now() });
+    await withTimeout(updateDoc(roomRef, { joinRequest: Date.now() }), 6000, "updateDoc(joinRequest)");
     logDiag("Nudged host (joinRequest via updateDoc).");
     return true;
   }catch(e){
@@ -434,31 +456,47 @@ async function createRoom(){
   roomIdInput.value = roomRef.id;
   location.hash = roomRef.id;
   refreshCopyInviteState();
+
   logDiag("HOST createRoom: roomId=" + roomRef.id);
 
   const caller = collection(roomRef,"callerCandidates");
   const callee = collection(roomRef,"calleeCandidates");
 
-  // Create room doc EARLY so guest sees exists=true immediately
+  // Force Firestore network on
   try{
-    await setDoc(roomRef, {
+    await withTimeout(enableNetwork(db), 6000, "enableNetwork()");
+    logDiag("enableNetwork() OK");
+  }catch(e){
+    logDiag("WARN: enableNetwork failed: " + (e?.code || e?.message || e));
+  }
+
+  // EARLY room doc write + server verify (this is where you are currently hanging)
+  try{
+    logDiag("HOST writing early room doc...");
+    await withTimeout(setDoc(roomRef, {
       state: "creating",
       build: BUILD,
       updatedAt: Date.now(),
-      createdAt: serverTimestamp(),
       hostUid: auth.currentUser?.uid || null
-    }, { merge:true });
-    logDiag("HOST wrote early room doc (state=creating).");
+    }, { merge:true }), 8000, "setDoc(room early)");
+
+    logDiag("HOST early setDoc resolved.");
+
+    // Verify it exists on server (NOT just local cache)
+    logDiag("HOST verifying room exists on SERVER...");
+    const s = await withTimeout(getDocFromServer(roomRef), 8000, "getDocFromServer(room)");
+    logDiag("HOST server verify: exists=" + s.exists());
+
   }catch(e){
-    logDiag("HOST FAILED early setDoc(room): " + (e?.code || e?.message || e));
+    logDiag("HOST FAILED early room write/verify: " + (e?.code || e?.message || e));
     showError(e);
     return;
   }
 
-  // Bump session number (best effort)
+  // session
   let session = 1;
   try{
-    const snap = await getDoc(roomRef);
+    const snap = await withTimeout(getDoc(roomRef), 6000, "getDoc(room)");
     const prev = snap.exists() ? (snap.data().session || 0) : 0;
     session = Number(prev) + 1;
     logDiag("HOST computed session=" + session);
@@ -469,12 +507,7 @@ async function createRoom(){
   await clearSubBestEffort(caller);
   await clearSubBestEffort(callee);
 
-  try{
-    ensurePeer();
-  }catch(e){
-    showError(e);
-    return;
-  }
+  try{ ensurePeer(); } catch(e){ showError(e); return; }
 
   pc.onicecandidate = (e)=>{
     if(e.candidate){
@@ -490,13 +523,14 @@ async function createRoom(){
     await pc.setLocalDescription(offer);
     logDiag("HOST setLocalDescription(offer) OK.");
 
-    await setDoc(roomRef, {
+    logDiag("HOST writing offer+session...");
+    await withTimeout(setDoc(roomRef, {
       state: "offered",
       session,
       offer: { type: offer.type, sdp: offer.sdp },
       answer: null,
       updatedAt: Date.now()
-    }, { merge:true });
+    }, { merge:true }), 8000, "setDoc(room offer)");
 
     logDiag("HOST wrote offer+session to room doc. session=" + session);
     setStatus(callStatus, `Room active (session ${session}). Send invite to B.`);
@@ -531,10 +565,7 @@ async function createRoom(){
         }
       }
     },
-    (err)=>{
-      logDiag("HOST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err));
-      showError(err);
-    }
+    (err)=>{ logDiag("HOST SNAPSHOT ERROR(room): " + (err?.code || err?.message || err)); showError(err); }
   );
 
   unsubCalleeA = onSnapshot(
@@ -547,10 +578,7 @@ async function createRoom(){
         try{ pc.addIceCandidate(c); }catch{}
       });
     },
-    (err)=>{
-      logDiag("HOST SNAPSHOT ERROR(calleeCandidates): " + (err?.code || err?.message || err));
-      showError(err);
-    }
+    (err)=>{ logDiag("HOST SNAPSHOT ERROR(calleeCandidates): " + (err?.code || err?.message || err)); showError(err); }
   );
 }
 
@@ -608,7 +636,6 @@ async function joinRoom(){
 
       try{
         ensurePeer();
-
         const caller = collection(roomRef,"callerCandidates");
         const callee = collection(roomRef,"calleeCandidates");
 
@@ -627,7 +654,7 @@ async function joinRoom(){
         const ans = await pc.createAnswer();
         await pc.setLocalDescription(ans);
 
-        await updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now(), state:"answered" });
+        await withTimeout(updateDoc(roomRef, { answer: ans, session: d.session, answeredAt: Date.now(), state:"answered" }), 8000, "updateDoc(answer)");
 
         setStatus(callStatus, `Joined room. Connecting… (session ${d.session})`);
         logDiag("GUEST wrote answer.");
@@ -643,10 +670,7 @@ async function joinRoom(){
               try{ pc.addIceCandidate(c); }catch{}
             });
           },
-          (err)=>{
-            logDiag("GUEST SNAPSHOT ERROR(callerCandidates): " + (err?.code || err?.message || err));
-            showError(err);
-          }
+          (err)=>{ logDiag("GUEST SNAPSHOT ERROR(callerCandidates): " + (err?.code || err?.message || err)); showError(err); }
         );
 
         pc.onconnectionstatechange = ()=>{
@@ -672,7 +696,6 @@ async function joinRoom(){
     }
   );
 
-  // Nudge host (updateDoc-only). Now that host creates doc early, this should usually succeed.
   nudgeHostUpdateOnly(roomRef).catch(()=>{});
 }
 
