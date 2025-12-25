@@ -1,775 +1,474 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>2-Person Video/Sound Communicator (WebRTC)</title>
-
-<style>
-body{font-family:system-ui;margin:16px}
-h1{font-size:20px;margin:0 0 10px}
-.row{display:flex;gap:12px;flex-wrap:wrap}
-.card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
-.videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width: 720px){ .videos{grid-template-columns:1fr} }
-video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
-button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
-button:disabled{opacity:.6;cursor:not-allowed}
-input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
-.status{font-size:13px;margin-top:8px}
-.small{font-size:12px;color:#555;margin-top:6px}
-
-#errorBox{
-  display:none;margin:12px 0;padding:10px;
-  border:1px solid #f3b5b5;background:#fff5f5;
-  color:#7a1b1b;border-radius:12px;white-space:pre-wrap
-}
-
-/* LOGIN OVERLAY */
-#loginOverlay{
-  position:fixed; inset:0; z-index:9999;
-  background:rgba(0,0,0,.55);
-  display:flex; align-items:center; justify-content:center;
-}
-#loginCard{
-  width:min(520px,calc(100% - 24px));
-  background:#fff; border-radius:14px;
-  padding:16px;
-  box-shadow:0 10px 30px rgba(0,0,0,.35);
-}
-#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
-#logoutBtn{float:right}
-#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
-
-/* DIAGNOSTICS */
-#diagBox{
-  display:none;
-  margin-top:8px;
-  max-height:220px;
-  overflow:auto;
-  background:#111;
-  color:#0f0;
-  padding:8px;
-  border-radius:8px;
-  font-size:12px;
-  white-space:pre-wrap;
-}
-.diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>2-Person Video/Sound Communicator (WebRTC)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; flex: 1 1 320px; }
+    .videos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 720px) { .videos { grid-template-columns: 1fr; } }
+    video { width: 100%; background: #000; border-radius: 12px; aspect-ratio: 16/9; }
+    label { font-size: 12px; color: #444; display: block; margin: 8px 0 6px; }
+    input[type="text"] { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid #ccc; }
+    button { padding: 10px 12px; border-radius: 10px; border: 1px solid #ccc; background: #f7f7f7; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .small { font-size: 12px; color: #555; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+    .status { margin-top: 10px; font-size: 13px; }
+    #errorBox{
+      display:none; margin: 12px 0; padding: 10px 12px;
+      border: 1px solid #f3b5b5; background: #fff5f5; color: #7a1b1b;
+      border-radius: 12px; white-space: pre-wrap;
+    }
+  </style>
 </head>
-
 <body>
-<h1>2-Person Video/Sound Communicator (WebRTC)</h1>
-
-<div id="errorBox"></div>
-
-<!-- LOGIN -->
-<div id="loginOverlay">
-  <div id="loginCard">
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
-    <div class="small">Only approved users can access this communicator.</div>
-
-    <label class="small">Email</label>
-    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
-
-    <label class="small">Password</label>
-    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
-
-    <div id="loginRow">
-      <button id="loginBtn">Login</button>
-    </div>
-    <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
-  </div>
-</div>
-
-<div id="app" class="locked">
+  <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
+  <div id="errorBox"></div>
 
   <div class="videos">
     <div class="card">
-      <b>Person A (You)</b>
-      <video id="localVideo" autoplay muted playsinline></video>
-      <div class="small">Muted so you don’t hear yourself.</div>
+      <div><strong>Person A (You)</strong> — your webcam + mic</div>
+      <video id="localVideo" playsinline autoplay muted></video>
+      <div class="small">Muted so you don’t hear yourself (remote audio will play).</div>
     </div>
+
     <div class="card">
-      <b>Person B (Other)</b>
-      <video id="remoteVideo" autoplay playsinline></video>
-      <div class="small">If audio doesn’t play, click the video once.</div>
+      <div><strong>Person B (Other)</strong> — remote webcam + mic</div>
+      <video id="remoteVideo" playsinline autoplay></video>
+      <div class="small">If audio doesn’t play, click the video once (browser autoplay rules).</div>
     </div>
   </div>
 
-  <div class="row" style="margin-top:12px">
+  <div class="row" style="margin-top: 12px;">
     <div class="card">
-      <b>Step 1</b><br/><br/>
-      <button id="startBtn" disabled>Start</button>
+      <div><strong>Step 1:</strong> Start camera & mic</div>
+      <button id="startBtn">Start</button>
       <button id="stopBtn" disabled>Stop</button>
       <div class="status" id="mediaStatus">Not started.</div>
     </div>
 
     <div class="card">
-      <b>Step 2</b><br/><br/>
-      <button id="createBtn" disabled>Create Room</button>
-      <button id="joinBtn" disabled>Join Room</button>
-      <div class="small" style="margin-top:8px">Room ID</div>
-      <input id="roomId" placeholder="Room ID"/>
-      <div style="margin-top:8px">
-        <button id="copyLinkBtn" disabled>Copy Invite</button>
+      <div><strong>Step 2:</strong> Create or join a room</div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        <button id="createBtn" disabled>Create Room (Person A)</button>
+        <button id="joinBtn" disabled>Join Room (Person B)</button>
       </div>
+
+      <label for="roomId">Room ID</label>
+      <input id="roomId" type="text" placeholder="(Create a room or paste one here)" />
+
+      <div style="margin-top:10px;">
+        <button id="copyLinkBtn" disabled>Copy Invite Link</button>
+      </div>
+
       <div class="status" id="callStatus">No room yet.</div>
-      <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
+      <div class="small" style="margin-top:8px;">
+        Tip: room ID is also taken from URL hash, like <span class="mono">.../webrtc.html#ROOM_ID</span>
+      </div>
     </div>
   </div>
 
-  <div class="card" style="margin-top:12px">
-    <button id="diagBtn">Diagnostics</button>
-    <div class="diagActions">
-      <button id="copyDiagBtn" disabled>Copy log</button>
-      <button id="clearDiagBtn" disabled>Clear log</button>
-    </div>
-    <pre id="diagBox"></pre>
-    <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
-  </div>
-</div>
+  <script type="module">
+    const errorBox = document.getElementById("errorBox");
+    function showError(e) {
+      errorBox.style.display = "block";
+      errorBox.textContent = String(e?.stack || e);
+      console.error(e);
+    }
+    window.addEventListener("error", (e) => showError(e.error || e.message || e));
+    window.addEventListener("unhandledrejection", (e) => showError(e.reason || e));
 
-<script type="module">
-/* ================== ELEMENTS ================== */
-const errorBox = document.getElementById("errorBox");
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+    import {
+      getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+      onSnapshot, getDocs, writeBatch
+    } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
-const loginOverlay = document.getElementById("loginOverlay");
-const loginBtn = document.getElementById("loginBtn");
-const logoutBtn = document.getElementById("logoutBtn");
-const loginStatus = document.getElementById("loginStatus");
-const emailInput = document.getElementById("emailInput");
-const passInput = document.getElementById("passInput");
-const appRoot = document.getElementById("app");
-
-const localVideo = document.getElementById("localVideo");
-const remoteVideo = document.getElementById("remoteVideo");
-const startBtn = document.getElementById("startBtn");
-const stopBtn  = document.getElementById("stopBtn");
-const createBtn= document.getElementById("createBtn");
-const joinBtn  = document.getElementById("joinBtn");
-const copyLinkBtn = document.getElementById("copyLinkBtn");
-const roomIdInput = document.getElementById("roomId");
-const mediaStatus = document.getElementById("mediaStatus");
-const callStatus  = document.getElementById("callStatus");
-
-const diagBtn = document.getElementById("diagBtn");
-const diagBox = document.getElementById("diagBox");
-const copyDiagBtn = document.getElementById("copyDiagBtn");
-const clearDiagBtn = document.getElementById("clearDiagBtn");
-
-const setStatus = (el,msg)=> el.textContent = msg;
-
-/* ================== DIAGNOSTICS ================== */
-let diagVisible = false;
-const diagLog = [];
-function logDiag(msg){
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  diagLog.push(line);
-  console.log(line);
-  if (diagVisible) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
-  }
-  copyDiagBtn.disabled = diagLog.length === 0;
-  clearDiagBtn.disabled = diagLog.length === 0;
-}
-diagBtn.onclick = () => {
-  diagVisible = !diagVisible;
-  diagBox.style.display = diagVisible ? "block" : "none";
-  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
-  if (diagVisible) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
-  }
-};
-clearDiagBtn.onclick = () => {
-  diagLog.length = 0;
-  if (diagVisible) diagBox.textContent = "";
-  copyDiagBtn.disabled = true;
-  clearDiagBtn.disabled = true;
-  logDiag("Diagnostics cleared.");
-};
-copyDiagBtn.onclick = async () => {
-  const text = diagLog.join("\n");
-  if (!text) return;
-  try{
-    await navigator.clipboard.writeText(text);
-    logDiag("Copied diagnostics to clipboard.");
-  }catch{
-    window.prompt("Copy diagnostics:", text);
-  }
-};
-
-/* ================== ERROR HANDLING ================== */
-function showError(e){
-  errorBox.style.display = "block";
-  errorBox.textContent = String(e?.stack || e?.message || e);
-  logDiag("ERROR: " + String(e?.message || e));
-}
-function hideErrorBox(){
-  errorBox.style.display = "none";
-  errorBox.textContent = "";
-}
-window.addEventListener("error", (e)=> showError(e.error || e.message || e));
-window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-
-emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-
-/* ================== FIREBASE ================== */
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-
-const app = initializeApp({
-  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
-  authDomain:"easosunov-webrtc.firebaseapp.com",
-  projectId:"easosunov-webrtc",
-  storageBucket:"easosunov-webrtc.firebasestorage.app",
-  messagingSenderId:"100169991412",
-  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
-});
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-/* ================== AUTH GATE ================== */
-let isAuthed = false;
-
-function requireAuthOrPrompt(){
-  if (isAuthed) return true;
-  loginOverlay.style.display = "flex";
-  appRoot.classList.add("locked");
-  loginStatus.textContent = "Please sign in first.";
-  return false;
-}
-
-loginBtn.onclick = async () => {
-  hideErrorBox();
-  loginStatus.textContent = "Signing in…";
-  try{
-    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-  }catch(e){
-    const code = String(e?.code || "");
-    const expected = new Set([
-      "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
-      "auth/invalid-email","auth/missing-password","auth/too-many-requests"
-    ]);
-    const msg =
-      (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password")
-        ? "Wrong email or password."
-      : (code === "auth/invalid-email")
-        ? "Invalid email address."
-      : (code === "auth/missing-password")
-        ? "Please enter your password."
-      : (code === "auth/too-many-requests")
-        ? "Too many attempts. Try again later."
-      : "Login failed. Please try again.";
-
-    loginStatus.textContent = msg;
-    logDiag(`Login failed (${code || "no-code"}): ${msg}`);
-    if (!expected.has(code)) showError(e);
-  }
-};
-
-logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
-
-onAuthStateChanged(auth, (user)=>{
-  isAuthed = !!user;
-  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
-
-  if (isAuthed){
-    loginOverlay.style.display = "none";
-    appRoot.classList.remove("locked");
-    logoutBtn.style.display = "inline-block";
-    loginStatus.textContent = "Signed in.";
-
-    startBtn.disabled = false;
-    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
-
-    refreshCopyInviteState();
-
-    // keep browser-safe (no camera without gesture)
-    window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
-  } else {
-    loginOverlay.style.display = "flex";
-    appRoot.classList.add("locked");
-    logoutBtn.style.display = "none";
-    stopAll();
-  }
-});
-
-/* ================== URL HASH / AUTOJOIN MODE ==================
-   IMPORTANT: only treat it as an invite if it existed on initial page load.
-   (When Person A creates a room, we will change hash, but we must NOT auto-join.)
-*/
-const openedFromInvite = (location.hash.length > 1);
-let suppressAutoJoin = false; // Create Room will turn this on to avoid races
-
-if (openedFromInvite) {
-  roomIdInput.value = location.hash.slice(1);
-  setStatus(callStatus, "Room ID detected in URL.");
-  logDiag("Room ID from URL hash: " + roomIdInput.value);
-}
-
-/* ================== WEBRTC ================== */
-let localStream = null;
-let pc = null;
-
-const rtcConfig = { iceServers:[{urls:"stun:stun.l.google.com:19302"}] };
-
-function closePeer(){
-  if(pc){
-    pc.onicecandidate=null;
-    pc.ontrack=null;
-    pc.onconnectionstatechange=null;
-    pc.oniceconnectionstatechange=null;
-    try{ pc.close(); }catch{}
-    pc=null;
-  }
-  remoteVideo.srcObject = null;
-}
-
-function ensurePeer(){
-  closePeer();
-  pc = new RTCPeerConnection(rtcConfig);
-  logDiag("Created RTCPeerConnection");
-
-  const rs = new MediaStream();
-  remoteVideo.srcObject = rs;
-
-  pc.ontrack = (e)=>{
-    e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
-    remoteVideo.muted = false;
-    remoteVideo.play().catch(()=>{});
-    logDiag(`ontrack: tracks=${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
-  };
-
-  pc.onconnectionstatechange = ()=>{
-    if (!pc) return;
-    logDiag("pc.connectionState=" + pc.connectionState);
-  };
-  pc.oniceconnectionstatechange = ()=>{
-    if (!pc) return;
-    logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
-  };
-
-  if(!localStream) throw new Error("Local media not started.");
-  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
-}
-
-/* ================== FIRESTORE HELPERS ================== */
-async function clearSub(col){
-  const s = await getDocs(col);
-  if(s.empty) return;
-  const b = writeBatch(db);
-  s.forEach(d=>b.delete(d.ref));
-  await b.commit();
-  logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
-}
-
-/* ================== UI HELPERS ================== */
-function refreshCopyInviteState(){
-  const hasRoomId = !!roomIdInput.value.trim();
-  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
-}
-
-/* ================== MEDIA + AUTOJOIN ================== */
-let startingPromise = null;
-let autoJoinDone = false;
-let autoJoinScheduled = false;
-let autoJoinTimer = null;
-
-async function startMedia(opts={skipAutoJoin:false}){
-  if(!requireAuthOrPrompt()) return;
-
-  if(localStream){
-    if(!opts.skipAutoJoin) scheduleAutoJoin();
-    return;
-  }
-  if(startingPromise) return startingPromise;
-
-  startingPromise = (async()=>{
-    hideErrorBox();
-
-    setStatus(mediaStatus,"Requesting camera/mic…");
-    logDiag("Requesting getUserMedia…");
-
-    localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-    localVideo.srcObject = localStream;
-
-    setStatus(mediaStatus,"Camera/mic started.");
-    logDiag("Camera/mic started (stream attached).");
-
-    localVideo.onloadedmetadata = async () => {
-      try { await localVideo.play(); } catch {}
-      setStatus(mediaStatus,"Camera/mic started.");
-      logDiag("Local video playing.");
+    const firebaseConfig = {
+      apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
+      authDomain: "easosunov-webrtc.firebaseapp.com",
+      projectId: "easosunov-webrtc",
+      storageBucket: "easosunov-webrtc.firebasestorage.app",
+      messagingSenderId: "100169991412",
+      appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
     };
 
-    startBtn.disabled = true;
-    stopBtn.disabled  = false;
-    createBtn.disabled = false;
-    joinBtn.disabled   = false;
-  })();
+    // UI
+    const localVideo = document.getElementById("localVideo");
+    const remoteVideo = document.getElementById("remoteVideo");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const createBtn = document.getElementById("createBtn");
+    const joinBtn = document.getElementById("joinBtn");
+    const copyLinkBtn = document.getElementById("copyLinkBtn");
+    const roomIdInput = document.getElementById("roomId");
+    const mediaStatus = document.getElementById("mediaStatus");
+    const callStatus = document.getElementById("callStatus");
 
-  try{ await startingPromise; }
-  finally{ startingPromise = null; }
+    function setStatus(el, msg) { el.textContent = msg; }
 
-  if(!opts.skipAutoJoin) scheduleAutoJoin();
-}
+    // Firestore
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
 
-function cancelPendingAutoJoin(){
-  autoJoinScheduled = false;
-  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
-}
-
-function scheduleAutoJoin(){
-  // Only auto-join if page was opened from invite AND we are not suppressing it
-  if (!openedFromInvite) return;
-  if (suppressAutoJoin) return;
-  if (autoJoinScheduled) return;
-
-  autoJoinScheduled = true;
-  cancelPendingAutoJoin(); // clear any older one; keep only the latest
-
-  autoJoinTimer = setTimeout(async ()=>{
-    autoJoinScheduled = false;
-    autoJoinTimer = null;
-    try{ await autoJoinIfNeeded(); }
-    catch(e){
-      setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
-      showError(e);
-    }
-  }, 0);
-}
-
-async function autoJoinIfNeeded(){
-  if(autoJoinDone) return;
-  if(!roomIdInput.value.trim()) return;
-
-  autoJoinDone = true;
-  setStatus(callStatus,"Auto-joining room…");
-  logDiag("Auto-joining triggered.");
-
-  try{
-    await joinRoom();
-  }catch(e){
-    autoJoinDone = false;
-    throw e;
-  }
-}
-
-/* ================== LISTENERS ================== */
-let unsubRoomA=null, unsubCalleeA=null;
-let unsubRoomB=null, unsubCallerB=null;
-
-function stopListeners(){
-  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
-  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
-  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
-  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-}
-
-/* ================== STOP ================== */
-function stopAll(){
-  stopListeners();
-  closePeer();
-
-  if(localStream){
-    localStream.getTracks().forEach(t=>t.stop());
-    localStream=null;
-  }
-  localVideo.srcObject=null;
-
-  startBtn.disabled = !isAuthed;
-  stopBtn.disabled = true;
-  createBtn.disabled = true;
-  joinBtn.disabled = true;
-
-  setStatus(mediaStatus,"Not started.");
-  setStatus(callStatus,"No room yet.");
-
-  autoJoinDone = false;
-  suppressAutoJoin = false;
-  cancelPendingAutoJoin();
-
-  refreshCopyInviteState();
-}
-stopBtn.onclick = () => stopAll();
-
-/* ================== REJOIN SUPPORT ================== */
-let lastSeenJoinRequestA = 0;
-let lastAnsweredSessionB = null;
-let bRetryTimer = null;
-
-function clearBRetry(){
-  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
-}
-
-async function requestFreshOffer(roomRef){
-  lastAnsweredSessionB = null;
-  await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
-  logDiag("Requested fresh offer (joinRequest).");
-}
-
-/* ================== ROOM A ================== */
-let createAttemptA = 0;
-
-async function createRoom(){
-  if(!requireAuthOrPrompt()) return;
-
-  // ✅ CRITICAL: stop any auto-join that might be queued from Start/startMedia
-  suppressAutoJoin = true;
-  autoJoinDone = true;
-  cancelPendingAutoJoin();
-
-  // ✅ also stop any join listeners (if user previously joined)
-  stopListeners();
-  clearBRetry();
-
-  // ✅ start media without scheduling auto-join
-  await startMedia({ skipAutoJoin:true });
-
-  const myAttempt = ++createAttemptA;
-
-  let roomRef;
-  const existing = roomIdInput.value.trim();
-  if(existing) roomRef = doc(db,"rooms", existing);
-  else roomRef = doc(collection(db,"rooms"));
-
-  roomIdInput.value = roomRef.id;
-  location.hash = roomRef.id;
-
-  refreshCopyInviteState();
-  logDiag("CreateRoom: roomId=" + roomRef.id);
-
-  const caller = collection(roomRef,"callerCandidates");
-  const callee = collection(roomRef,"calleeCandidates");
-
-  const snap = await getDoc(roomRef);
-  const prev = snap.exists() ? (snap.data().session || 0) : 0;
-  const session = Number(prev) + 1;
-
-  if(myAttempt !== createAttemptA) return;
-
-  await clearSub(caller);
-  await clearSub(callee);
-
-  if(myAttempt !== createAttemptA) return;
-
-  ensurePeer();
-
-  pc.onicecandidate = (e)=>{
-    if(e.candidate){
-      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
-    }
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  await setDoc(roomRef, {
-    session,
-    offer: { type: offer.type, sdp: offer.sdp },
-    answer: null,
-    updatedAt: Date.now()
-  }, { merge:true });
-
-  setStatus(callStatus, `Room active (session ${session}). Click "Copy Invite" and send it.`);
-  logDiag(`Room written. session=${session}`);
-
-  unsubRoomA = onSnapshot(roomRef, async (s)=>{
-    if(myAttempt !== createAttemptA) return;
-    const d = s.data();
-    if(!d) return;
-
-    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
-      lastSeenJoinRequestA = d.joinRequest;
-      setStatus(callStatus, "Join request received — restarting session…");
-      logDiag("JoinRequest seen => restarting offer/session.");
-      setTimeout(()=>createRoom().catch(()=>{}), 150);
-      return;
+    if (location.hash && location.hash.length > 1) {
+      roomIdInput.value = location.hash.substring(1);
     }
 
-    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
-      try{
-        await pc.setRemoteDescription(d.answer);
-        setStatus(callStatus, `Connected (session ${session}).`);
-        logDiag("Applied remote answer.");
-      }catch(e){
-        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
-        setStatus(callStatus, "Answer failed — restarting session…");
-        setTimeout(()=>createRoom().catch(()=>{}), 200);
+    // WebRTC
+    let localStream = null;
+    let pc = null;
+
+    // Unsubscribe handles (avoid stacked listeners)
+    let unsubRoomA = null, unsubCalleeA = null;
+    let unsubRoomB = null, unsubCallerB = null;
+
+    // Session / joinRequest tracking
+    let currentSessionA = 0;
+    let lastSeenJoinRequestA = 0;
+    let lastAnsweredSessionB = null;
+
+    // Make Start->Join fast safe
+    let startingPromise = null;
+
+    const rtcConfig = {
+      iceServers: [
+        { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"] }
+      ]
+    };
+
+    function closePeer() {
+      if (pc) {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
+        pc.close();
+        pc = null;
       }
+      remoteVideo.srcObject = null;
     }
-  });
 
-  unsubCalleeA = onSnapshot(callee, (ss)=>{
-    ss.docChanges().forEach(ch=>{
-      if(ch.type !== "added" || !pc) return;
-      const c = ch.doc.data();
-      if(c.session !== session) return;
-      try{ pc.addIceCandidate(c); }catch{}
-    });
-  });
+    function stopListeners() {
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeA) { unsubCalleeA(); unsubCalleeA = null; }
+      if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
+      if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
+    }
+
+    function ensurePeerConnection() {
+      closePeer();
+      pc = new RTCPeerConnection(rtcConfig);
+
+      const remoteStream = new MediaStream();
+      remoteVideo.srcObject = remoteStream;
+
+      pc.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(t => remoteStream.addTrack(t));
+        remoteVideo.muted = false;
+        remoteVideo.play().catch(() => {});
+      };
+
+      if (!localStream) throw new Error("Local media not started yet.");
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    async function clearSubcollection(colRef) {
+      const snap = await getDocs(colRef);
+      if (snap.empty) return;
+      const batch = writeBatch(db);
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+
+    async function startMedia() {
+      if (localStream) return;
+      if (startingPromise) return startingPromise;
+
+      startingPromise = (async () => {
+        setStatus(mediaStatus, "Requesting camera/mic permission…");
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+
+        setStatus(mediaStatus, "Camera/mic started.");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        createBtn.disabled = false;
+        joinBtn.disabled = false;
+        copyLinkBtn.disabled = !roomIdInput.value.trim();
+      })();
+
+      try { await startingPromise; }
+      finally { startingPromise = null; }
+    }
+    
+    // Auto-start media on first user interaction (browser-safe)
+let autoStarted = false;
+
+async function autoStartMediaOnce() {
+  if (autoStarted) return;
+  autoStarted = true;
+
+  try {
+    setStatus(mediaStatus, "Auto-starting camera/mic…");
+    await startMedia();
+  } catch (e) {
+    autoStarted = false; // allow retry
+    setStatus(mediaStatus, "Click Start to enable camera/mic.");
+  }
 }
 
-/* ================== ROOM B ================== */
-let joinAttemptB = 0;
+// Any user interaction triggers auto-start
+["click", "keydown", "touchstart"].forEach(evt => {
+  window.addEventListener(evt, autoStartMediaOnce, { once: true });
+});
 
-async function joinRoom(){
-  if(!requireAuthOrPrompt()) return;
+    async function stopMedia() {
+      stopListeners();
+      closePeer();
 
-  // Joining is allowed again
-  suppressAutoJoin = false;
+      if (localStream) {
+        localStream.getTracks().forEach(t => t.stop());
+        localStream = null;
+      }
+      localVideo.srcObject = null;
 
-  await startMedia({ skipAutoJoin:true });
+      setStatus(mediaStatus, "Stopped.");
+      setStatus(callStatus, "Call ended.");
 
-  const myAttempt = ++joinAttemptB;
-  stopListeners();
-  clearBRetry();
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      createBtn.disabled = true;
+      joinBtn.disabled = true;
+      copyLinkBtn.disabled = true;
 
-  const roomId = roomIdInput.value.trim();
-  if(!roomId) throw new Error("Room ID is empty.");
-  location.hash = roomId;
+      lastAnsweredSessionB = null;
+    }
 
-  logDiag("JoinRoom: roomId=" + roomId);
+    // =========================
+    // Person A: Create or restart a session (new offer)
+    // =========================
+    async function createRoom() {
+      if (!localStream) throw new Error("Start media first.");
 
-  const roomRef = doc(db,"rooms", roomId);
-  const snap = await getDoc(roomRef);
-  if(!snap.exists()) throw new Error("Room not found");
+      // stop old A listeners (important!)
+      if (unsubRoomA) { unsubRoomA(); unsubRoomA = null; }
+      if (unsubCalleeA) { unsubCalleeA(); unsubCalleeA = null; }
 
-  await requestFreshOffer(roomRef);
-  if(myAttempt !== joinAttemptB) return;
+      let roomRef;
+      const existingId = roomIdInput.value.trim();
+      if (existingId) roomRef = doc(db, "rooms", existingId);
+      else {
+        roomRef = doc(collection(db, "rooms"));
+        roomIdInput.value = roomRef.id;
+        location.hash = roomRef.id;
+      }
 
-  setStatus(callStatus, "Connecting… (requested fresh offer)");
+      const callerCandidates = collection(roomRef, "callerCandidates");
+      const calleeCandidates = collection(roomRef, "calleeCandidates");
 
-  unsubRoomB = onSnapshot(roomRef, async (s)=>{
-    if(myAttempt !== joinAttemptB) return;
-    const d = s.data();
-    if(!d?.offer || !d.session) return;
+      // bump session
+      const roomSnap = await getDoc(roomRef);
+      const prevSession = roomSnap.exists() ? (roomSnap.data().session || 0) : 0;
+      const session = prevSession + 1;
+      currentSessionA = session;
 
-    if(lastAnsweredSessionB === d.session) return;
+      // clear stale candidates so room is clean for this session
+      await clearSubcollection(callerCandidates);
+      await clearSubcollection(calleeCandidates);
 
-    const session = d.session;
-    lastAnsweredSessionB = session;
-    logDiag("New offer/session detected: " + session);
+      ensurePeerConnection();
 
-    try{
-      ensurePeer();
-
-      const caller = collection(roomRef,"callerCandidates");
-      const callee = collection(roomRef,"calleeCandidates");
-
-      await clearSub(callee);
-      if(myAttempt !== joinAttemptB) return;
-
-      pc.onicecandidate = (e)=>{
-        if(e.candidate){
-          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+      pc.onicecandidate = async (event) => {
+        if (event.candidate) {
+          await addDoc(callerCandidates, { session, ...event.candidate.toJSON() });
         }
       };
 
-      await pc.setRemoteDescription(d.offer);
-      const ans = await pc.createAnswer();
-      await pc.setLocalDescription(ans);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
 
-      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
-      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
-      logDiag("Answer written to room doc.");
+      await setDoc(roomRef, {
+        session,
+        offer: { type: offer.type, sdp: offer.sdp },
+        answer: null,
+        updatedAt: Date.now()
+      }, { merge: true });
 
-      unsubCallerB = onSnapshot(caller, (ss)=>{
-        if(myAttempt !== joinAttemptB) return;
-        ss.docChanges().forEach(ch=>{
-          if(ch.type !== "added" || !pc) return;
-          const c = ch.doc.data();
-          if(c.session !== session) return;
-          try{ pc.addIceCandidate(c); }catch{}
+      setStatus(callStatus, `Room active (session ${session}). Room ID: ${roomRef.id}`);
+      copyLinkBtn.disabled = false;
+
+      // Listen for joinRequest and answers
+      unsubRoomA = onSnapshot(roomRef, async (snap) => {
+        const d = snap.data();
+        if (!d) return;
+
+        // If B requests (re)join, restart the session (new offer)
+        if (d.joinRequest && d.joinRequest > lastSeenJoinRequestA) {
+          lastSeenJoinRequestA = d.joinRequest;
+
+          // Always restart; it avoids the "stable" wrong-state issue.
+          setStatus(callStatus, "Join request received — restarting session…");
+          setTimeout(() => createRoom().catch(() => {}), 150);
+          return;
+        }
+
+        // Apply answer only for THIS session and only if we are waiting for it
+        if (!d.answer || d.session !== session) return;
+        if (!pc) return;
+        if (pc.signalingState !== "have-local-offer") return;
+        if (pc.currentRemoteDescription) return;
+
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(d.answer));
+          setStatus(callStatus, `Connected (session ${session}).`);
+        } catch (e) {
+          showError(e);
+          setStatus(callStatus, "Answer apply failed — restarting session…");
+          setTimeout(() => createRoom().catch(() => {}), 200);
+        }
+      });
+
+      // Accept only callee candidates for THIS session
+      unsubCalleeA = onSnapshot(calleeCandidates, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          if (change.type !== "added" || !pc) return;
+          const c = change.doc.data();
+          if (c.session !== session) return;
+          try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
         });
       });
 
-      clearBRetry();
-      bRetryTimer = setTimeout(async ()=>{
-        if(myAttempt !== joinAttemptB) return;
-        if(!pc) return;
-        if(pc.connectionState === "connected") return;
-
-        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
-        logDiag("Watchdog: requesting fresh offer again.");
-        try{
-          lastAnsweredSessionB = null;
-          await requestFreshOffer(roomRef);
-        }catch(e){ showError(e); }
-      }, 10000);
-
-      pc.onconnectionstatechange = async ()=>{
-        if(myAttempt !== joinAttemptB || !pc) return;
-        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
-        if(pc.connectionState === "connected"){ clearBRetry(); }
-        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
-          setStatus(callStatus, "Connection lost — requesting new offer…");
-          logDiag("Connection lost => requesting fresh offer.");
-          try{
-            lastAnsweredSessionB = null;
-            await requestFreshOffer(roomRef);
-          }catch(e){ showError(e); }
-        }
+      pc.onconnectionstatechange = () => {
+        setStatus(callStatus, `A: ${pc.connectionState} (session ${session})`);
       };
-
-    }catch(e){
-      lastAnsweredSessionB = null;
-      logDiag("Join flow error: " + (e?.message || e));
-      setStatus(callStatus, "Join failed — requesting new offer…");
-      try{ await requestFreshOffer(roomRef); }catch(err){ showError(err); }
     }
-  });
-}
 
-/* ================== COPY INVITE ================== */
-async function copyTextRobust(text){
-  if(navigator.clipboard && window.isSecureContext){
-    try{ await navigator.clipboard.writeText(text); return true; }catch{}
-  }
-  window.prompt("Copy this invite link:", text);
-  return false;
-}
+    // =========================
+    // Person B: Join (and rejoin) reliably
+    // =========================
+    async function joinRoom() {
+      if (!localStream) await startMedia();
 
-copyLinkBtn.onclick = async ()=>{
-  const roomId = roomIdInput.value.trim();
-  if(!roomId) return;
-  const invite = `${location.origin}${location.pathname}#${roomId}`;
-  const ok = await copyTextRobust(invite);
-  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
-  logDiag("Copy invite clicked.");
-};
+      // stop old B listeners
+      if (unsubRoomB) { unsubRoomB(); unsubRoomB = null; }
+      if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
 
-/* ================== BUTTON WIRING ================== */
-startBtn.onclick = async ()=>{
-  try{
-    hideErrorBox();
-    await startMedia();
-  }catch(e){
-    const name = String(e?.name || "");
-    if(name === "NotAllowedError" || name === "NotFoundError") return;
-    showError(e);
-  }
-};
+      
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) throw new Error("Enter a room ID.");
+      location.hash = roomId;
 
-createBtn.onclick = ()=> createRoom().catch(showError);
-joinBtn.onclick   = ()=> joinRoom().catch(showError);
+      const roomRef = doc(db, "rooms", roomId);
+      const roomSnap = await getDoc(roomRef);
+      if (!roomSnap.exists()) throw new Error("Room not found.");
 
-roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
-refreshCopyInviteState();
+      // key: request a fresh offer/session every time B joins/rejoins
+      await setDoc(roomRef, { joinRequest: Date.now() }, { merge: true });
 
-window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
-</script>
+      setStatus(callStatus, "Connecting… (waiting for fresh offer)");
+
+      unsubRoomB = onSnapshot(roomRef, async (snap) => {
+        const d = snap.data();
+        if (!d?.offer || !d.session) return;
+
+        const session = d.session;
+        if (lastAnsweredSessionB === session) return;
+
+        // New session -> new PC and answer
+        lastAnsweredSessionB = session;
+
+        ensurePeerConnection();
+
+        const callerCandidates = collection(roomRef, "callerCandidates");
+        const calleeCandidates = collection(roomRef, "calleeCandidates");
+
+        // Clean B candidates for this session
+        await clearSubcollection(calleeCandidates);
+
+        pc.onicecandidate = async (event) => {
+          if (event.candidate) {
+            await addDoc(calleeCandidates, { session, ...event.candidate.toJSON() });
+          }
+        };
+
+        await pc.setRemoteDescription(new RTCSessionDescription(d.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        await updateDoc(roomRef, {
+          answer: { type: answer.type, sdp: answer.sdp },
+          session,
+          answeredAt: Date.now()
+        });
+
+        setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+
+        // subscribe to caller candidates for this session only
+        if (unsubCallerB) { unsubCallerB(); unsubCallerB = null; }
+        unsubCallerB = onSnapshot(callerCandidates, (snapshot) => {
+          snapshot.docChanges().forEach(async (change) => {
+            if (change.type !== "added" || !pc) return;
+            const c = change.doc.data();
+            if (c.session !== session) return;
+            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
+          });
+        });
+
+        pc.onconnectionstatechange = () => {
+          setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          if (!pc) return;
+          if (pc.iceConnectionState === "failed") {
+            setStatus(callStatus, `ICE failed (session ${session}). TURN may be required on this network.`);
+          }
+        };
+      });
+    }
+
+    function copyInviteLink() {
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) return;
+      const url = `${location.origin}${location.pathname}#${roomId}`;
+      navigator.clipboard.writeText(url);
+      setStatus(callStatus, "Invite link copied to clipboard.");
+    }
+
+    // UI wiring
+    startBtn.addEventListener("click", async () => {
+      try { await startMedia(); }
+      catch (e) { setStatus(mediaStatus, `Error: ${e.message}`); showError(e); }
+    });
+
+    stopBtn.addEventListener("click", () => stopMedia().catch(showError));
+
+    createBtn.addEventListener("click", async () => {
+      try { await createRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
+    });
+
+    joinBtn.addEventListener("click", async () => {
+      try { await joinRoom(); }
+      catch (e) { setStatus(callStatus, `Error: ${e.message}`); showError(e); }
+    });
+
+    copyLinkBtn.addEventListener("click", copyInviteLink);
+
+    roomIdInput.addEventListener("input", () => {
+      copyLinkBtn.disabled = !roomIdInput.value.trim();
+    });
+
+    if (roomIdInput.value.trim()) {
+      setStatus(callStatus, `Room ID detected in URL: ${roomIdInput.value.trim()}`);
+    }
+  </script>
 </body>
 </html>
