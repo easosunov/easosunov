@@ -364,13 +364,15 @@ let autoJoinDone = false;
 
 function setJoiningUI(isJoining){
   joinInProgress = isJoining;
-  joinBtn.disabled = isJoining || !isAuthed;
-  createBtn.disabled = (!isAuthed || !localStream) ? true : false;
-  if(isJoining){
-    logDiag("Join lock ON (prevent re-join spam).");
+  joinBtn.textContent = isJoining ? "Nudge Host" : "Join Room";
+  if (!isAuthed) {
+    joinBtn.disabled = true;
   } else {
-    logDiag("Join lock OFF.");
+    // When joining, we still allow button (as "Nudge Host")
+    joinBtn.disabled = false;
   }
+  if(isJoining) logDiag("Join lock ON (prevent re-join spam).");
+  else logDiag("Join lock OFF.");
 }
 
 function stopAll(){
@@ -434,30 +436,18 @@ async function startMedia(){
   finally{ startingPromise = null; }
 }
 
-/* ================== AUTO-JOIN (STRICT ONE-SHOT) ================== */
-async function autoJoinIfNeeded(){
-  if(!openedFromInvite) return;
-  if(autoJoinDone) return;
-  if(joinInProgress) return;
-  if(!roomIdInput.value.trim()) return;
-
-  autoJoinDone = true;
-  setStatus(callStatus,"Auto-joining room…");
-  logDiag("Auto-joining triggered.");
-  await joinRoom({ isAuto:true }).catch((e)=>{
-    autoJoinDone = false;
-    logDiag("Auto-join failed: " + (e?.message || e));
-    setStatus(callStatus, "Auto-join failed. Click Join Room.");
-  });
-}
-
 /* ================== REJOIN SUPPORT ================== */
 let lastSeenJoinRequestA = 0;
 let lastAnsweredSessionB = null;
 
-async function requestFreshOffer(roomRef){
-  await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
-  logDiag("Requested fresh offer (joinRequest).");
+async function nudgeHost(roomRef){
+  try{
+    await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
+    logDiag("Nudged host (joinRequest).");
+  }catch(e){
+    logDiag("Nudge failed: " + (e?.message || e));
+    showError(e);
+  }
 }
 
 /* ================== ROOM A ================== */
@@ -466,7 +456,7 @@ let createAttemptA = 0;
 async function createRoom(){
   if(!requireAuthOrPrompt()) return;
 
-  // Stop any join watcher before becoming host
+  // Becoming host => stop B watcher
   setJoiningUI(false);
   stopListeners();
   clearBRetry();
@@ -563,9 +553,13 @@ let joinAttemptB = 0;
 async function joinRoom({isAuto=false} = {}){
   if(!requireAuthOrPrompt()) return;
 
-  // HARD GUARD: do not start another join while snapshot is active
+  // If already joining, clicking Join acts as "Nudge host"
   if(joinInProgress){
-    logDiag("Join suppressed: already in progress.");
+    const roomId = roomIdInput.value.trim();
+    if(!roomId) return;
+    logDiag("Join pressed while joining => nudging host.");
+    await nudgeHost(doc(db,"rooms", roomId));
+    setStatus(callStatus, "Nudged host. Still waiting for offer…");
     return;
   }
 
@@ -588,107 +582,118 @@ async function joinRoom({isAuto=false} = {}){
 
   const roomRef = doc(db,"rooms", roomId);
 
-  // Request host to restart once at the beginning
-  await requestFreshOffer(roomRef);
-
-  setStatus(callStatus, "Waiting for host offer…");
-  logDiag("Waiting for room doc/offer via onSnapshot (no getDoc throw).");
+  // ✅ Install snapshot FIRST (do not block on writes)
+  setStatus(callStatus, "Waiting for host to create room / offer…");
+  logDiag("Installing onSnapshot(roomRef) now…");
 
   const waitStartedAt = Date.now();
   const WAIT_LIMIT_MS = 30000;
 
-  unsubRoomB = onSnapshot(roomRef, async (snap)=>{
-    if(myAttempt !== joinAttemptB) return;
-
-    if(!snap.exists()){
-      const elapsed = Date.now() - waitStartedAt;
-      setStatus(callStatus, elapsed > WAIT_LIMIT_MS
-        ? "Still waiting… host has not created the room yet."
-        : "Waiting for host to create the room…");
-      return;
-    }
-
-    const d = snap.data();
-    if(!d?.offer || !d.session){
-      const elapsed = Date.now() - waitStartedAt;
-      setStatus(callStatus, elapsed > WAIT_LIMIT_MS
-        ? "Room exists, but offer not ready yet…"
-        : "Room found. Waiting for offer…");
-      return;
-    }
-
-    if(lastAnsweredSessionB === d.session) return;
-
-    const session = d.session;
-    lastAnsweredSessionB = session;
-    logDiag("Offer/session detected: " + session);
-
-    try{
-      ensurePeer();
-
-      const caller = collection(roomRef,"callerCandidates");
-      const callee = collection(roomRef,"calleeCandidates");
-
-      await clearSub(callee);
+  unsubRoomB = onSnapshot(
+    roomRef,
+    async (snap)=>{
       if(myAttempt !== joinAttemptB) return;
 
-      pc.onicecandidate = (e)=>{
-        if(e.candidate){
-          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
-        }
-      };
+      // We got a snapshot callback (proves listener is alive)
+      if(!snap.exists()){
+        const elapsed = Date.now() - waitStartedAt;
+        setStatus(callStatus, elapsed > WAIT_LIMIT_MS
+          ? "Still waiting… host has not created the room yet."
+          : "Waiting for host to create the room…");
+        return;
+      }
 
-      await pc.setRemoteDescription(d.offer);
-      const ans = await pc.createAnswer();
-      await pc.setLocalDescription(ans);
+      const d = snap.data();
 
-      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
+      if(!d?.offer || !d.session){
+        const elapsed = Date.now() - waitStartedAt;
+        setStatus(callStatus, elapsed > WAIT_LIMIT_MS
+          ? "Room exists, but offer not ready yet…"
+          : "Room found. Waiting for offer…");
+        return;
+      }
 
-      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
-      logDiag("Answer written to room doc.");
+      if(lastAnsweredSessionB === d.session) return;
 
-      if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-      unsubCallerB = onSnapshot(caller, (ss)=>{
+      const session = d.session;
+      lastAnsweredSessionB = session;
+      logDiag("Offer/session detected: " + session);
+
+      try{
+        ensurePeer();
+
+        const caller = collection(roomRef,"callerCandidates");
+        const callee = collection(roomRef,"calleeCandidates");
+
+        await clearSub(callee);
         if(myAttempt !== joinAttemptB) return;
-        ss.docChanges().forEach(ch=>{
-          if(ch.type !== "added" || !pc) return;
-          const c = ch.doc.data();
-          if(c.session !== session) return;
-          try{ pc.addIceCandidate(c); }catch{}
+
+        pc.onicecandidate = (e)=>{
+          if(e.candidate){
+            addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+          }
+        };
+
+        await pc.setRemoteDescription(d.offer);
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+
+        await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
+
+        setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+        logDiag("Answer written to room doc.");
+
+        if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+        unsubCallerB = onSnapshot(caller, (ss)=>{
+          if(myAttempt !== joinAttemptB) return;
+          ss.docChanges().forEach(ch=>{
+            if(ch.type !== "added" || !pc) return;
+            const c = ch.doc.data();
+            if(c.session !== session) return;
+            try{ pc.addIceCandidate(c); }catch{}
+          });
         });
-      });
 
-      // When connected, we can release the join lock
-      pc.onconnectionstatechange = ()=>{
-        if(myAttempt !== joinAttemptB || !pc) return;
-        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
-        if(pc.connectionState === "connected"){
-          logDiag("B connected => releasing join lock.");
-          setJoiningUI(false);
-          clearBRetry();
-        }
-      };
+        pc.onconnectionstatechange = ()=>{
+          if(myAttempt !== joinAttemptB || !pc) return;
+          setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+          if(pc.connectionState === "connected"){
+            logDiag("B connected => releasing join lock.");
+            setJoiningUI(false);
+            clearBRetry();
+          }
+        };
 
-      // Watchdog: if not connected, ask again (does NOT restart joinRoom)
-      clearBRetry();
-      bRetryTimer = setTimeout(async ()=>{
-        if(myAttempt !== joinAttemptB) return;
-        if(!pc) return;
-        if(pc.connectionState === "connected") return;
+        clearBRetry();
+        bRetryTimer = setTimeout(async ()=>{
+          if(myAttempt !== joinAttemptB) return;
+          if(!pc) return;
+          if(pc.connectionState === "connected") return;
 
-        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
-        logDiag("Watchdog: requesting fresh offer again.");
+          setStatus(callStatus, "Still connecting… nudging host again…");
+          logDiag("Watchdog: nudging host again.");
+          lastAnsweredSessionB = null;
+          await nudgeHost(roomRef);
+        }, 10000);
+
+      }catch(e){
         lastAnsweredSessionB = null;
-        try{ await requestFreshOffer(roomRef); }catch(e){ showError(e); }
-      }, 10000);
-
-    }catch(e){
-      lastAnsweredSessionB = null;
-      logDiag("Join flow error: " + (e?.message || e));
-      setStatus(callStatus, "Join failed — waiting / retrying…");
-      // do NOT call joinRoom again; keep snapshot alive
+        logDiag("Join flow error: " + (e?.message || e));
+        setStatus(callStatus, "Join failed — waiting / retrying…");
+      }
+    },
+    (err)=>{
+      // Snapshot error callback (permissions/offline/etc.)
+      logDiag("SNAPSHOT ERROR: " + (err?.message || err));
+      setStatus(callStatus, "Firestore listener error (see diagnostics).");
+      showError(err);
     }
-  });
+  );
+
+  logDiag("onSnapshot installed OK.");
+
+  // ✅ Nudge host AFTER snapshot is installed (non-blocking)
+  nudgeHost(roomRef).catch(()=>{});
 }
 
 /* ================== COPY INVITE ================== */
@@ -743,8 +748,9 @@ onAuthStateChanged(auth, (user)=>{
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
     refreshCopyInviteState();
+    joinBtn.disabled = false;
 
-    // Auto-join once after auth (no repeated joins)
+    // Auto-join once after auth if opened from invite
     setTimeout(()=> autoJoinIfNeeded().catch(()=>{}), 0);
 
   } else {
@@ -754,6 +760,23 @@ onAuthStateChanged(auth, (user)=>{
     stopAll();
   }
 });
+
+/* ================== AUTOJOIN ================== */
+async function autoJoinIfNeeded(){
+  if(!openedFromInvite) return;
+  if(autoJoinDone) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus,"Auto-joining room…");
+  logDiag("Auto-joining triggered.");
+
+  await joinRoom({isAuto:true}).catch((e)=>{
+    autoJoinDone = false;
+    logDiag("Auto-join failed: " + (e?.message || e));
+    setStatus(callStatus, "Auto-join failed. Click Join Room.");
+  });
+}
 
 /* cleanup */
 window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
