@@ -320,10 +320,22 @@ if (openedFromInvite) {
 }
 
 /* ================== WEBRTC ================== */
+let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+async function loadIceServers() {
+  logDiag("Fetching ICE servers from http://localhost:3000/ice …");
+  const r = await fetch("http://localhost:3000/ice", { cache: "no-store" });
+  if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
+  const data = await r.json();
+  rtcConfig = { iceServers: data.iceServers };
+  logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
+}
+
+  
 let localStream = null;
 let pc = null;
 
-const rtcConfig = { iceServers:[{urls:"stun:stun.l.google.com:19302"}] };
+
 
 function closePeer(){
   if(pc){
@@ -364,33 +376,38 @@ async function loadIceServers() {
 }
 
   
-function ensurePeer(){
+async function ensurePeer() {
   closePeer();
+
+  if (!rtcConfig || !rtcConfig.iceServers || rtcConfig.iceServers.length === 0) {
+    await loadIceServers();
+  }
+
   pc = new RTCPeerConnection(rtcConfig);
-  logDiag("Created RTCPeerConnection");
+  logDiag("Created RTCPeerConnection with ICE servers");
 
   const rs = new MediaStream();
   remoteVideo.srcObject = rs;
 
-  pc.ontrack = (e)=>{
-    e.streams[0].getTracks().forEach(t=>rs.addTrack(t));
+  pc.ontrack = (e) => {
+    e.streams[0].getTracks().forEach(t => rs.addTrack(t));
     remoteVideo.muted = false;
-    remoteVideo.play().catch(()=>{});
-    logDiag(`ontrack: tracks=${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+    remoteVideo.play().catch(() => {});
+    logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
   };
 
-  pc.onconnectionstatechange = ()=>{
-    if (!pc) return;
-    logDiag("pc.connectionState=" + pc.connectionState);
-  };
-  pc.oniceconnectionstatechange = ()=>{
-    if (!pc) return;
-    logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
+  pc.onconnectionstatechange = () => {
+    if (pc) logDiag("pc.connectionState=" + pc.connectionState);
   };
 
-  if(!localStream) throw new Error("Local media not started.");
-  localStream.getTracks().forEach(t=>pc.addTrack(t, localStream));
+  pc.oniceconnectionstatechange = () => {
+    if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
+  };
+
+  if (!localStream) throw new Error("Local media not started.");
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 }
+
 
 /* ================== FIRESTORE HELPERS ================== */
 async function clearSub(col){
@@ -440,6 +457,8 @@ async function startMedia(opts={skipAutoJoin:false}){
       setStatus(mediaStatus,"Camera/mic started.");
       logDiag("Local video playing.");
     };
+    
+    await loadIceServers();
 
     startBtn.disabled = true;
     stopBtn.disabled  = false;
@@ -592,7 +611,7 @@ async function createRoom(){
 
   if(myAttempt !== createAttemptA) return;
 
-  ensurePeer();
+  await ensurePeer();
 
   pc.onicecandidate = (e)=>{
     if(e.candidate){
@@ -691,7 +710,7 @@ async function joinRoom(){
     logDiag("New offer/session detected: " + session);
 
     try{
-      ensurePeer();
+      await ensurePeer();
 
       const caller = collection(roomRef,"callerCandidates");
       const callee = collection(roomRef,"calleeCandidates");
