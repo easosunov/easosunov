@@ -256,26 +256,13 @@ loginBtn.onclick = async () => {
   loginStatus.textContent = "Signing in…";
   try{
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-  }catch(e){
-    const code = String(e?.code || "");
-    const expected = new Set([
-      "auth/invalid-credential","auth/user-not-found","auth/wrong-password",
-      "auth/invalid-email","auth/missing-password","auth/too-many-requests"
-    ]);
-    const msg =
-      (code === "auth/invalid-credential" || code === "auth/user-not-found" || code === "auth/wrong-password")
-        ? "Wrong email or password."
-      : (code === "auth/invalid-email")
-        ? "Invalid email address."
-      : (code === "auth/missing-password")
-        ? "Please enter your password."
-      : (code === "auth/too-many-requests")
-        ? "Too many attempts. Try again later."
-      : "Login failed. Please try again.";
-
-    loginStatus.textContent = msg;
-    logDiag(`Login failed (${code || "no-code"}): ${msg}`);
-    if (!expected.has(code)) showError(e);
+  } catch (e) {
+    // Show the real reason
+    const code = e?.code || "(no code)";
+    const msg  = e?.message || String(e);
+    loginStatus.textContent = `Login failed: ${code}`;
+    showError(`${code}\n${msg}`);
+    logDiag(`Login failed: ${code} :: ${msg}`);
   }
 };
 
