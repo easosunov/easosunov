@@ -311,7 +311,7 @@ let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
 async function loadIceServers() {
   logDiag("Fetching ICE servers from http://localhost:3000/ice …");
-  const r = await fetch("https://<your-worker>.workers.dev/ice");
+  const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
   if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
   const data = await r.json();
   rtcConfig = { iceServers: data.iceServers };
