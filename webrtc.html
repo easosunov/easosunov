@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>2-Person Video/Sound Communicator (WebRTC)</title>
-    
+
 <style>
 body{font-family:system-ui;margin:16px}
 h1{font-size:20px;margin:0 0 10px}
@@ -55,6 +55,22 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   white-space:pre-wrap;
 }
 .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+
+/* INCOMING CALL MODAL */
+#incomingOverlay{
+  position:fixed; inset:0; z-index:9998;
+  background:rgba(0,0,0,.55);
+  display:none; align-items:center; justify-content:center;
+}
+#incomingCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+.incomingActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#answerBtn{background:#e8fff0;border-color:#bdeccc}
+#declineBtn{background:#fff0f0;border-color:#f1bcbc}
 </style>
 </head>
 
@@ -62,6 +78,19 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
 
 <div id="errorBox"></div>
+
+<!-- INCOMING CALL -->
+<div id="incomingOverlay">
+  <div id="incomingCard">
+    <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
+    <div id="incomingText" class="status">Someone is calling…</div>
+    <div id="incomingHint" class="small">If you don’t hear ringing, tap once anywhere to enable sound.</div>
+    <div class="incomingActions">
+      <button id="answerBtn">Answer</button>
+      <button id="declineBtn">Decline</button>
+    </div>
+  </div>
+</div>
 
 <!-- LOGIN -->
 <div id="loginOverlay">
@@ -99,6 +128,33 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     </div>
   </div>
 
+  <!-- PHONE CALLING -->
+  <div class="row" style="margin-top:12px">
+    <div class="card">
+      <b>Phone calling</b><br/><br/>
+
+      <div class="small">Your phone number (used only for in-app lookup)</div>
+      <input id="myPhoneInput" placeholder="+15551234567"/>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="savePhoneBtn" disabled>Save My Number</button>
+        <button id="testSoundBtn" disabled>Test Ring Sound</button>
+      </div>
+      <div class="status" id="phoneStatus">Not set.</div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <div class="small">Call another user by phone number</div>
+      <input id="calleePhoneInput" placeholder="+15557654321"/>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="callBtn" disabled>Call</button>
+        <button id="hangupBtn" disabled>Hang up</button>
+      </div>
+      <div class="status" id="phoneCallStatus">Idle.</div>
+      <div class="small">Tip: both users must be signed in and have saved their phone number.</div>
+    </div>
+  </div>
+
+  <!-- ORIGINAL STEPS (still available) -->
   <div class="row" style="margin-top:12px">
     <div class="card">
       <b>Step 1</b><br/><br/>
@@ -159,6 +215,22 @@ const diagBtn = document.getElementById("diagBtn");
 const diagBox = document.getElementById("diagBox");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
+
+/* Phone call UI */
+const myPhoneInput = document.getElementById("myPhoneInput");
+const savePhoneBtn = document.getElementById("savePhoneBtn");
+const phoneStatus = document.getElementById("phoneStatus");
+const calleePhoneInput = document.getElementById("calleePhoneInput");
+const callBtn = document.getElementById("callBtn");
+const hangupBtn = document.getElementById("hangupBtn");
+const phoneCallStatus = document.getElementById("phoneCallStatus");
+const testSoundBtn = document.getElementById("testSoundBtn");
+
+/* Incoming modal */
+const incomingOverlay = document.getElementById("incomingOverlay");
+const incomingText = document.getElementById("incomingText");
+const answerBtn = document.getElementById("answerBtn");
+const declineBtn = document.getElementById("declineBtn");
 
 const setStatus = (el,msg)=> el.textContent = msg;
 
@@ -223,7 +295,7 @@ passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textCont
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch
+  onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut
@@ -242,6 +314,7 @@ const auth = getAuth(app);
 
 /* ================== AUTH GATE ================== */
 let isAuthed = false;
+let myUid = null;
 
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
@@ -257,7 +330,6 @@ loginBtn.onclick = async () => {
   try{
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   } catch (e) {
-    // Show the real reason
     const code = e?.code || "(no code)";
     const msg  = e?.message || String(e);
     loginStatus.textContent = `Login failed: ${code}`;
@@ -268,37 +340,11 @@ loginBtn.onclick = async () => {
 
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
-onAuthStateChanged(auth, (user)=>{
-  isAuthed = !!user;
-  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
-
-  if (isAuthed){
-    loginOverlay.style.display = "none";
-    appRoot.classList.remove("locked");
-    logoutBtn.style.display = "inline-block";
-    loginStatus.textContent = "Signed in.";
-
-    startBtn.disabled = false;
-    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
-
-    refreshCopyInviteState();
-
-    // keep browser-safe (no camera without gesture)
-    window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
-  } else {
-    loginOverlay.style.display = "flex";
-    appRoot.classList.add("locked");
-    logoutBtn.style.display = "none";
-    stopAll();
-  }
-});
-
 /* ================== URL HASH / AUTOJOIN MODE ==================
    IMPORTANT: only treat it as an invite if it existed on initial page load.
-   (When Person A creates a room, we will change hash, but we must NOT auto-join.)
 */
 const openedFromInvite = (location.hash.length > 1);
-let suppressAutoJoin = false; // Create Room will turn this on to avoid races
+let suppressAutoJoin = false;
 
 if (openedFromInvite) {
   roomIdInput.value = location.hash.slice(1);
@@ -310,7 +356,7 @@ if (openedFromInvite) {
 let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
 async function loadIceServers() {
-  logDiag("Fetching ICE servers from http://localhost:3000/ice …");
+  logDiag("Fetching ICE servers …");
   const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
   if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
   const data = await r.json();
@@ -318,11 +364,8 @@ async function loadIceServers() {
   logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
 }
 
-  
 let localStream = null;
 let pc = null;
-
-
 
 function closePeer(){
   if(pc){
@@ -336,7 +379,6 @@ function closePeer(){
   remoteVideo.srcObject = null;
 }
 
-  
 async function ensurePeer() {
   closePeer();
 
@@ -368,7 +410,6 @@ async function ensurePeer() {
   if (!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 }
-
 
 /* ================== FIRESTORE HELPERS ================== */
 async function clearSub(col){
@@ -418,7 +459,7 @@ async function startMedia(opts={skipAutoJoin:false}){
       setStatus(mediaStatus,"Camera/mic started.");
       logDiag("Local video playing.");
     };
-    
+
     await loadIceServers();
 
     startBtn.disabled = true;
@@ -439,13 +480,12 @@ function cancelPendingAutoJoin(){
 }
 
 function scheduleAutoJoin(){
-  // Only auto-join if page was opened from invite AND we are not suppressing it
   if (!openedFromInvite) return;
   if (suppressAutoJoin) return;
   if (autoJoinScheduled) return;
 
   autoJoinScheduled = true;
-  cancelPendingAutoJoin(); // clear any older one; keep only the latest
+  cancelPendingAutoJoin();
 
   autoJoinTimer = setTimeout(async ()=>{
     autoJoinScheduled = false;
@@ -489,6 +529,8 @@ function stopListeners(){
 function stopAll(){
   stopListeners();
   closePeer();
+  stopCallListeners();
+  stopIncomingUI();
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
@@ -509,6 +551,10 @@ function stopAll(){
   cancelPendingAutoJoin();
 
   refreshCopyInviteState();
+
+  hangupBtn.disabled = true;
+  callBtn.disabled = !isAuthed;
+  setStatus(phoneCallStatus, "Idle.");
 }
 stopBtn.onclick = () => stopAll();
 
@@ -530,30 +576,33 @@ async function requestFreshOffer(roomRef){
 /* ================== ROOM A ================== */
 let createAttemptA = 0;
 
-async function createRoom(){
-  if(!requireAuthOrPrompt()) return;
+/**
+ * createRoom(options)
+ * - updateHash: keep old behavior for manual invite links
+ * - reuseRoomIdInput: if true, uses roomIdInput value (old behavior), else makes new doc id
+ */
+async function createRoom(options={updateHash:true, reuseRoomIdInput:true}){
+  if(!requireAuthOrPrompt()) return null;
 
-  // ✅ CRITICAL: stop any auto-join that might be queued from Start/startMedia
   suppressAutoJoin = true;
   autoJoinDone = true;
   cancelPendingAutoJoin();
 
-  // ✅ also stop any join listeners (if user previously joined)
   stopListeners();
   clearBRetry();
 
-  // ✅ start media without scheduling auto-join
   await startMedia({ skipAutoJoin:true });
 
   const myAttempt = ++createAttemptA;
 
   let roomRef;
-  const existing = roomIdInput.value.trim();
+  const existing = (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
   if(existing) roomRef = doc(db,"rooms", existing);
   else roomRef = doc(collection(db,"rooms"));
 
+  // Always show room ID in UI (useful for debugging), but only change URL if updateHash true
   roomIdInput.value = roomRef.id;
-  location.hash = roomRef.id;
+  if (options.updateHash) location.hash = roomRef.id;
 
   refreshCopyInviteState();
   logDiag("CreateRoom: roomId=" + roomRef.id);
@@ -565,12 +614,12 @@ async function createRoom(){
   const prev = snap.exists() ? (snap.data().session || 0) : 0;
   const session = Number(prev) + 1;
 
-  if(myAttempt !== createAttemptA) return;
+  if(myAttempt !== createAttemptA) return null;
 
   await clearSub(caller);
   await clearSub(callee);
 
-  if(myAttempt !== createAttemptA) return;
+  if(myAttempt !== createAttemptA) return null;
 
   await ensurePeer();
 
@@ -590,7 +639,7 @@ async function createRoom(){
     updatedAt: Date.now()
   }, { merge:true });
 
-  setStatus(callStatus, `Room active (session ${session}). Click "Copy Invite" and send it.`);
+  setStatus(callStatus, `Room active (session ${session}).`);
   logDiag(`Room written. session=${session}`);
 
   unsubRoomA = onSnapshot(roomRef, async (s)=>{
@@ -602,7 +651,7 @@ async function createRoom(){
       lastSeenJoinRequestA = d.joinRequest;
       setStatus(callStatus, "Join request received — restarting session…");
       logDiag("JoinRequest seen => restarting offer/session.");
-      setTimeout(()=>createRoom().catch(()=>{}), 150);
+      setTimeout(()=>createRoom(options).catch(()=>{}), 150);
       return;
     }
 
@@ -614,7 +663,7 @@ async function createRoom(){
       }catch(e){
         logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
         setStatus(callStatus, "Answer failed — restarting session…");
-        setTimeout(()=>createRoom().catch(()=>{}), 200);
+        setTimeout(()=>createRoom(options).catch(()=>{}), 200);
       }
     }
   });
@@ -627,6 +676,8 @@ async function createRoom(){
       try{ pc.addIceCandidate(c); }catch{}
     });
   });
+
+  return { roomId: roomRef.id, roomRef };
 }
 
 /* ================== ROOM B ================== */
@@ -635,9 +686,7 @@ let joinAttemptB = 0;
 async function joinRoom(){
   if(!requireAuthOrPrompt()) return;
 
-  // Joining is allowed again
   suppressAutoJoin = false;
-
   await startMedia({ skipAutoJoin:true });
 
   const myAttempt = ++joinAttemptB;
@@ -758,25 +807,53 @@ copyLinkBtn.onclick = async ()=>{
   logDiag("Copy invite clicked.");
 };
 
-/* ================== BUTTON WIRING ================== */
-startBtn.onclick = async ()=>{
-  try{
-    hideErrorBox();
-    await startMedia();
-  }catch(e){
-    const name = String(e?.name || "");
-    if(name === "NotAllowedError" || name === "NotFoundError") return;
-    showError(e);
+/* ================== RINGTONE (WebAudio Oscillator) ================== */
+let audioCtx = null;
+let ringOsc = null;
+let ringGain = null;
+let ringTimer = null;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
-};
+  return audioCtx;
+}
 
-createBtn.onclick = ()=> createRoom().catch(showError);
-joinBtn.onclick   = ()=> joinRoom().catch(showError);
+async function unlockAudio(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") await ctx.resume();
+  }catch{}
+}
 
-roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
-refreshCopyInviteState();
+// Best effort: browsers often require a user gesture before sound
+window.addEventListener("click", ()=>{ unlockAudio(); }, { once:false, passive:true });
 
-window.addEventListener("beforeunload", ()=>{ try{ closePeer(); }catch{} });
-</script>
-</body>
-</html>
+function startRingtone(){
+  stopRingtone();
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") {
+      // will try anyway; may be silent until user taps
+      ctx.resume().catch(()=>{});
+    }
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.08;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    // “ring ring” cadence
+    let on = true;
+    ringTimer = setInterval(()=>{
+      if(!ringGain) return;
+      ringGain.gain.value = on ? 0.08 : 0.0001;
+      on = !on;
+    }, 450);
+
+    l
