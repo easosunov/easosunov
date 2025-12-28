@@ -326,6 +326,17 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 const auth = getAuth(app);
+async function enforceAllowlist(user){
+  // UID-based allowlist (recommended; avoids rules lower() issues)
+  const ref = doc(db, "allowlistUids", user.uid);
+  const snap = await getDoc(ref);
+
+  if(!snap.exists() || snap.data()?.enabled !== true){
+    // Not approved -> sign out and lock UI
+    try{ await signOut(auth); }catch{}
+    throw new Error("This account is not approved. Ask admin to allowlist your UID.");
+  }
+}
 
 /* ================== AUTH GATE ================== */
 let isAuthed = false;
@@ -1219,6 +1230,14 @@ onAuthStateChanged(auth, async (user)=>{
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
+
+  try{
+      await enforceAllowlist(user);
+    }catch(e){
+      showError(e);
+      return; // user was signed out inside enforceAllowlist
+    }
+    
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
