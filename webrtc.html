@@ -895,6 +895,9 @@ function stopRingtone(){
 function normalizePhone(p){
   return String(p || "").trim().replace(/\s+/g,"");
 }
+function isE164(p){
+  return /^\+\d{5,20}$/.test(p);
+}
 
 let myPhone = "";
 let currentIncomingCall = null; // { id, data }
@@ -911,42 +914,53 @@ function stopCallListeners(){
 }
 
 async function loadMyPhoneFromFirestore(){
-  if(!myUid) return;
-  const uref = doc(db, "users", myUid);
-  const s = await getDoc(uref);
-  if(s.exists()){
-    const d = s.data();
-    myPhone = normalizePhone(d.phone || "");
-    myPhoneInput.value = myPhone;
-    setStatus(phoneStatus, myPhone ? `Saved: ${myPhone}` : "Not set.");
-  }else{
-    myPhone = "";
-    myPhoneInput.value = "";
-    setStatus(phoneStatus, "Not set.");
-  }
+  // No longer stored in users/{uid}. Keep local input only.
+  // (You could store it in localStorage if you want persistence.)
+  myPhone = normalizePhone(localStorage.getItem("myPhone") || "");
+  myPhoneInput.value = myPhone;
+  setStatus(phoneStatus, myPhone ? `Saved (local): ${myPhone}` : "Not set.");
 }
+
 
 async function saveMyPhone(){
   if(!requireAuthOrPrompt()) return;
+
   const p = normalizePhone(myPhoneInput.value);
   if(!p) throw new Error("Your phone number is empty.");
-  if(p.length < 5) throw new Error("Phone number looks too short.");
+  if(!isE164(p)) throw new Error("Use E.164 format, e.g. +15551234567");
 
-  const uref = doc(db, "users", myUid);
-  await setDoc(uref, { phone: p, updatedAt: Date.now() }, { merge:true });
+  // Create/overwrite phone directory entry (self-claim)
+  await setDoc(doc(db, "phones", p), {
+    phone: p,
+    uid: myUid,
+    enabled: true,
+    updatedAt: serverTimestamp()
+  }, { merge:true });
+
   myPhone = p;
+  localStorage.setItem("myPhone", myPhone);
+
   setStatus(phoneStatus, `Saved: ${myPhone}`);
-  logDiag("Saved my phone: " + myPhone);
+  logDiag("Saved my phone (phones directory): " + myPhone);
 }
+
 
 async function findUserByPhone(phone){
   const p = normalizePhone(phone);
-  const qy = query(collection(db,"users"), where("phone","==",p), limit(1));
-  const s = await getDocs(qy);
-  if(s.empty) return null;
-  const doc0 = s.docs[0];
-  return { uid: doc0.id, phone: p };
+  if(!isE164(p)) throw new Error("Callee phone must be E.164, e.g. +15557654321");
+
+  const s = await getDoc(doc(db, "phones", p));
+  if(!s.exists()) return null;
+
+  const d = s.data() || {};
+  if(d.enabled !== true) return null;
+
+  const uid = d.uid;
+  if(!uid) return null;
+
+  return { uid, phone: p };
 }
+
 
 function showIncomingUI(callId, data){
   currentIncomingCall = { id: callId, data };
@@ -1216,8 +1230,9 @@ testSoundBtn.onclick = async ()=>{
 enablePushBtn.onclick = ()=> enablePush().catch(showError);
 
 myPhoneInput.addEventListener("input", ()=>{
-  savePhoneBtn.disabled = !isAuthed || normalizePhone(myPhoneInput.value).length < 5;
+  savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
 });
+
 
 calleePhoneInput.addEventListener("input", ()=>{
   callBtn.disabled = !isAuthed;
