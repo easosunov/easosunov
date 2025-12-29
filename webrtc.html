@@ -315,6 +315,10 @@ import {
 import {
   getMessaging, getToken, onMessage
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  setPersistence, inMemoryPersistence
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 /* ======= IMPORTANT =======
    Put your Firebase Console -> Project Settings -> Cloud Messaging -> Web Push certificates -> Public VAPID key here.
@@ -1251,6 +1255,11 @@ calleePhoneInput.addEventListener("input", ()=>{
 });
 
 /* ================== AUTH STATE ================== */
+  const auth = getAuth(app);
+
+// Force login every time the page is opened (no stored session)
+await setPersistence(auth, inMemoryPersistence);
+
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
   myUid = user?.uid || null;
