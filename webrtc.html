@@ -284,10 +284,13 @@ copyDiagBtn.onclick = async () => {
 
 /* ================== ERROR HANDLING ================== */
 function showError(e){
+  const code = e?.code ? `\ncode: ${e.code}` : "";
+  const msg  = e?.message ? `\nmessage: ${e.message}` : "";
   errorBox.style.display = "block";
-  errorBox.textContent = String(e?.stack || e?.message || e);
-  logDiag("ERROR: " + String(e?.message || e));
+  errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
+  logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
 }
+
 function hideErrorBox(){
   errorBox.style.display = "none";
   errorBox.textContent = "";
