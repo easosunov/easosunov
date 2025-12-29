@@ -356,16 +356,20 @@ function requireAuthOrPrompt(){
 loginBtn.onclick = async () => {
   hideErrorBox();
   loginStatus.textContent = "Signing in…";
-  try{
+  try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   } catch (e) {
     const code = e?.code || "(no code)";
     const msg  = e?.message || String(e);
     loginStatus.textContent = `Login failed: ${code}`;
-    showError(`${code}\n${msg}`);
+
+    // IMPORTANT: show the real error object
+    showError(e);
     logDiag(`Login failed: ${code} :: ${msg}`);
+    logDiag("Full error: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
   }
 };
+
 
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
