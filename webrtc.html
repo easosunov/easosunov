@@ -194,7 +194,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2025-12-29-2");
+console.log("APP VERSION:", "2025-12-30-1");
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
@@ -313,7 +313,6 @@ import {
   setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-/* ======= IMPORTANT ======= */
 const PUBLIC_VAPID_KEY = "PASTE_YOUR_PUBLIC_VAPID_KEY_HERE";
 
 const app = initializeApp({
@@ -330,6 +329,7 @@ const auth = getAuth(app);
 /* Force login every time (no stored session) */
 await setPersistence(auth, inMemoryPersistence);
 
+/* UID allowlist */
 async function enforceAllowlist(user){
   const ref = doc(db, "allowlistUids", user.uid);
   const snap = await getDoc(ref);
@@ -390,6 +390,9 @@ async function loadIceServers() {
 let localStream = null;
 let pc = null;
 
+/* CRITICAL: when making a phone call, pin the room id so restarts NEVER jump rooms */
+let pinnedRoomId = null;
+
 function closePeer(){
   if(pc){
     pc.onicecandidate=null;
@@ -443,6 +446,14 @@ async function clearSub(col){
 function refreshCopyInviteState(){
   const hasRoomId = !!roomIdInput.value.trim();
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
+}
+
+/* Call button enable/disable */
+function normalizePhone(p){ return String(p || "").trim().replace(/\s+/g,""); }
+function isE164(p){ return /^\+\d{5,20}$/.test(p); }
+function refreshCallButtonState(){
+  const ok = isAuthed && isE164(normalizePhone(calleePhoneInput.value));
+  callBtn.disabled = !ok;
 }
 
 /* ================== MEDIA + AUTOJOIN ================== */
@@ -502,8 +513,9 @@ function scheduleAutoJoin(){
   if (suppressAutoJoin) return;
   if (autoJoinScheduled) return;
 
-  autoJoinScheduled = true;
+  /* IMPORTANT: cancel first, then set scheduled */
   cancelPendingAutoJoin();
+  autoJoinScheduled = true;
 
   autoJoinTimer = setTimeout(async ()=>{
     autoJoinScheduled = false;
@@ -573,6 +585,9 @@ function stopAll(){
   hangupBtn.disabled = true;
   callBtn.disabled = !isAuthed;
   setStatus(phoneCallStatus, "Idle.");
+
+  /* reset call pin */
+  pinnedRoomId = null;
 }
 stopBtn.onclick = () => stopAll();
 
@@ -594,12 +609,6 @@ async function requestFreshOffer(roomRef){
 /* ================== ROOM A ================== */
 let createAttemptA = 0;
 
-/**
- * createRoom(options)
- * - updateHash: change URL hash (manual invites)
- * - reuseRoomIdInput: if true, uses existing roomIdInput value, else generates a new doc id
- * - fixedRoomId: if provided, ALWAYS use that room id (used for restarts)
- */
 async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
   if(!requireAuthOrPrompt()) return null;
 
@@ -616,10 +625,12 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
 
   const existing =
     (options.fixedRoomId ? String(options.fixedRoomId).trim() : "") ||
+    (pinnedRoomId ? String(pinnedRoomId).trim() : "") ||
     (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
 
   const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
 
+  /* if pinned, keep input in sync */
   roomIdInput.value = roomRef.id;
   if (options.updateHash) location.hash = roomRef.id;
 
@@ -682,7 +693,6 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
       }catch(e){
         logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
         setStatus(callStatus, "Answer failed — restarting session…");
-        // IMPORTANT: restart MUST stay on the SAME room id
         setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 200);
       }
     }
@@ -884,9 +894,6 @@ function stopRingtone(){
 }
 
 /* ================== PHONE DIRECTORY + CALLS ================== */
-function normalizePhone(p){ return String(p || "").trim().replace(/\s+/g,""); }
-function isE164(p){ return /^\+\d{5,20}$/.test(p); }
-
 let myPhone = "";
 let currentIncomingCall = null; // { id, data }
 let currentOutgoingCallId = null;
@@ -944,9 +951,9 @@ async function findUserByPhone(phone){
   return { uid, phone: p };
 }
 
-/* IMPORTANT FIX: stop listening for MORE incoming calls once we show one */
+/* Prevent overwriting current incoming call */
 function showIncomingUI(callId, data){
-  if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; } // prevents overwriting currentIncomingCall
+  if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; }
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromPhone || "unknown"}…`;
   incomingOverlay.style.display = "flex";
@@ -1014,6 +1021,9 @@ async function startPhoneCall(){
   const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
   if(!created?.roomId) throw new Error("Room creation failed.");
 
+  /* PIN room id for this phone call so restarts never jump rooms */
+  pinnedRoomId = created.roomId;
+
   const callRef = await addDoc(collection(db,"calls"), {
     fromUid: myUid,
     toUid: callee.uid,
@@ -1063,6 +1073,7 @@ function cleanupOutgoingCallUI(){
   hangupBtn.disabled = true;
   currentOutgoingCallId = null;
   if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
+  pinnedRoomId = null;
 }
 
 async function hangup(){
@@ -1094,7 +1105,6 @@ answerBtn.onclick = async ()=>{
 
     await joinRoom();
 
-    // IMPORTANT FIX: resume incoming listening after handling
     try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
@@ -1108,15 +1118,13 @@ declineBtn.onclick = async ()=>{
     stopIncomingUI();
     await updateDoc(doc(db,"calls", id), { status: "declined", updatedAt: serverTimestamp() });
     setStatus(phoneCallStatus, "Declined incoming call.");
-
-    // IMPORTANT FIX: resume incoming listening after handling
     try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
   }
 };
 
-/* ================== PUSH NOTIFICATIONS (optional) ================== */
+/* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
 
@@ -1183,7 +1191,12 @@ roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
 refreshCopyInviteState();
 
 savePhoneBtn.onclick = ()=> saveMyPhone().catch(showError);
-callBtn.onclick = ()=> startPhoneCall().catch(showError);
+
+callBtn.onclick = async () => {
+  logDiag("Call button clicked");
+  try { await startPhoneCall(); } catch(e){ showError(e); }
+};
+
 hangupBtn.onclick = ()=> hangup().catch(showError);
 
 testSoundBtn.onclick = async ()=>{
@@ -1191,14 +1204,13 @@ testSoundBtn.onclick = async ()=>{
   startRingtone();
   setTimeout(()=>stopRingtone(), 1800);
 };
+
 enablePushBtn.onclick = ()=> enablePush().catch(showError);
 
 myPhoneInput.addEventListener("input", ()=>{
   savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
 });
-calleePhoneInput.addEventListener("input", ()=>{
-  callBtn.disabled = !isAuthed;
-});
+calleePhoneInput.addEventListener("input", refreshCallButtonState);
 
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
@@ -1207,12 +1219,8 @@ onAuthStateChanged(auth, async (user)=>{
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
-    try{
-      await enforceAllowlist(user);
-    }catch(e){
-      showError(e);
-      return;
-    }
+    try{ await enforceAllowlist(user); }
+    catch(e){ showError(e); return; }
 
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
@@ -1222,12 +1230,12 @@ onAuthStateChanged(auth, async (user)=>{
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    callBtn.disabled = false;
-    savePhoneBtn.disabled = normalizePhone(myPhoneInput.value).length < 5;
+    savePhoneBtn.disabled = !isE164(normalizePhone(myPhoneInput.value));
     testSoundBtn.disabled = false;
     enablePushBtn.disabled = false;
 
     refreshCopyInviteState();
+    refreshCallButtonState();
 
     try{ await loadMyPhoneFromFirestore(); } catch(e){ logDiag("Load phone failed: " + (e?.message || e)); }
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
