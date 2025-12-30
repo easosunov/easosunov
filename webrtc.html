@@ -271,7 +271,7 @@ const setStatus = (el,msg)=> el.textContent = msg;
     if(callId && roomId){
       incomingText.textContent = `Call from ${fromPhone || "unknown"}…`;
       incomingOverlay.style.display = "flex";
-      startRingtone();
+      if (typeof startRingtone === "function") startRingtone();
 
       pendingIncomingCallWhileLoggedOut = {
         id: callId,
@@ -383,6 +383,7 @@ async function enforceAllowlist(user){
 /* ================== AUTH GATE ================== */
 let isAuthed = false;
 let myUid = null;
+let pendingIncomingCallWhileLoggedOut = null;
 
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
