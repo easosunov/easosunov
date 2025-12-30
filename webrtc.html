@@ -194,7 +194,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2025-12-29-1");
+console.log("APP VERSION:", "2025-12-29-2");
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
@@ -292,14 +292,12 @@ function showError(e){
   errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
   logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
 }
-
 function hideErrorBox(){
   errorBox.style.display = "none";
   errorBox.textContent = "";
 }
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-
 emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
@@ -309,18 +307,13 @@ import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
   onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
-import {
-  getMessaging, getToken, onMessage
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
   setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-/* ======= IMPORTANT =======
-   Put your Firebase Console -> Project Settings -> Cloud Messaging -> Web Push certificates -> Public VAPID key here.
-*/
+/* ======= IMPORTANT ======= */
 const PUBLIC_VAPID_KEY = "PASTE_YOUR_PUBLIC_VAPID_KEY_HERE";
 
 const app = initializeApp({
@@ -333,13 +326,14 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 const auth = getAuth(app);
+
+/* Force login every time (no stored session) */
+await setPersistence(auth, inMemoryPersistence);
+
 async function enforceAllowlist(user){
-  // UID-based allowlist (recommended; avoids rules lower() issues)
   const ref = doc(db, "allowlistUids", user.uid);
   const snap = await getDoc(ref);
-
   if(!snap.exists() || snap.data()?.enabled !== true){
-    // Not approved -> sign out and lock UI
     try{ await signOut(auth); }catch{}
     throw new Error("This account is not approved. Ask admin to allowlist your UID.");
   }
@@ -363,26 +357,15 @@ loginBtn.onclick = async () => {
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
   } catch (e) {
-    console.error("LOGIN ERROR RAW:", e);
-
     loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
-
-    // show full object details (Firebase errors often have non-enumerable fields)
-    try {
-      logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
-    } catch {}
-
-    showError(e); // <-- IMPORTANT
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
   }
 };
 
-
-
 logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
 
-/* ================== URL HASH / AUTOJOIN MODE ==================
-   IMPORTANT: only treat it as an invite if it existed on initial page load.
-*/
+/* ================== URL HASH / AUTOJOIN MODE ================== */
 const openedFromInvite = (location.hash.length > 1);
 let suppressAutoJoin = false;
 
@@ -439,13 +422,8 @@ async function ensurePeer() {
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
   };
 
-  pc.onconnectionstatechange = () => {
-    if (pc) logDiag("pc.connectionState=" + pc.connectionState);
-  };
-
-  pc.oniceconnectionstatechange = () => {
-    if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
-  };
+  pc.onconnectionstatechange = () => { if (pc) logDiag("pc.connectionState=" + pc.connectionState); };
+  pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
 
   if (!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
@@ -620,8 +598,9 @@ let createAttemptA = 0;
  * createRoom(options)
  * - updateHash: change URL hash (manual invites)
  * - reuseRoomIdInput: if true, uses existing roomIdInput value, else generates a new doc id
+ * - fixedRoomId: if provided, ALWAYS use that room id (used for restarts)
  */
-async function createRoom(options={updateHash:true, reuseRoomIdInput:true}){
+async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
   if(!requireAuthOrPrompt()) return null;
 
   suppressAutoJoin = true;
@@ -635,10 +614,11 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true}){
 
   const myAttempt = ++createAttemptA;
 
-  let roomRef;
-  const existing = (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
-  if(existing) roomRef = doc(db,"rooms", existing);
-  else roomRef = doc(collection(db,"rooms"));
+  const existing =
+    (options.fixedRoomId ? String(options.fixedRoomId).trim() : "") ||
+    (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
+
+  const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
 
   roomIdInput.value = roomRef.id;
   if (options.updateHash) location.hash = roomRef.id;
@@ -690,7 +670,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true}){
       lastSeenJoinRequestA = d.joinRequest;
       setStatus(callStatus, "Join request received — restarting session…");
       logDiag("JoinRequest seen => restarting offer/session.");
-      setTimeout(()=>createRoom(options).catch(()=>{}), 150);
+      setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 150);
       return;
     }
 
@@ -702,7 +682,8 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true}){
       }catch(e){
         logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
         setStatus(callStatus, "Answer failed — restarting session…");
-        setTimeout(()=>createRoom(options).catch(()=>{}), 200);
+        // IMPORTANT: restart MUST stay on the SAME room id
+        setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 200);
       }
     }
   });
@@ -846,7 +827,7 @@ copyLinkBtn.onclick = async ()=>{
   logDiag("Copy invite clicked.");
 };
 
-/* ================== RINGTONE (WebAudio Oscillator) ================== */
+/* ================== RINGTONE ================== */
 let audioCtx = null;
 let ringOsc = null;
 let ringGain = null;
@@ -858,14 +839,12 @@ function ensureAudio(){
   }
   return audioCtx;
 }
-
 async function unlockAudio(){
   try{
     const ctx = ensureAudio();
     if(ctx.state !== "running") await ctx.resume();
   }catch{}
 }
-
 window.addEventListener("click", ()=>{ unlockAudio(); }, { once:false, passive:true });
 
 function startRingtone(){
@@ -895,7 +874,6 @@ function startRingtone(){
     logDiag("Ringtone failed: " + (e?.message || e));
   }
 }
-
 function stopRingtone(){
   if(ringTimer){ clearInterval(ringTimer); ringTimer=null; }
   try{ if(ringOsc){ ringOsc.stop(); } }catch{}
@@ -906,12 +884,8 @@ function stopRingtone(){
 }
 
 /* ================== PHONE DIRECTORY + CALLS ================== */
-function normalizePhone(p){
-  return String(p || "").trim().replace(/\s+/g,"");
-}
-function isE164(p){
-  return /^\+\d{5,20}$/.test(p);
-}
+function normalizePhone(p){ return String(p || "").trim().replace(/\s+/g,""); }
+function isE164(p){ return /^\+\d{5,20}$/.test(p); }
 
 let myPhone = "";
 let currentIncomingCall = null; // { id, data }
@@ -928,13 +902,10 @@ function stopCallListeners(){
 }
 
 async function loadMyPhoneFromFirestore(){
-  // No longer stored in users/{uid}. Keep local input only.
-  // (You could store it in localStorage if you want persistence.)
   myPhone = normalizePhone(localStorage.getItem("myPhone") || "");
   myPhoneInput.value = myPhone;
   setStatus(phoneStatus, myPhone ? `Saved (local): ${myPhone}` : "Not set.");
 }
-
 
 async function saveMyPhone(){
   if(!requireAuthOrPrompt()) return;
@@ -943,7 +914,6 @@ async function saveMyPhone(){
   if(!p) throw new Error("Your phone number is empty.");
   if(!isE164(p)) throw new Error("Use E.164 format, e.g. +15551234567");
 
-  // Create/overwrite phone directory entry (self-claim)
   await setDoc(doc(db, "phones", p), {
     phone: p,
     uid: myUid,
@@ -957,7 +927,6 @@ async function saveMyPhone(){
   setStatus(phoneStatus, `Saved: ${myPhone}`);
   logDiag("Saved my phone (phones directory): " + myPhone);
 }
-
 
 async function findUserByPhone(phone){
   const p = normalizePhone(phone);
@@ -975,8 +944,9 @@ async function findUserByPhone(phone){
   return { uid, phone: p };
 }
 
-
+/* IMPORTANT FIX: stop listening for MORE incoming calls once we show one */
 function showIncomingUI(callId, data){
+  if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; } // prevents overwriting currentIncomingCall
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromPhone || "unknown"}…`;
   incomingOverlay.style.display = "flex";
@@ -1041,7 +1011,7 @@ async function startPhoneCall(){
   }
 
   setStatus(phoneCallStatus, "Creating room…");
-  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false });
+  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
   if(!created?.roomId) throw new Error("Room creation failed.");
 
   const callRef = await addDoc(collection(db,"calls"), {
@@ -1123,6 +1093,9 @@ answerBtn.onclick = async ()=>{
     callBtn.disabled = !isAuthed;
 
     await joinRoom();
+
+    // IMPORTANT FIX: resume incoming listening after handling
+    try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
   }
@@ -1135,65 +1108,43 @@ declineBtn.onclick = async ()=>{
     stopIncomingUI();
     await updateDoc(doc(db,"calls", id), { status: "declined", updatedAt: serverTimestamp() });
     setStatus(phoneCallStatus, "Declined incoming call.");
+
+    // IMPORTANT FIX: resume incoming listening after handling
+    try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
   }
 };
 
-/* ================== PUSH NOTIFICATIONS (FCM Web Push) ================== */
+/* ================== PUSH NOTIFICATIONS (optional) ================== */
 let messaging = null;
 let swReg = null;
 
 async function enablePush(){
   if(!requireAuthOrPrompt()) return;
 
-  if (!("Notification" in window)) {
-    setStatus(pushStatus, "Push: not supported in this browser.");
-    return;
-  }
-  if (!("serviceWorker" in navigator)) {
-    setStatus(pushStatus, "Push: service worker not supported.");
-    return;
-  }
-  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) {
-    setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first.");
-    return;
-  }
+  if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
+  if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
+  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try{
-    // Must exist at SITE ROOT on GitHub Pages: /firebase-messaging-sw.js
     swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
     logDiag("SW registered: /firebase-messaging-sw.js");
 
     messaging = getMessaging(app);
 
     const perm = await Notification.requestPermission();
-    if (perm !== "granted"){
-      setStatus(pushStatus, "Push: permission not granted.");
-      return;
-    }
+    if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
 
-    const token = await getToken(messaging, {
-      vapidKey: PUBLIC_VAPID_KEY,
-      serviceWorkerRegistration: swReg
-    });
-
-    if(!token){
-      setStatus(pushStatus, "Push: no token returned.");
-      return;
-    }
+    const token = await getToken(messaging, { vapidKey: PUBLIC_VAPID_KEY, serviceWorkerRegistration: swReg });
+    if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
 
     const tokenId = token.slice(0, 32);
-    await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), {
-      token,
-      createdAt: Date.now(),
-      ua: navigator.userAgent
-    }, { merge:true });
+    await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), { token, createdAt: Date.now(), ua: navigator.userAgent }, { merge:true });
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored.");
 
-    // Foreground push handler
     onMessage(messaging, (payload)=>{
       logDiag("FCM foreground message: " + JSON.stringify(payload));
       const data = payload?.data || {};
@@ -1225,7 +1176,7 @@ startBtn.onclick = async ()=>{
   }
 };
 
-createBtn.onclick = ()=> createRoom({updateHash:true, reuseRoomIdInput:true}).catch(showError);
+createBtn.onclick = ()=> createRoom({updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}).catch(showError);
 joinBtn.onclick   = ()=> joinRoom().catch(showError);
 
 roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
@@ -1240,38 +1191,29 @@ testSoundBtn.onclick = async ()=>{
   startRingtone();
   setTimeout(()=>stopRingtone(), 1800);
 };
-
 enablePushBtn.onclick = ()=> enablePush().catch(showError);
 
 myPhoneInput.addEventListener("input", ()=>{
   savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
 });
-
-
 calleePhoneInput.addEventListener("input", ()=>{
   callBtn.disabled = !isAuthed;
 });
 
 /* ================== AUTH STATE ================== */
-
-
-// Force login every time the page is opened (no stored session)
-await setPersistence(auth, inMemoryPersistence);
-
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
-
-  try{
+    try{
       await enforceAllowlist(user);
     }catch(e){
       showError(e);
-      return; // user was signed out inside enforceAllowlist
+      return;
     }
-    
+
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
@@ -1290,7 +1232,6 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await loadMyPhoneFromFirestore(); } catch(e){ logDiag("Load phone failed: " + (e?.message || e)); }
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
 
-    // keep browser-safe (no camera without gesture)
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
