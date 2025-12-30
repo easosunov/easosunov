@@ -492,6 +492,10 @@ let autoJoinTimer = null;
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
+  logDiag("enablePush(): Notification in window = " + ("Notification" in window));
+  logDiag("enablePush(): serviceWorker in navigator = " + ("serviceWorker" in navigator));
+  logDiag("enablePush(): Notification.permission = " + (("Notification" in window) ? Notification.permission : "n/a"));
+  logDiag("enablePush(): PUBLIC_VAPID_KEY set = " + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
 
   if(localStream){
     if(!opts.skipAutoJoin) scheduleAutoJoin();
