@@ -1064,17 +1064,6 @@ async function startPhoneCall(){
   hangupBtn.disabled = false;
   callBtn.disabled = true;
 // Request push so callee rings even if tab is closed
-try{
-  await sendCallPushToPhone({
-    toPhone: callee.phone,
-    fromPhone: myPhone,
-    roomId: created.roomId,
-    callId: callRef.id
-  });
-  logDiag("Push requested for callee.");
-}catch(e){
-  logDiag("Push request failed: " + (e?.message || e));
-}
 
   setStatus(phoneCallStatus, `Calling ${callee.phone}…`);
   logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
@@ -1160,20 +1149,7 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
-// [L1291–L1310] Call backend to send FCM push
-async function sendCallPushToPhone({ toPhone, fromPhone, roomId, callId }){
-  const r = await fetch("/sendCallPush", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ toPhone, fromPhone, roomId, callId })
-  });
 
-  if(!r.ok){
-    const t = await r.text().catch(()=> "");
-    throw new Error("sendCallPush failed: " + r.status + " " + t);
-  }
-  return r.json().catch(()=> ({}));
-}
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
