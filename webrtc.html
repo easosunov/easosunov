@@ -195,6 +195,31 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 
 <script type="module">
 console.log("APP VERSION:", "2025-12-30-1");
+// Handle open from push notification (tab was closed)
+(function handlePushOpen(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const callId = qs.get("callId");
+    const roomId = qs.get("roomId");
+    const fromPhone = qs.get("fromPhone");
+    const toPhone = qs.get("toPhone");
+
+    if(callId && roomId){
+      incomingText.textContent = `Call from ${fromPhone || "unknown"}…`;
+      incomingOverlay.style.display = "flex";
+      startRingtone("incoming");
+
+      pendingIncomingCallWhileLoggedOut = {
+        id: callId,
+        data: { roomId, fromPhone, toPhone }
+      };
+
+      roomIdInput.value = roomId;
+    }
+  }catch(e){
+    console.warn("Push open parse failed", e);
+  }
+})();
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
@@ -1038,6 +1063,18 @@ async function startPhoneCall(){
   currentOutgoingCallId = callRef.id;
   hangupBtn.disabled = false;
   callBtn.disabled = true;
+// Request push so callee rings even if tab is closed
+try{
+  await sendCallPushToPhone({
+    toPhone: callee.phone,
+    fromPhone: myPhone,
+    roomId: created.roomId,
+    callId: callRef.id
+  });
+  logDiag("Push requested for callee.");
+}catch(e){
+  logDiag("Push request failed: " + (e?.message || e));
+}
 
   setStatus(phoneCallStatus, `Calling ${callee.phone}…`);
   logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
@@ -1123,6 +1160,20 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
+// [L1291–L1310] Call backend to send FCM push
+async function sendCallPushToPhone({ toPhone, fromPhone, roomId, callId }){
+  const r = await fetch("/sendCallPush", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ toPhone, fromPhone, roomId, callId })
+  });
+
+  if(!r.ok){
+    const t = await r.text().catch(()=> "");
+    throw new Error("sendCallPush failed: " + r.status + " " + t);
+  }
+  return r.json().catch(()=> ({}));
+}
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
@@ -1149,6 +1200,26 @@ async function enablePush(){
 
     const tokenId = token.slice(0, 32);
     await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), { token, createdAt: Date.now(), ua: navigator.userAgent }, { merge:true });
+// [L1361–L1380] ALSO store token indexed by phone number
+const phone = normalizePhone(
+  myPhoneInput.value || localStorage.getItem("myPhone") || ""
+);
+
+if (isE164(phone)) {
+  await setDoc(
+    doc(db, "phonePushTokens", phone, "tokens", tokenId),
+    {
+      token,
+      createdAt: Date.now(),
+      ua: navigator.userAgent,
+      enabled: true
+    },
+    { merge: true }
+  );
+  logDiag("FCM token stored for phone " + phone);
+} else {
+  logDiag("FCM token NOT stored (phone missing/invalid)");
+}
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored.");
