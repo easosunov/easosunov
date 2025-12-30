@@ -263,6 +263,18 @@ const phoneCallStatus = document.getElementById("phoneCallStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const enablePushBtn = document.getElementById("enablePushBtn");
 
+  // HARD WIRING: always run push enable when the button is clicked
+enablePushBtn.addEventListener("click", (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  logDiag("Enable Push HARD listener fired");
+  enablePush().catch((e) => {
+    logDiag("enablePush() error: " + (e?.message || e));
+    showError(e);
+  });
+});
+
+
 /* Incoming modal */
 const incomingOverlay = document.getElementById("incomingOverlay");
 const incomingText = document.getElementById("incomingText");
@@ -1163,6 +1175,12 @@ let messaging = null;
 let swReg = null;
 
 async function enablePush(){
+  logDiag("enablePush(): ENTER");
+  logDiag("enablePush(): Notification in window=" + ("Notification" in window));
+  logDiag("enablePush(): serviceWorker in navigator=" + ("serviceWorker" in navigator));
+  logDiag("enablePush(): Notification.permission=" + (("Notification" in window) ? Notification.permission : "n/a"));
+  logDiag("enablePush(): vapidSet=" + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
+
   if(!requireAuthOrPrompt()) return;
 
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
