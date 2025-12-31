@@ -1,38 +1,16 @@
-/* firebase-messaging-sw.js */
-console.log("SW boot ok", self.location.href);
-importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
+// firebase-messaging-sw.js (MINIMAL TEST)
+console.log("SW: boot", self.location.href);
 
-firebase.initializeApp({
-  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
-  authDomain:"easosunov-webrtc.firebaseapp.com",
-  projectId:"easosunov-webrtc",
-  storageBucket:"easosunov-webrtc.firebasestorage.app",
-  messagingSenderId:"100169991412",
-  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
+self.addEventListener("install", (event) => {
+  console.log("SW: install");
+  self.skipWaiting();
 });
 
-const messaging = firebase.messaging();
-
-messaging.onBackgroundMessage((payload) => {
-  const title = payload?.notification?.title || "Incoming call";
-  const options = {
-    body: payload?.notification?.body || "Tap to open",
-    data: payload?.data || {}
-  };
-  self.registration.showNotification(title, options);
+self.addEventListener("activate", (event) => {
+  console.log("SW: activate");
+  event.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("notificationclick", (event) => {
-  event.notification.close();
-  const d = event.notification.data || {};
-  const base = self.location.href.replace(/[^/]*$/, ""); // .../easosunov/
-  const url = new URL(base + "webrtc.html");
-
-  if (d.callId) url.searchParams.set("callId", d.callId);
-  if (d.roomId) url.searchParams.set("roomId", d.roomId);
-  if (d.fromPhone) url.searchParams.set("fromPhone", d.fromPhone);
-  if (d.toPhone) url.searchParams.set("toPhone", d.toPhone);
-
-  event.waitUntil(clients.openWindow(url.toString()));
+self.addEventListener("fetch", (event) => {
+  // no-op
 });
