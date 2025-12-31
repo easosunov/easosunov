@@ -1191,6 +1191,16 @@ async function enablePush(){
 
   try{
     const swUrl = new URL("firebase-messaging-sw.js", location.href);
+    const swUrl = new URL("firebase-messaging-sw.js", location.href);
+
+// PRECHECK: prove we are downloading JS and not HTML
+const resp = await fetch(swUrl, { cache: "no-store" });
+const ct = resp.headers.get("content-type") || "";
+const txt = await resp.text();
+logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
+logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
+if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
+
     swReg = await navigator.serviceWorker.register(swUrl);
     logDiag("SW registered: " + swUrl.toString());
 
