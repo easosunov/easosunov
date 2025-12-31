@@ -1,9 +1,7 @@
-/* firebase-messaging-sw.js (MUST be at site root) */
-
+/* firebase-messaging-sw.js */
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
 
-// Same config as your page:
 firebase.initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
@@ -15,33 +13,25 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Background notifications
 messaging.onBackgroundMessage((payload) => {
   const title = payload?.notification?.title || "Incoming call";
-  const body  = payload?.notification?.body  || "Tap to answer";
-  const roomId = payload?.data?.roomId || "";
-
-  self.registration.showNotification(title, {
-    body,
-    icon: payload?.notification?.icon || "/icon-192.png",
-    data: { roomId }
-  });
+  const options = {
+    body: payload?.notification?.body || "Tap to open",
+    data: payload?.data || {}
+  };
+  self.registration.showNotification(title, options);
 });
 
-// Click: open app and pass roomId in URL hash
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const roomId = event.notification?.data?.roomId || "";
-  event.waitUntil((async () => {
-    const url = roomId ? (`/webrtc.html#${roomId}`) : "/webrtc.html";
-    const allClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
-    for (const client of allClients) {
-      if ("focus" in client) {
-        client.navigate(url);
-        return client.focus();
-      }
-    }
-    return clients.openWindow(url);
-  })());
-});
+  const d = event.notification.data || {};
+  const base = self.location.href.replace(/[^/]*$/, ""); // .../easosunov/
+  const url = new URL(base + "webrtc.html");
 
+  if (d.callId) url.searchParams.set("callId", d.callId);
+  if (d.roomId) url.searchParams.set("roomId", d.roomId);
+  if (d.fromPhone) url.searchParams.set("fromPhone", d.fromPhone);
+  if (d.toPhone) url.searchParams.set("toPhone", d.toPhone);
+
+  event.waitUntil(clients.openWindow(url.toString()));
+});
