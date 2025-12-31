@@ -1279,7 +1279,6 @@ testSoundBtn.onclick = async ()=>{
   setTimeout(()=>stopRingtone(), 1800);
 };
 
-enablePushBtn.onclick = ()=> { logDiag("Enable Push button clicked"); enablePush().catch(showError); };
 
 myPhoneInput.addEventListener("input", ()=>{
   savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
