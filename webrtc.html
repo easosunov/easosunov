@@ -205,11 +205,12 @@ function cleanVapidKey(k){
 }
 
 const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
-logDiag("VAPID len=" + VAPID.length +
-        " start=" + VAPID.slice(0,10) +
-        " end=" + VAPID.slice(-10));
-logDiag("VAPID has + or / ? " + /[+/]/.test(VAPID));
+console.log("VAPID len=" + VAPID.length +
+            " start=" + VAPID.slice(0,10) +
+            " end=" + VAPID.slice(-10));
+console.log("VAPID has + or / ? " + /[+/]/.test(VAPID));
 console.log("PUBLIC_VAPID_KEY CHECK:", PUBLIC_VAPID_KEY.slice(0, 10));
+
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
