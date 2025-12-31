@@ -197,7 +197,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 console.log("APP VERSION:", "2025-12-31-1");
 
 /* ======== CONFIG ======== */
-const PUBLIC_VAPID_KEY = "BCB4B8uFw0ZJuzKHLBCJO22NNpupe88jBwkriTwvQALDpWUeJ3umIkNJTLrb0L_eLeu2HyBNbogHc67YfNzM";
+const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
 function cleanVapidKey(k){
   return String(k || "")
     .trim()
@@ -1169,6 +1169,26 @@ declineBtn.onclick = async ()=>{
 /* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
+function base64UrlToUint8Array(base64Url) {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+function validateVapid(vapid) {
+  const s = String(vapid || "").trim();
+  if (!/^[A-Za-z0-9\-_]+$/.test(s)) return { ok:false, why:"contains invalid characters" };
+  try {
+    const bytes = base64UrlToUint8Array(s);
+    if (bytes.length !== 65) return { ok:false, why:`decoded length ${bytes.length}, expected 65` };
+    return { ok:true, why:`ok (65 bytes)` };
+  } catch (e) {
+    return { ok:false, why:`decode failed: ${e?.message || e}` };
+  }
+}
 
 async function enablePush(){
   logDiag("enablePush(): ENTER");
@@ -1201,6 +1221,9 @@ async function enablePush(){
 
     const perm = await Notification.requestPermission();
     if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
+const check = validateVapid(VAPID);
+logDiag("VAPID check: " + check.ok + " - " + check.why);
+if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
 
     const token = await getToken(messaging, {
   vapidKey: VAPID,
