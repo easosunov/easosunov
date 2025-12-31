@@ -198,6 +198,17 @@ console.log("APP VERSION:", "2025-12-31-1");
 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCB4B8uFw0ZJuzKHLBCJO22NNpupe88jBwkriTwvQALDpWUeJ3umIkNJTLrb0L_eLeu2HyBNbogHc67YfNzM";
+function cleanVapidKey(k){
+  return String(k || "")
+    .trim()
+    .replace(/[\r\n\s]/g, "");
+}
+
+const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
+logDiag("VAPID len=" + VAPID.length +
+        " start=" + VAPID.slice(0,10) +
+        " end=" + VAPID.slice(-10));
+logDiag("VAPID has + or / ? " + /[+/]/.test(VAPID));
 console.log("PUBLIC_VAPID_KEY CHECK:", PUBLIC_VAPID_KEY.slice(0, 10));
 
 /* ================== ELEMENTS ================== */
@@ -1190,7 +1201,11 @@ async function enablePush(){
     const perm = await Notification.requestPermission();
     if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
 
-    const token = await getToken(messaging, { vapidKey: PUBLIC_VAPID_KEY, serviceWorkerRegistration: swReg });
+    const token = await getToken(messaging, {
+  vapidKey: VAPID,
+  serviceWorkerRegistration: swReg
+});
+
     if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
 
     const tokenId = token.slice(0, 32);
