@@ -1,4 +1,5 @@
 /* firebase-messaging-sw.js */
+console.log("SW boot ok", self.location.href);
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
 
