@@ -1190,7 +1190,8 @@ async function enablePush(){
   if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try{
-    swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+    swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js", { scope: "./" });
+
     logDiag("SW registered: /firebase-messaging-sw.js");
 
     messaging = getMessaging(app);
