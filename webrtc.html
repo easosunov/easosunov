@@ -669,7 +669,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
   logDiag("CreateRoom: roomId=" + roomRef.id);
 
   const caller = collection(roomRef,"callerCandidates");
-
+  const callee = collection(roomRef,"calleeCandidates");
   const snap = await getDoc(roomRef);
   const prev = snap.exists() ? (snap.data().session || 0) : 0;
   const session = Number(prev) + 1;
