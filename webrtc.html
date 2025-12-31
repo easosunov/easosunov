@@ -25,7 +25,6 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   color:#7a1b1b;border-radius:12px;white-space:pre-wrap
 }
 
-  
 /* LOGIN OVERLAY */
 #loginOverlay{
   position:fixed; inset:0; z-index:9999;
@@ -155,7 +154,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
       <div class="status" id="phoneCallStatus">Idle.</div>
       <div class="small">Tip: both users must be signed in and have saved their phone number.</div>
       <div class="small">
-        Push requires an extra file at site root: <code>/firebase-messaging-sw.js</code>, plus a Cloud Function to send push.
+        Push requires an extra file next to this HTML file: <code>firebase-messaging-sw.js</code>
       </div>
     </div>
   </div>
@@ -195,12 +194,14 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2025-12-30-2");
+/* =========================================================
+   APP VERSION / CONFIG
+   ========================================================= */
+// [LN:CONFIG-01] Put your VAPID key ONLY HERE (do NOT put it in <style>!)
 const PUBLIC_VAPID_KEY = "BCB4B8uFw0ZJuzKHLBCJO22NNpupe88jBwkriTwvQALDpWUeJ3umIkNJTLrb0L_eLeu2HyBNbogHc67YfNzM";
-console.log("PUBLIC_VAPID_KEY CHECK:", PUBLIC_VAPID_KEY.slice(0, 10));
 
-// Handle open from push notification (tab was closed)
-
+console.log("APP VERSION:", "2025-12-31-pushfix-1");
+console.log("PUBLIC_VAPID_KEY CHECK:", (PUBLIC_VAPID_KEY || "").slice(0, 10));
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
@@ -241,18 +242,6 @@ const phoneCallStatus = document.getElementById("phoneCallStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const enablePushBtn = document.getElementById("enablePushBtn");
 
-  // HARD WIRING: always run push enable when the button is clicked
-enablePushBtn.addEventListener("click", (ev) => {
-  ev.preventDefault();
-  ev.stopPropagation();
-  logDiag("Enable Push HARD listener fired");
-  enablePush().catch((e) => {
-    logDiag("enablePush() error: " + (e?.message || e));
-    showError(e);
-  });
-});
-
-
 /* Incoming modal */
 const incomingOverlay = document.getElementById("incomingOverlay");
 const incomingText = document.getElementById("incomingText");
@@ -260,30 +249,7 @@ const answerBtn = document.getElementById("answerBtn");
 const declineBtn = document.getElementById("declineBtn");
 
 const setStatus = (el,msg)=> el.textContent = msg;
-(function handlePushOpen(){
-  try{
-    const qs = new URLSearchParams(location.search);
-    const callId = qs.get("callId");
-    const roomId = qs.get("roomId");
-    const fromPhone = qs.get("fromPhone");
-    const toPhone = qs.get("toPhone");
 
-    if(callId && roomId){
-      incomingText.textContent = `Call from ${fromPhone || "unknown"}…`;
-      incomingOverlay.style.display = "flex";
-      if (typeof startRingtone === "function") startRingtone();
-
-      pendingIncomingCallWhileLoggedOut = {
-        id: callId,
-        data: { roomId, fromPhone, toPhone }
-      };
-
-      roomIdInput.value = roomId;
-    }
-  }catch(e){
-    console.warn("Push open parse failed", e);
-  }
-})();
 /* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
 const diagLog = [];
@@ -354,8 +320,6 @@ import {
   setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
-
-
 const app = initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
@@ -383,6 +347,8 @@ async function enforceAllowlist(user){
 /* ================== AUTH GATE ================== */
 let isAuthed = false;
 let myUid = null;
+
+/* If user opened via notification, we show modal early; after login we can join. */
 let pendingIncomingCallWhileLoggedOut = null;
 
 function requireAuthOrPrompt(){
@@ -416,6 +382,34 @@ if (openedFromInvite) {
   setStatus(callStatus, "Room ID detected in URL.");
   logDiag("Room ID from URL hash: " + roomIdInput.value);
 }
+
+/* ================== PUSH OPEN (tab was closed) ================== */
+// [LN:PUSHOPEN-01] This lets notification click open your page with ?callId&roomId
+(function handlePushOpen(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const callId = qs.get("callId");
+    const roomId = qs.get("roomId");
+    const fromPhone = qs.get("fromPhone");
+    const toPhone = qs.get("toPhone");
+
+    if(callId && roomId){
+      incomingText.textContent = `Call from ${fromPhone || "unknown"}…`;
+      incomingOverlay.style.display = "flex";
+      startRingtone();
+
+      pendingIncomingCallWhileLoggedOut = {
+        id: callId,
+        data: { roomId, fromPhone, toPhone }
+      };
+
+      roomIdInput.value = roomId;
+      logDiag("Opened from notification: callId=" + callId + " roomId=" + roomId);
+    }
+  }catch(e){
+    console.warn("Push open parse failed", e);
+  }
+})();
 
 /* ================== WEBRTC ================== */
 let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
@@ -506,10 +500,6 @@ let autoJoinTimer = null;
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
-  logDiag("enablePush(): Notification in window = " + ("Notification" in window));
-  logDiag("enablePush(): serviceWorker in navigator = " + ("serviceWorker" in navigator));
-  logDiag("enablePush(): Notification.permission = " + (("Notification" in window) ? Notification.permission : "n/a"));
-  logDiag("enablePush(): PUBLIC_VAPID_KEY set = " + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
 
   if(localStream){
     if(!opts.skipAutoJoin) scheduleAutoJoin();
@@ -559,7 +549,6 @@ function scheduleAutoJoin(){
   if (suppressAutoJoin) return;
   if (autoJoinScheduled) return;
 
-  /* IMPORTANT: cancel first, then set scheduled */
   cancelPendingAutoJoin();
   autoJoinScheduled = true;
 
@@ -632,7 +621,6 @@ function stopAll(){
   callBtn.disabled = !isAuthed;
   setStatus(phoneCallStatus, "Idle.");
 
-  /* reset call pin */
   pinnedRoomId = null;
 }
 stopBtn.onclick = () => stopAll();
@@ -676,7 +664,6 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
 
   const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
 
-  /* if pinned, keep input in sync */
   roomIdInput.value = roomRef.id;
   if (options.updateHash) location.hash = roomRef.id;
 
@@ -999,7 +986,6 @@ async function findUserByPhone(phone){
 
 /* Prevent overwriting current incoming call */
 function showIncomingUI(callId, data){
-  if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; }
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromPhone || "unknown"}…`;
   incomingOverlay.style.display = "flex";
@@ -1067,7 +1053,6 @@ async function startPhoneCall(){
   const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
   if(!created?.roomId) throw new Error("Room creation failed.");
 
-  /* PIN room id for this phone call so restarts never jump rooms */
   pinnedRoomId = created.roomId;
 
   const callRef = await addDoc(collection(db,"calls"), {
@@ -1084,7 +1069,6 @@ async function startPhoneCall(){
   currentOutgoingCallId = callRef.id;
   hangupBtn.disabled = false;
   callBtn.disabled = true;
-// Request push so callee rings even if tab is closed
 
   setStatus(phoneCallStatus, `Calling ${callee.phone}…`);
   logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
@@ -1151,7 +1135,6 @@ answerBtn.onclick = async ()=>{
     callBtn.disabled = !isAuthed;
 
     await joinRoom();
-
     try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
@@ -1171,32 +1154,31 @@ declineBtn.onclick = async ()=>{
   }
 };
 
-
 /* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
 
 async function enablePush(){
-  logDiag("enablePush(): ENTER");
-  logDiag("enablePush(): Notification in window=" + ("Notification" in window));
-  logDiag("enablePush(): serviceWorker in navigator=" + ("serviceWorker" in navigator));
-  logDiag("enablePush(): Notification.permission=" + (("Notification" in window) ? Notification.permission : "n/a"));
-  logDiag("enablePush(): vapidSet=" + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
+  logDiag("Enable Push button clicked");
 
   if(!requireAuthOrPrompt()) return;
 
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
-  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
+
+  const vapidOk = !!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_");
+  if(!vapidOk) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try{
+    // [LN:PUSH-REGISTER-01] IMPORTANT for GitHub Pages project sites:
+    // Use RELATIVE path so it loads from the same folder as this HTML (fixes 404).
     swReg = await navigator.serviceWorker.register("./firebase-messaging-sw.js", { scope: "./" });
-
-    logDiag("SW registered: /firebase-messaging-sw.js");
+    logDiag("SW registered: ./firebase-messaging-sw.js scope=./");
 
     messaging = getMessaging(app);
 
     const perm = await Notification.requestPermission();
+    logDiag("Notification.permission=" + perm);
     if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
 
     const token = await getToken(messaging, { vapidKey: PUBLIC_VAPID_KEY, serviceWorkerRegistration: swReg });
@@ -1204,26 +1186,19 @@ async function enablePush(){
 
     const tokenId = token.slice(0, 32);
     await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), { token, createdAt: Date.now(), ua: navigator.userAgent }, { merge:true });
-// [L1361–L1380] ALSO store token indexed by phone number
-const phone = normalizePhone(
-  myPhoneInput.value || localStorage.getItem("myPhone") || ""
-);
 
-if (isE164(phone)) {
-  await setDoc(
-    doc(db, "phonePushTokens", phone, "tokens", tokenId),
-    {
-      token,
-      createdAt: Date.now(),
-      ua: navigator.userAgent,
-      enabled: true
-    },
-    { merge: true }
-  );
-  logDiag("FCM token stored for phone " + phone);
-} else {
-  logDiag("FCM token NOT stored (phone missing/invalid)");
-}
+    // Store token indexed by phone (optional, if you use phonePushTokens)
+    const phone = normalizePhone(myPhoneInput.value || localStorage.getItem("myPhone") || "");
+    if (isE164(phone)) {
+      await setDoc(
+        doc(db, "phonePushTokens", phone, "tokens", tokenId),
+        { token, createdAt: Date.now(), ua: navigator.userAgent, enabled: true },
+        { merge: true }
+      );
+      logDiag("FCM token stored for phone " + phone);
+    } else {
+      logDiag("FCM token NOT stored (phone missing/invalid)");
+    }
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored.");
@@ -1280,7 +1255,7 @@ testSoundBtn.onclick = async ()=>{
   setTimeout(()=>stopRingtone(), 1800);
 };
 
-enablePushBtn.onclick = ()=> { logDiag("Enable Push button clicked"); enablePush().catch(showError); };
+enablePushBtn.onclick = ()=> enablePush().catch(showError);
 
 myPhoneInput.addEventListener("input", ()=>{
   savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
@@ -1314,6 +1289,15 @@ onAuthStateChanged(auth, async (user)=>{
 
     try{ await loadMyPhoneFromFirestore(); } catch(e){ logDiag("Load phone failed: " + (e?.message || e)); }
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+
+    // If we opened from notification while logged out, keep modal visible; user can Answer after login.
+    if (pendingIncomingCallWhileLoggedOut?.data?.roomId) {
+      roomIdInput.value = pendingIncomingCallWhileLoggedOut.data.roomId;
+      incomingOverlay.style.display = "flex";
+      incomingText.textContent = `Call from ${pendingIncomingCallWhileLoggedOut.data.fromPhone || "unknown"}…`;
+      startRingtone();
+      // We don't auto-answer: user clicks Answer.
+    }
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
