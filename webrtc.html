@@ -1214,7 +1214,17 @@ async function enablePush(){
     logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
     if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
-    swReg = await navigator.serviceWorker.register(swUrl, { scope: "./" });
+    // cache-bust SW URL so *everyone* gets the newest script immediately
+swUrl.searchParams.set("v", "2026-01-01"); // bump this when you deploy SW changes
+
+swReg = await navigator.serviceWorker.register(swUrl.toString(), {
+  scope: "./",
+  updateViaCache: "none",
+});
+
+// ask for update right away
+await swReg.update();
+
     logDiag("SW registered: " + swUrl.toString());
 
     messaging = getMessaging(app);
