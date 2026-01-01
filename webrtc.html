@@ -1204,28 +1204,35 @@ async function enablePush(){
   if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try {
-    const swUrl = new URL("firebase-messaging-sw.js", location.href);
+    // --- SERVICE WORKER (FCM) ---
+const swUrl = new URL("firebase-messaging-sw.js", location.href);
+swUrl.searchParams.set("v", "2026-01-01"); // bump when you deploy SW changes
 
-    // PRECHECK: prove we are downloading JS and not HTML
-    const resp = await fetch(swUrl, { cache: "no-store" });
-    const ct = resp.headers.get("content-type") || "";
-    const txt = await resp.text();
-    logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
-    logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
-    if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
+// PRECHECK: validate the *same* URL that we will register
+const resp = await fetch(swUrl.toString(), { cache: "no-store" });
+const ct = resp.headers.get("content-type") || "";
+const txt = await resp.text();
+logDiag("SW prefetch url=" + swUrl.toString());
+logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
+logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
+if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
-    // cache-bust SW URL so *everyone* gets the newest script immediately
-swUrl.searchParams.set("v", "2026-01-01"); // bump this when you deploy SW changes
-
+// Register SW
 swReg = await navigator.serviceWorker.register(swUrl.toString(), {
   scope: "./",
   updateViaCache: "none",
 });
 
-// ask for update right away
-await swReg.update();
+// Wait until the SW is ready (important for FCM timing)
+await navigator.serviceWorker.ready;
 
-    logDiag("SW registered: " + swUrl.toString());
+// Force an update check (optional but helpful on GitHub Pages)
+try { await swReg.update(); } catch {}
+
+// Log SW state
+logDiag("SW registered/ready. controller=" + (!!navigator.serviceWorker.controller));
+logDiag("SW state active=" + (swReg.active?.state || "none"));
+
 
     messaging = getMessaging(app);
 
@@ -1280,9 +1287,26 @@ if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
     });
 
   } catch (e) {
-    setStatus(pushStatus, "Push: failed (see diagnostics).");
-    logDiag("Push enable failed: " + (e?.message || e));
+  setStatus(pushStatus, "Push: failed (see diagnostics).");
+
+  // Log complete error details (not just message)
+  try {
+    logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
+  } catch {
+    logDiag("Push error props: (stringify failed)");
   }
+  logDiag("Push enable failed: name=" + (e?.name || "") +
+          " code=" + (e?.code || "") +
+          " message=" + (e?.message || e));
+
+  // Helpful context
+  logDiag("Context: isSecureContext=" + window.isSecureContext);
+  logDiag("Context: Notification.permission=" + (("Notification" in window) ? Notification.permission : "n/a"));
+  logDiag("Context: SW controller=" + (!!navigator.serviceWorker.controller));
+
+  showError(e);
+}
+
 }
 
 /* HARD WIRING: always run push enable when the button is clicked */
