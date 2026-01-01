@@ -1,6 +1,4 @@
-// firebase-messaging-sw.js
-console.log("SW boot ok", self.location.href);
-
+/* firebase-messaging-sw.js */
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
 
@@ -15,6 +13,7 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// This fires when the tab is CLOSED but browser is running
 messaging.onBackgroundMessage((payload) => {
   const title = payload?.notification?.title || "Incoming call";
   const options = {
@@ -27,7 +26,8 @@ messaging.onBackgroundMessage((payload) => {
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const d = event.notification.data || {};
-  const base = self.location.href.replace(/[^/]*$/, "");
+
+  const base = self.location.origin + self.location.pathname.replace(/[^/]*$/, "");
   const url = new URL(base + "webrtc.html");
 
   if (d.callId) url.searchParams.set("callId", d.callId);
@@ -37,4 +37,3 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(clients.openWindow(url.toString()));
 });
-
