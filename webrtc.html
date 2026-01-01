@@ -1220,9 +1220,10 @@ if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
 // Register SW
 swReg = await navigator.serviceWorker.register(swUrl.toString(), {
-  scope: "/",
+  scope: "/easosunov/",
   updateViaCache: "none",
 });
+
 
 // Wait until the SW is ready (important for FCM timing)
 await navigator.serviceWorker.ready;
