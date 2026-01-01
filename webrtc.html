@@ -1207,7 +1207,7 @@ async function enablePush(){
     // --- SERVICE WORKER (FCM) ---
 const swUrl = new URL("/firebase-messaging-sw.js", location.origin);
 
-swUrl.searchParams.set("v", "2026-01-01"); // bump when you deploy SW changes
+swUrl.searchParams.set("v", "2026-01-01b"); // bump when you deploy SW changes
 
 // PRECHECK: validate the *same* URL that we will register
 const resp = await fetch(swUrl.toString(), { cache: "no-store" });
