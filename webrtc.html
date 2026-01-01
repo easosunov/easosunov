@@ -1205,7 +1205,8 @@ async function enablePush(){
 
   try {
     // --- SERVICE WORKER (FCM) ---
-const swUrl = new URL("firebase-messaging-sw.js", location.href);
+const swUrl = new URL("/firebase-messaging-sw.js", location.origin);
+
 swUrl.searchParams.set("v", "2026-01-01"); // bump when you deploy SW changes
 
 // PRECHECK: validate the *same* URL that we will register
@@ -1219,7 +1220,7 @@ if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
 // Register SW
 swReg = await navigator.serviceWorker.register(swUrl.toString(), {
-  scope: "./",
+  scope: "/",
   updateViaCache: "none",
 });
 
