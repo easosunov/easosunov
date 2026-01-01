@@ -27,8 +27,8 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const d = event.notification.data || {};
 
-  const base = self.location.origin + self.location.pathname.replace(/[^/]*$/, "");
-  const url = new URL(base + "webrtc.html");
+  const url = new URL("/easosunov/webrtc.html", self.location.origin);
+
 
   if (d.callId) url.searchParams.set("callId", d.callId);
   if (d.roomId) url.searchParams.set("roomId", d.roomId);
