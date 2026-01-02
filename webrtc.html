@@ -449,13 +449,36 @@ await setPersistence(auth, inMemoryPersistence);
 
 /* UID allowlist */
 async function enforceAllowlist(user){
-  const ref = doc(db, "allowlistUids", user.uid);
-  const snap = await getDoc(ref);
-  if(!snap.exists() || snap.data()?.enabled !== true){
-    try{ await signOut(auth); }catch{}
-    throw new Error("This account is not approved. Ask admin to allowlist your UID.");
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
+
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
+
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
+    }
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
+    }
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
   }
 }
+
 
 /* ================== AUTH GATE ================== */
 let isAuthed = false;
@@ -475,6 +498,7 @@ loginBtn.onclick = async () => {
   loginStatus.textContent = "Signing in…";
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+loginStatus.textContent = "Signed in. Checking allowlist…";
 
     // Claim device owner immediately (forces other tabs with different UID to sign out)
     const uid = auth.currentUser?.uid;
@@ -1676,7 +1700,18 @@ onAuthStateChanged(auth, async (user)=>{
 
   if (isAuthed){
     try{ await enforceAllowlist(user); }
-    catch(e){ showError(e); return; }
+    catch(e){
+  showError(e);
+
+  // restore locked UI so login doesn't look frozen
+  loginOverlay.style.display = "flex";
+  appRoot.classList.add("locked");
+  logoutBtn.style.display = "none";
+  startBtn.disabled = true;
+
+  return;
+}
+
 
 // Single-user lock: reaffirm ownership after allowlist passes
 setDeviceOwner(user.uid);
