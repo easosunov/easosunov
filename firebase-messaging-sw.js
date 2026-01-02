@@ -6,15 +6,15 @@
     try { console.log("[FCM-SW]", msg); } catch (e) {}
   }
 
-  try {
-    importScripts("/easosunov/firebase-app-compat.js");
-    importScripts("/easosunov/firebase-messaging-compat.js");
-    log("importScripts OK");
-  } catch (e) {
-    log("importScripts FAILED: " + (e && e.message ? e.message : e));
-    // Re-throw so registration fails, but now you can see WHY in the SW console.
-    throw e;
-  }
+ try {
+  importScripts("/easosunov/firebase-app-compat.js");
+  importScripts("/easosunov/firebase-messaging-compat.js");
+  console.log("[FCM-SW] importScripts OK");
+} catch (e) {
+  console.error("[FCM-SW] importScripts FAILED", e);
+  throw e;
+}
+
 
   try {
     firebase.initializeApp({
