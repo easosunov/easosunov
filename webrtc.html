@@ -1008,8 +1008,10 @@ function showIncomingUI(callId, data){
 function stopIncomingUI(){
   incomingOverlay.style.display = "none";
   stopRingtone();
+  lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
   currentIncomingCall = null;
 }
+
 
 async function listenIncomingCalls(){
   if(!myUid) return;
@@ -1028,7 +1030,12 @@ async function listenIncomingCalls(){
     if(snap.empty) return;
     const d = snap.docs[0];
     const data = d.data();
+
+    // Don't re-show the same call after we already dismissed/answered it
+    if (d.id === lastDismissedIncomingCallId) return;
+
     if(currentIncomingCall?.id === d.id) return;
+
     logDiag("Incoming call (Firestore): " + d.id);
     showIncomingUI(d.id, data);
   }, (err)=>{
@@ -1145,14 +1152,21 @@ async function hangup(){
 /* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
   try{
-    if(!currentIncomingCall) return;
-    const { id, data } = currentIncomingCall;
-
+    // Always close UI + stop ringing, regardless of how popup was opened (push or Firestore)
     stopIncomingUI();
+
+    // If we don't have a call object, we can't update Firestore
+    if(!currentIncomingCall){
+      setStatus(phoneCallStatus, "No call context. Please wait for the caller again.");
+      return;
+    }
+
+    const { id, data } = currentIncomingCall;
 
     await updateDoc(doc(db,"calls", id), { status: "accepted", updatedAt: serverTimestamp() });
 
     roomIdInput.value = data.roomId;
+
     setStatus(phoneCallStatus, `Answered ${data.fromPhone || ""}. Joining room…`);
     hangupBtn.disabled = true;
     callBtn.disabled = !isAuthed;
@@ -1313,7 +1327,10 @@ if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
       logDiag("FCM foreground message: " + JSON.stringify(payload));
       const data = payload?.data || {};
       if (data.roomId) roomIdInput.value = data.roomId;
-
+      // Attach call context if provided
+      if (data.callId) {
+        currentIncomingCall = { id: data.callId, data: data };
+      }
       incomingText.textContent =
         payload?.notification?.body ||
         (data.fromPhone ? `Call from ${data.fromPhone}` : "Incoming call…");
