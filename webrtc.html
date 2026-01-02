@@ -914,24 +914,24 @@ function stopRingtone(){
 
 /* ================== CALLS (UID-based) ================== */
 let currentIncomingCall = null; // { id, data }
-let currentOutgoingCallId = null;
+let activeCallId = null;        // NEW: callId for BOTH sides (caller OR callee)
 let lastDismissedIncomingCallId = null;
 
 let unsubIncoming = null;
-let unsubOutgoing = null;
+let unsubCallDoc = null;
 
 function stopCallListeners(){
   if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
-  if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
   currentIncomingCall = null;
-  currentOutgoingCallId = null;
+  activeCallId = null;
 }
 
 function showIncomingUI(callId, data){
-  if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; }
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
 
+  // Let caller know callee browser received/displayed invite
   if (!data?.deliveredAt) {
     updateDoc(doc(db,"calls", callId), {
       deliveredAt: serverTimestamp(),
@@ -978,23 +978,73 @@ async function listenIncomingCalls(){
   });
 }
 
-function cleanupOutgoingCallUI(){
+function cleanupCallUI(){
   hangupBtn.disabled = true;
-  currentOutgoingCallId = null;
-  if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
+  activeCallId = null;
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
   pinnedRoomId = null;
 }
 
+function listenActiveCall(callId){
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+
+  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
+    if(!s.exists()) return;
+    const d = s.data();
+    if(!d) return;
+
+    // If the other side ends the call, clean everything up locally
+    if(d.status === "ended"){
+      setStatus(dirCallStatus, "Ended.");
+      logDiag("Call ended (remote).");
+      cleanupCallUI();
+      stopAll(); // full local cleanup
+      return;
+    }
+
+    // Optional: keep your existing status feedback
+    if(d.status === "accepted"){
+      setStatus(dirCallStatus, "Answered. Connecting…");
+      return;
+    }
+    if(d.status === "declined"){
+      setStatus(dirCallStatus, "Declined.");
+      logDiag("Call declined.");
+      cleanupCallUI();
+      return;
+    }
+
+    if (d.deliveredAt) {
+      setStatus(dirCallStatus, "Delivered (callee page open).");
+      return;
+    }
+
+    const stage = d.push?.stage || "";
+    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
+    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
+    if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
+
+    setStatus(dirCallStatus, "Ringing…");
+  });
+}
+
 async function hangup(){
-  if (currentOutgoingCallId) {
+  // NEW: works for BOTH caller and callee
+  if (activeCallId) {
     try{
-      await updateDoc(doc(db,"calls", currentOutgoingCallId), {
+      await updateDoc(doc(db,"calls", activeCallId), {
         status: "ended",
         updatedAt: serverTimestamp()
       });
-    }catch{}
+    }catch(e){
+      // If rules block it, you'll see it in the error box (we fix rules below)
+      showError(e);
+    }
   }
+
+  // FULL local cleanup
   stopAll();
+  cleanupCallUI();
   setStatus(dirCallStatus, "Ended.");
 }
 
@@ -1013,10 +1063,14 @@ answerBtn.onclick = async ()=>{
 
     await updateDoc(doc(db,"calls", id), { status: "accepted", updatedAt: serverTimestamp() });
 
+    // NEW: Callee now has an active call id and can hang up
+    activeCallId = id;
+    hangupBtn.disabled = false;
+    listenActiveCall(id);
+
     roomIdInput.value = data.roomId;
 
     setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
-    hangupBtn.disabled = true;
 
     await joinRoom();
 
@@ -1042,7 +1096,6 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
-
 /* ================== USER DIRECTORY (C-lite) ================== */
 let myDisplayName = "";
 let allUsersCache = []; // [{uid, displayName}]
@@ -1178,48 +1231,12 @@ async function startCallToUid(toUid, toName=""){
     updatedAt: serverTimestamp()
   });
 
-  currentOutgoingCallId = callRef.id;
-  hangupBtn.disabled = false;
+  activeCallId = callRef.id;
+hangupBtn.disabled = false;
 
-  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
-  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
-
-  if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
-  unsubOutgoing = onSnapshot(doc(db,"calls", callRef.id), (s)=>{
-    if(!s.exists()) return;
-    const d = s.data();
-    if(!d) return;
-
-    if(d.status === "accepted"){
-      setStatus(dirCallStatus, "Answered. Connecting…");
-      logDiag("Call accepted.");
-      return;
-    }
-    if(d.status === "declined"){
-      setStatus(dirCallStatus, "Declined.");
-      logDiag("Call declined.");
-      cleanupOutgoingCallUI();
-      return;
-    }
-    if(d.status === "ended"){
-      setStatus(dirCallStatus, "Ended.");
-      logDiag("Call ended.");
-      cleanupOutgoingCallUI();
-      return;
-    }
-
-    if (d.deliveredAt) {
-      setStatus(dirCallStatus, "Delivered (callee page open).");
-      return;
-    }
-
-    const stage = d.push?.stage || "";
-    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
-    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
-    if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
-
-    setStatus(dirCallStatus, "Ringing…");
-  });
+// Watch the call doc for accepted/declined/ended/delivery/push status
+listenActiveCall(activeCallId);
+);
 }
 
 /* ================== PUSH (optional) ================== */
