@@ -934,6 +934,13 @@ function showIncomingUI(callId, data){
   if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; }
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
+    // NEW: Let caller know that callee's browser actually received/displayed the invite
+  if (!data?.deliveredAt) {
+    updateDoc(doc(db,"calls", callId), {
+      deliveredAt: serverTimestamp(),
+      deliveredVia: "firestore"
+    }).catch(()=>{});
+  }
   incomingOverlay.style.display = "flex";
   startRingtone();
 }
@@ -1201,6 +1208,28 @@ async function startCallToUid(toUid, toName=""){
       cleanupOutgoingCallUI();
       return;
     }
+      // NEW: delivery/push feedback for the caller while still ringing
+    if (d.deliveredAt) {
+      setStatus(dirCallStatus, "Delivered (callee page open).");
+      return;
+    }
+
+    const stage = d.push?.stage || "";
+    if (stage === "sent") {
+      setStatus(dirCallStatus, "Push sent (waiting for answer)...");
+      return;
+    }
+    if (stage === "no_tokens") {
+      setStatus(dirCallStatus, "No push tokens for callee (tab must be open).");
+      return;
+    }
+    if (stage === "error") {
+      setStatus(dirCallStatus, "Push error (see call doc push.error).");
+      return;
+    }
+
+    setStatus(dirCallStatus, "Ringing…");
+
   });
 }
 
@@ -1386,7 +1415,14 @@ onAuthStateChanged(auth, async (user)=>{
     // Ensure profile + load directory
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
-
+    // NEW: If page was opened via push while logged out, mark delivered after we are authenticated
+    if (pendingIncomingCallWhileLoggedOut?.id) {
+      const callId = pendingIncomingCallWhileLoggedOut.id;
+      updateDoc(doc(db,"calls", callId), {
+        deliveredAt: serverTimestamp(),
+        deliveredVia: "push_open"
+      }).catch(()=>{});
+    }
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
