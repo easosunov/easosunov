@@ -1,8 +1,6 @@
-/* firebase-messaging-sw.js */
-
-// IMPORTANT: use the compat libraries in SW (simplest for SW)
-importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
+/* firebase-messaging-sw.js (stable SW version) */
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 
 firebase.initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
@@ -18,21 +16,14 @@ const messaging = firebase.messaging();
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-// FCM background handler (THIS is what you were missing)
 messaging.onBackgroundMessage((payload) => {
-  // payload: { notification?, data? }
   const data = payload?.data || {};
-
-  const title =
-    payload?.notification?.title ||
-    "Incoming call";
-
+  const title = payload?.notification?.title || "Incoming call";
   const options = {
     body: payload?.notification?.body || "Tap to answer",
-    data: data, // keep callId/roomId here
-    requireInteraction: true,
+    data,
+    requireInteraction: true
   };
-
   self.registration.showNotification(title, options);
 });
 
