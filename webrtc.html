@@ -139,7 +139,6 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
         <button id="saveNameBtn" disabled>Save Name</button>
         <button id="refreshUsersBtn" disabled>Refresh Users</button>
         <button id="testSoundBtn" disabled>Test Ring Sound</button>
-        <button id="enablePushBtn" disabled>Enable Push Notifications</button>
         <button id="hangupBtn" disabled>Hang up</button>
       </div>
 
@@ -247,7 +246,6 @@ const dirCallStatus = document.getElementById("dirCallStatus");
 /* Push + sound + hangup */
 const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
-const enablePushBtn = document.getElementById("enablePushBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 
 const setStatus = (el,msg)=> el.textContent = msg;
@@ -1340,13 +1338,56 @@ async function enablePush(){
   }
 }
 
-/* HARD WIRING: always run push enable when the button is clicked */
-enablePushBtn.addEventListener("click", (ev) => {
-  ev.preventDefault();
-  ev.stopPropagation();
-  logDiag("Enable Push HARD listener fired");
-  enablePush().catch(showError);
-});
+  let autoPushClickArmed = false;
+
+function autoEnablePushOnLogin(){
+  // No push support
+  if (!("Notification" in window)) {
+    setStatus(pushStatus, "Push: not supported in this browser.");
+    return;
+  }
+  if (!("serviceWorker" in navigator)) {
+    setStatus(pushStatus, "Push: service worker not supported.");
+    return;
+  }
+
+  const perm = Notification.permission;
+
+  // If user already granted permission earlier, do it immediately (no prompt)
+  if (perm === "granted") {
+    logDiag("Auto-push: permission granted -> enabling push now");
+    enablePush().catch((e)=> {
+      logDiag("Auto-push enable failed: " + (e?.message || e));
+    });
+    return;
+  }
+
+  // If user blocked notifications, we cannot prompt again
+  if (perm === "denied") {
+    setStatus(pushStatus, "Push: blocked in browser settings (Notifications = Block).");
+    logDiag("Auto-push: permission denied");
+    return;
+  }
+
+  // perm === "default" (not decided yet)
+  // Most browsers behave best if requestPermission happens after a user gesture.
+  setStatus(pushStatus, "Push: click anywhere once to enable notifications.");
+  if (autoPushClickArmed) return;
+  autoPushClickArmed = true;
+
+  const handler = () => {
+    window.removeEventListener("click", handler, { capture:true });
+    autoPushClickArmed = false;
+    logDiag("Auto-push: user click detected -> enabling push");
+    enablePush().catch((e)=> {
+      logDiag("Auto-push enable failed: " + (e?.message || e));
+      showError(e);
+    });
+  };
+
+  // capture=true so it triggers even if user clicks a button/video
+  window.addEventListener("click", handler, { once:true, capture:true });
+}
 
 /* ================== BUTTON WIRING ================== */
 startBtn.onclick = async ()=>{
@@ -1401,7 +1442,8 @@ onAuthStateChanged(auth, async (user)=>{
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
     testSoundBtn.disabled = false;
-    enablePushBtn.disabled = false;
+    // NEW: auto-enable push on login (no button)
+    autoEnablePushOnLogin();
 
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
@@ -1432,8 +1474,7 @@ onAuthStateChanged(auth, async (user)=>{
     stopAll();
 
     testSoundBtn.disabled = true;
-    enablePushBtn.disabled = true;
-
+    
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
