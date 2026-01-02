@@ -1359,7 +1359,33 @@ async function startCallToUid(toUid, toName=""){
 /* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
+/* ===== NEW: rotate FCM token when user changes on same browser ===== */
+let lastPushUid = null;
 
+async function rotateFcmTokenIfUserChanged(){
+  try{
+    if(!("Notification" in window)) return;
+    if(!("serviceWorker" in navigator)) return;
+    if(Notification.permission !== "granted") return;
+
+    // If browser already had push for another user, invalidate token
+    if(lastPushUid && myUid && lastPushUid !== myUid){
+      logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
+
+      if(!messaging){
+        messaging = getMessaging(app);
+      }
+
+      // IMPORTANT: this invalidates the token at FCM level
+      await deleteToken(messaging);
+      logDiag("Push: deleteToken() success");
+    }
+
+    lastPushUid = myUid || null;
+  }catch(e){
+    logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
+  }
+}
   // Remember which token belongs to THIS browser + which UID it was saved under
 const LS_PUSH_UID = "webrtc_push_uid";
 const LS_PUSH_TID = "webrtc_push_tokenId";
@@ -1502,22 +1528,51 @@ savePushBinding(myUid, tokenId);
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored (users/{uid}/fcmTokens).");
 
-    onMessage(messaging, (payload)=>{
-      logDiag("FCM foreground message: " + JSON.stringify(payload));
-      const data = payload?.data || {};
-      if (data.roomId) roomIdInput.value = data.roomId;
+   onMessage(messaging, async (payload)=>{
+  try{
+    logDiag("FCM foreground message: " + JSON.stringify(payload));
+    const data = payload?.data || {};
 
-      if (data.callId) {
-        currentIncomingCall = { id: data.callId, data: data };
+    // Must be signed in to react
+    if(!isAuthed || !myUid) {
+      logDiag("Ignoring FCM: not authed");
+      return;
+    }
+
+    // If this is a call, verify it is REALLY for me by reading the call doc
+    if (data.callId) {
+      const callRef = doc(db, "calls", data.callId);
+      const callSnap = await getDoc(callRef);
+      if(!callSnap.exists()){
+        logDiag("Ignoring FCM: call doc missing");
+        return;
       }
+      const call = callSnap.data() || {};
+
+      if(call.toUid !== myUid){
+        logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
+        return;
+      }
+
+      // OK - it is for me
+      if (call.roomId) roomIdInput.value = call.roomId;
+      currentIncomingCall = { id: data.callId, data: call };
 
       incomingText.textContent =
         payload?.notification?.body ||
-        (data.fromName ? `Call from ${data.fromName}` : "Incoming call…");
+        (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
 
       incomingOverlay.style.display = "flex";
       startRingtone();
-    });
+      return;
+    }
+
+    // Non-call pushes: ignore (or handle if you want)
+    logDiag("Ignoring FCM: not a callId payload");
+  }catch(e){
+    logDiag("onMessage handler error: " + (e?.message || e));
+  }
+});
 
   } catch (e) {
     setStatus(pushStatus, "Push: failed (see diagnostics).");
@@ -1618,7 +1673,7 @@ broadcastNewOwner(user.uid);
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
     testSoundBtn.disabled = false;
-
+await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
