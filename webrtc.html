@@ -905,7 +905,7 @@ function startRingtone(){
     const ctx = ensureAudio();
     if(ctx.state !== "running") ctx.resume().catch(()=>{});
     ringGain = ctx.createGain();
-    ringGain.gain.value = 0.08;
+    ringGain.gain.value = 0.5;
     ringGain.connect(ctx.destination);
 
     ringOsc = ctx.createOscillator();
