@@ -19,7 +19,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 .status{font-size:13px;margin-top:8px}
 .small{font-size:12px;color:#555;margin-top:6px}
 
-#errorBox{ 
+#errorBox{
   display:none;margin:12px 0;padding:10px;
   border:1px solid #f3b5b5;background:#fff5f5;
   color:#7a1b1b;border-radius:12px;white-space:pre-wrap
@@ -128,33 +128,32 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     </div>
   </div>
 
-  <!-- PHONE CALLING -->
+  <!-- USER DIRECTORY (C-lite, ALL USERS LIST) -->
   <div class="row" style="margin-top:12px">
     <div class="card">
-      <b>Phone calling</b><br/><br/>
+      <b>User directory (C-lite)</b><br/><br/>
 
-      <div class="small">Your phone number (used only for in-app lookup)</div>
-      <input id="myPhoneInput" placeholder="+15551234567"/>
+      <div class="small">Your display name (shown to other users)</div>
+      <input id="myNameInput" placeholder="e.g. Alex"/>
       <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="savePhoneBtn" disabled>Save My Number</button>
+        <button id="saveNameBtn" disabled>Save Name</button>
+        <button id="refreshUsersBtn" disabled>Refresh Users</button>
         <button id="testSoundBtn" disabled>Test Ring Sound</button>
         <button id="enablePushBtn" disabled>Enable Push Notifications</button>
+        <button id="hangupBtn" disabled>Hang up</button>
       </div>
-      <div class="status" id="phoneStatus">Not set.</div>
+
+      <div class="status" id="myNameStatus">Not set.</div>
       <div class="status" id="pushStatus">Push: not enabled.</div>
+      <div class="status" id="dirCallStatus">Idle.</div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
-      <div class="small">Call another user by phone number</div>
-      <input id="calleePhoneInput" placeholder="+15557654321"/>
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="callBtn" disabled>Call</button>
-        <button id="hangupBtn" disabled>Hang up</button>
-      </div>
-      <div class="status" id="phoneCallStatus">Idle.</div>
-      <div class="small">Tip: both users must be signed in and have saved their phone number.</div>
-      <div class="small">
-        Push requires an extra file at site root: <code>/firebase-messaging-sw.js</code>, plus a Cloud Function to send push.
+      <div class="small">All allowed users</div>
+      <input id="userSearchInput" placeholder="Search users…" />
+      <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
+      <div class="small" style="margin-top:8px;color:#777">
+        Tip: both users must be signed in and have this page open (unless push is implemented end-to-end via Cloud Functions).
       </div>
     </div>
   </div>
@@ -194,23 +193,14 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2025-12-31-1");
+console.log("APP VERSION:", "2026-01-02-C-LITE-ALL-USERS-NO-PHONE");
 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
 function cleanVapidKey(k){
-  return String(k || "")
-    .trim()
-    .replace(/[\r\n\s]/g, "");
+  return String(k || "").trim().replace(/[\r\n\s]/g, "");
 }
-
 const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
-console.log("VAPID len=" + VAPID.length +
-            " start=" + VAPID.slice(0,10) +
-            " end=" + VAPID.slice(-10));
-console.log("VAPID has + or / ? " + /[+/]/.test(VAPID));
-console.log("PUBLIC_VAPID_KEY CHECK:", PUBLIC_VAPID_KEY.slice(0, 10));
-
 
 /* ================== ELEMENTS ================== */
 const errorBox = document.getElementById("errorBox");
@@ -239,23 +229,26 @@ const diagBox = document.getElementById("diagBox");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
 
-/* Phone call UI */
-const myPhoneInput = document.getElementById("myPhoneInput");
-const savePhoneBtn = document.getElementById("savePhoneBtn");
-const phoneStatus = document.getElementById("phoneStatus");
-const pushStatus = document.getElementById("pushStatus");
-const calleePhoneInput = document.getElementById("calleePhoneInput");
-const callBtn = document.getElementById("callBtn");
-const hangupBtn = document.getElementById("hangupBtn");
-const phoneCallStatus = document.getElementById("phoneCallStatus");
-const testSoundBtn = document.getElementById("testSoundBtn");
-const enablePushBtn = document.getElementById("enablePushBtn");
-
 /* Incoming modal */
 const incomingOverlay = document.getElementById("incomingOverlay");
 const incomingText = document.getElementById("incomingText");
 const answerBtn = document.getElementById("answerBtn");
 const declineBtn = document.getElementById("declineBtn");
+
+/* Directory UI (C-lite) */
+const myNameInput = document.getElementById("myNameInput");
+const saveNameBtn = document.getElementById("saveNameBtn");
+const refreshUsersBtn = document.getElementById("refreshUsersBtn");
+const myNameStatus = document.getElementById("myNameStatus");
+const userSearchInput = document.getElementById("userSearchInput");
+const usersList = document.getElementById("usersList");
+const dirCallStatus = document.getElementById("dirCallStatus");
+
+/* Push + sound + hangup */
+const pushStatus = document.getElementById("pushStatus");
+const testSoundBtn = document.getElementById("testSoundBtn");
+const enablePushBtn = document.getElementById("enablePushBtn");
+const hangupBtn = document.getElementById("hangupBtn");
 
 const setStatus = (el,msg)=> el.textContent = msg;
 
@@ -321,7 +314,8 @@ passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textCont
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
 import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp
+  onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp,
+  documentId
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
 import {
@@ -386,17 +380,17 @@ logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showErr
     const qs = new URLSearchParams(location.search);
     const callId = qs.get("callId");
     const roomId = qs.get("roomId");
-    const fromPhone = qs.get("fromPhone");
-    const toPhone = qs.get("toPhone");
+    const fromName = qs.get("fromName");
+    const toName = qs.get("toName");
 
     if(callId && roomId){
-      incomingText.textContent = `Call from ${fromPhone || "unknown"}…`;
+      incomingText.textContent = `Call from ${fromName || "unknown"}…`;
       incomingOverlay.style.display = "flex";
       if (typeof startRingtone === "function") startRingtone();
 
       pendingIncomingCallWhileLoggedOut = {
         id: callId,
-        data: { roomId, fromPhone, toPhone }
+        data: { roomId, fromName, toName }
       };
 
       roomIdInput.value = roomId;
@@ -431,7 +425,7 @@ async function loadIceServers() {
 let localStream = null;
 let pc = null;
 
-/* CRITICAL: when making a phone call, pin the room id so restarts NEVER jump rooms */
+/* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
 
 function closePeer(){
@@ -489,14 +483,6 @@ function refreshCopyInviteState(){
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
 }
 
-/* Call button enable/disable */
-function normalizePhone(p){ return String(p || "").trim().replace(/\s+/g,""); }
-function isE164(p){ return /^\+\d{5,20}$/.test(p); }
-function refreshCallButtonState(){
-  const ok = isAuthed && isE164(normalizePhone(calleePhoneInput.value));
-  callBtn.disabled = !ok;
-}
-
 /* ================== MEDIA + AUTOJOIN ================== */
 let startingPromise = null;
 let autoJoinDone = false;
@@ -505,11 +491,6 @@ let autoJoinTimer = null;
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
-
-  logDiag("enablePush(): Notification in window = " + ("Notification" in window));
-  logDiag("enablePush(): serviceWorker in navigator = " + ("serviceWorker" in navigator));
-  logDiag("enablePush(): Notification.permission = " + (("Notification" in window) ? Notification.permission : "n/a"));
-  logDiag("enablePush(): PUBLIC_VAPID_KEY set = " + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
 
   if(localStream){
     if(!opts.skipAutoJoin) scheduleAutoJoin();
@@ -628,8 +609,7 @@ function stopAll(){
   refreshCopyInviteState();
 
   hangupBtn.disabled = true;
-  callBtn.disabled = !isAuthed;
-  setStatus(phoneCallStatus, "Idle.");
+  setStatus(dirCallStatus, "Idle.");
 
   pinnedRoomId = null;
 }
@@ -905,7 +885,7 @@ function startRingtone(){
     const ctx = ensureAudio();
     if(ctx.state !== "running") ctx.resume().catch(()=>{});
     ringGain = ctx.createGain();
-    ringGain.gain.value = 0.5;
+    ringGain.gain.value = 0.10; // slightly louder than your old 0.08
     ringGain.connect(ctx.destination);
 
     ringOsc = ctx.createOscillator();
@@ -917,7 +897,7 @@ function startRingtone(){
     let on = true;
     ringTimer = setInterval(()=>{
       if(!ringGain) return;
-      ringGain.gain.value = on ? 0.08 : 0.0001;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
       on = !on;
     }, 450);
 
@@ -935,8 +915,7 @@ function stopRingtone(){
   ringGain = null;
 }
 
-/* ================== PHONE DIRECTORY + CALLS ================== */
-let myPhone = "";
+/* ================== CALLS (UID-based) ================== */
 let currentIncomingCall = null; // { id, data }
 let currentOutgoingCallId = null;
 let lastDismissedIncomingCallId = null;
@@ -951,57 +930,10 @@ function stopCallListeners(){
   currentOutgoingCallId = null;
 }
 
-async function loadMyPhoneFromFirestore(){
-  myPhone = normalizePhone(localStorage.getItem("myPhone") || "");
-  myPhoneInput.value = myPhone;
-  setStatus(phoneStatus, myPhone ? `Saved (local): ${myPhone}` : "Not set.");
-}
-
-async function saveMyPhone(){
-  if(!requireAuthOrPrompt()) return;
-
-  const p = normalizePhone(myPhoneInput.value);
-  if(!p) throw new Error("Your phone number is empty.");
-  if(!isE164(p)) throw new Error("Use E.164 format, e.g. +15551234567");
-
-  await setDoc(doc(db, "phones", p), {
-    phone: p,
-    uid: myUid,
-    enabled: true,
-    updatedAt: serverTimestamp()
-  }, { merge:true });
-
-  myPhone = p;
-  localStorage.setItem("myPhone", myPhone);
-
-  setStatus(phoneStatus, `Saved: ${myPhone}`);
-  logDiag("Saved my phone (phones directory): " + myPhone);
-
-    // If push was enabled before phone existed, re-run token store now that phone is valid
-  try { await ensurePhoneTokenLink(); } catch (e) { logDiag("ensurePhoneTokenLink failed: " + (e?.message || e)); }
-}
-
-async function findUserByPhone(phone){
-  const p = normalizePhone(phone);
-  if(!isE164(p)) throw new Error("Callee phone must be E.164, e.g. +15557654321");
-
-  const s = await getDoc(doc(db, "phones", p));
-  if(!s.exists()) return null;
-
-  const d = s.data() || {};
-  if(d.enabled !== true) return null;
-
-  const uid = d.uid;
-  if(!uid) return null;
-
-  return { uid, phone: p };
-}
-
-/* Prevent overwriting current incoming call */
 function showIncomingUI(callId, data){
   if (unsubIncoming) { unsubIncoming(); unsubIncoming = null; }
   currentIncomingCall = { id: callId, data };
-  incomingText.textContent = `Call from ${data.fromPhone || "unknown"}…`;
+  incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
   incomingOverlay.style.display = "flex";
   startRingtone();
 }
@@ -1012,7 +944,6 @@ function stopIncomingUI(){
   lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
   currentIncomingCall = null;
 }
-
 
 async function listenIncomingCalls(){
   if(!myUid) return;
@@ -1032,9 +963,7 @@ async function listenIncomingCalls(){
     const d = snap.docs[0];
     const data = d.data();
 
-    // Don't re-show the same call after we already dismissed/answered it
     if (d.id === lastDismissedIncomingCallId) return;
-
     if(currentIncomingCall?.id === d.id) return;
 
     logDiag("Incoming call (Firestore): " + d.id);
@@ -1044,94 +973,7 @@ async function listenIncomingCalls(){
   });
 }
 
-async function startPhoneCall(){
-  
-  logDiag("startPhoneCall(): ENTER");
-
-  if(!requireAuthOrPrompt()) return;
-
-  myPhone = normalizePhone(myPhoneInput.value || myPhone);
-  
-    logDiag("startPhoneCall(): myPhone=" + myPhone);
-
-  if(!myPhone){
-    setStatus(phoneCallStatus, "Set and Save your phone number first.");
-    return;
-  }
-
-  const calleePhone = normalizePhone(calleePhoneInput.value);
-    logDiag("startPhoneCall(): calleePhone=" + calleePhone);
-if(!calleePhone){
-    setStatus(phoneCallStatus, "Enter the other person's phone number.");
-    return;
-  }
-
-  setStatus(phoneCallStatus, "Looking up user…");
-    logDiag("startPhoneCall(): looking up callee in phones/");
- const callee = await findUserByPhone(calleePhone);
-  if(!callee){
-    setStatus(phoneCallStatus, "No signed-in user found with that phone number.");
-    return;
-  }
-  if(callee.uid === myUid){
-    setStatus(phoneCallStatus, "You can’t call yourself.");
-    return;
-  }
-    logDiag("startPhoneCall(): callee uid=" + callee.uid + " phone=" + callee.phone);
-
-  setStatus(phoneCallStatus, "Creating room…");
-  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
-  if(!created?.roomId) throw new Error("Room creation failed.");
-
-  /* PIN room id for this phone call so restarts never jump rooms */
-  pinnedRoomId = created.roomId;
-
-  const callRef = await addDoc(collection(db,"calls"), {
-    fromUid: myUid,
-    toUid: callee.uid,
-    fromPhone: myPhone,
-    toPhone: callee.phone,
-    roomId: created.roomId,
-    status: "ringing",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-
-  currentOutgoingCallId = callRef.id;
-  hangupBtn.disabled = false;
-  callBtn.disabled = true;
-
-  setStatus(phoneCallStatus, `Calling ${callee.phone}…`);
-  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
-
-  if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
-  unsubOutgoing = onSnapshot(doc(db,"calls", callRef.id), (s)=>{
-    if(!s.exists()) return;
-    const d = s.data();
-    if(!d) return;
-
-    if(d.status === "accepted"){
-      setStatus(phoneCallStatus, "Answered. Connecting…");
-      logDiag("Call accepted.");
-      return;
-    }
-    if(d.status === "declined"){
-      setStatus(phoneCallStatus, "Declined.");
-      logDiag("Call declined.");
-      cleanupOutgoingCallUI();
-      return;
-    }
-    if(d.status === "ended"){
-      setStatus(phoneCallStatus, "Ended.");
-      logDiag("Call ended.");
-      cleanupOutgoingCallUI();
-      return;
-    }
-  });
-}
-
 function cleanupOutgoingCallUI(){
-  callBtn.disabled = !isAuthed;
   hangupBtn.disabled = true;
   currentOutgoingCallId = null;
   if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
@@ -1147,21 +989,17 @@ async function hangup(){
     });
   }catch{}
   cleanupOutgoingCallUI();
-  setStatus(phoneCallStatus, "Ended.");
+  setStatus(dirCallStatus, "Ended.");
 }
 
 /* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
   try{
-    // Capture call context FIRST (stopIncomingUI() clears currentIncomingCall)
     const call = currentIncomingCall;
-
-    // Always close UI + stop ringing, regardless of how popup was opened
     stopIncomingUI();
 
-    // If we don't have a call object, we can't update Firestore
     if(!call){
-      setStatus(phoneCallStatus, "No call context. Please wait for the caller again.");
+      setStatus(dirCallStatus, "No call context. Please wait for the caller again.");
       return;
     }
 
@@ -1171,9 +1009,8 @@ answerBtn.onclick = async ()=>{
 
     roomIdInput.value = data.roomId;
 
-    setStatus(phoneCallStatus, `Answered ${data.fromPhone || ""}. Joining room…`);
+    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
     hangupBtn.disabled = true;
-    callBtn.disabled = !isAuthed;
 
     await joinRoom();
 
@@ -1193,37 +1030,183 @@ declineBtn.onclick = async ()=>{
     const { id } = call;
     await updateDoc(doc(db,"calls", id), { status: "declined", updatedAt: serverTimestamp() });
 
-    setStatus(phoneCallStatus, "Declined incoming call.");
+    setStatus(dirCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
   }
 };
-;
 
+/* ================== USER DIRECTORY (C-lite) ================== */
+let myDisplayName = "";
+let allUsersCache = []; // [{uid, displayName}]
+
+function defaultNameFromEmail(email){
+  const e = String(email || "").trim();
+  if(!e) return "";
+  return e.split("@")[0].slice(0, 24);
+}
+
+async function ensureMyUserProfile(user){
+  const ref = doc(db, "users", user.uid);
+  const snap = await getDoc(ref);
+
+  const existing = snap.exists() ? (snap.data() || {}) : {};
+  const name = existing.displayName || defaultNameFromEmail(user.email);
+
+  await setDoc(ref, {
+    uid: user.uid,
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  myDisplayName = name;
+  myNameInput.value = name || "";
+  myNameStatus.textContent = name ? `Saved: ${name}` : "Not set.";
+}
+
+async function saveMyName(){
+  if(!requireAuthOrPrompt()) return;
+
+  const name = String(myNameInput.value || "").trim();
+  if(!name) throw new Error("Name cannot be empty.");
+  if(name.length > 40) throw new Error("Name is too long (max 40).");
+
+  await setDoc(doc(db, "users", myUid), {
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge:true });
+
+  myDisplayName = name;
+  myNameStatus.textContent = `Saved: ${name}`;
+  logDiag("Saved displayName=" + name);
+}
+
+function chunk(arr, n){
+  const out = [];
+  for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i, i+n));
+  return out;
+}
+
+function renderUsersList(filterText=""){
+  const q = String(filterText || "").trim().toLowerCase();
+  const rows = allUsersCache
+    .filter(u => u.uid !== myUid)
+    .filter(u => !q || String(u.displayName||"").toLowerCase().includes(q))
+    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
+
+  usersList.innerHTML = "";
+
+  if(rows.length === 0){
+    usersList.innerHTML = `<div class="small" style="color:#777">No users found.</div>`;
+    return;
+  }
+
+  for(const u of rows){
+    const div = document.createElement("div");
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.justifyContent = "space-between";
+    div.style.gap = "10px";
+    div.style.border = "1px solid #eee";
+    div.style.borderRadius = "10px";
+    div.style.padding = "10px";
+
+    const left = document.createElement("div");
+    left.innerHTML = `<b>${u.displayName || "(no name)"}</b><div class="small" style="color:#666">${u.uid}</div>`;
+
+    const btn = document.createElement("button");
+    btn.textContent = "Call";
+    btn.disabled = !isAuthed;
+    btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
+
+    div.appendChild(left);
+    div.appendChild(btn);
+    usersList.appendChild(div);
+  }
+}
+
+async function loadAllAllowedUsers(){
+  if(!requireAuthOrPrompt()) return;
+
+  const alSnap = await getDocs(
+    query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
+  );
+  const uids = alSnap.docs.map(d => d.id).filter(Boolean);
+
+  const users = [];
+  for(const group of chunk(uids, 10)){
+    const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
+    usSnap.forEach(docu => {
+      const d = docu.data() || {};
+      users.push({ uid: docu.id, displayName: d.displayName || "" });
+    });
+  }
+
+  allUsersCache = users;
+  renderUsersList(userSearchInput.value);
+  logDiag("Loaded users directory: " + users.length);
+}
+
+async function startCallToUid(toUid, toName=""){
+  logDiag("startCallToUid(): ENTER toUid=" + toUid);
+
+  if(!requireAuthOrPrompt()) return;
+  if(!toUid) throw new Error("Missing toUid.");
+  if(toUid === myUid) throw new Error("You can’t call yourself.");
+
+  setStatus(dirCallStatus, "Creating room…");
+  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
+  if(!created?.roomId) throw new Error("Room creation failed.");
+
+  pinnedRoomId = created.roomId;
+
+  const callRef = await addDoc(collection(db,"calls"), {
+    fromUid: myUid,
+    toUid,
+    fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+    toName: toName || "",
+    roomId: created.roomId,
+    status: "ringing",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  currentOutgoingCallId = callRef.id;
+  hangupBtn.disabled = false;
+
+  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
+  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+
+  if(unsubOutgoing){ unsubOutgoing(); unsubOutgoing=null; }
+  unsubOutgoing = onSnapshot(doc(db,"calls", callRef.id), (s)=>{
+    if(!s.exists()) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.status === "accepted"){
+      setStatus(dirCallStatus, "Answered. Connecting…");
+      logDiag("Call accepted.");
+      return;
+    }
+    if(d.status === "declined"){
+      setStatus(dirCallStatus, "Declined.");
+      logDiag("Call declined.");
+      cleanupOutgoingCallUI();
+      return;
+    }
+    if(d.status === "ended"){
+      setStatus(dirCallStatus, "Ended.");
+      logDiag("Call ended.");
+      cleanupOutgoingCallUI();
+      return;
+    }
+  });
+}
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
-
-  let lastFcmToken = null;
-
-async function ensurePhoneTokenLink(){
-  if(!lastFcmToken) { logDiag("ensurePhoneTokenLink: no lastFcmToken yet"); return; }
-
-  const phone = normalizePhone(myPhoneInput.value || localStorage.getItem("myPhone") || "");
-  if (!isE164(phone)) { logDiag("ensurePhoneTokenLink: phone missing/invalid"); return; }
-
-  const tokenId = lastFcmToken.slice(0, 32);
-
-  await setDoc(
-    doc(db, "phonePushTokens", phone, "tokens", tokenId),
-    { token: lastFcmToken, createdAt: Date.now(), ua: navigator.userAgent, enabled: true },
-    { merge: true }
-  );
-
-  logDiag("ensurePhoneTokenLink: token linked to phone " + phone);
-}
 
 function base64UrlToUint8Array(base64Url) {
   const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
@@ -1248,11 +1231,6 @@ function validateVapid(vapid) {
 
 async function enablePush(){
   logDiag("enablePush(): ENTER");
-  logDiag("enablePush(): Notification in window=" + ("Notification" in window));
-  logDiag("enablePush(): serviceWorker in navigator=" + ("serviceWorker" in navigator));
-  logDiag("enablePush(): Notification.permission=" + (("Notification" in window) ? Notification.permission : "n/a"));
-  logDiag("enablePush(): vapidSet=" + (!!PUBLIC_VAPID_KEY && !String(PUBLIC_VAPID_KEY).includes("PASTE_")));
-
   if(!requireAuthOrPrompt()) return;
 
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
@@ -1260,57 +1238,44 @@ async function enablePush(){
   if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try {
-    // --- SERVICE WORKER (FCM) ---
-const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+    const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+    swUrl.searchParams.set("v", "2026-01-02-no-phone"); // bump when you deploy SW changes
 
-swUrl.searchParams.set("v", "2026-01-01g"); // bump when you deploy SW changes
+    const resp = await fetch(swUrl.toString(), { cache: "no-store" });
+    const ct = resp.headers.get("content-type") || "";
+    const txt = await resp.text();
+    logDiag("SW prefetch url=" + swUrl.toString());
+    logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
+    logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
+    if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
-// PRECHECK: validate the *same* URL that we will register
-const resp = await fetch(swUrl.toString(), { cache: "no-store" });
-const ct = resp.headers.get("content-type") || "";
-const txt = await resp.text();
-logDiag("SW prefetch url=" + swUrl.toString());
-logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
-logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
-if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
+    swReg = await navigator.serviceWorker.register(swUrl.toString(), {
+      scope: "/easosunov/",
+      updateViaCache: "none",
+    });
 
-// Register SW
-swReg = await navigator.serviceWorker.register(swUrl.toString(), {
-  scope: "/easosunov/",
-  updateViaCache: "none",
-});
-
-
-// Wait until the SW is ready (important for FCM timing)
-await navigator.serviceWorker.ready;
-
-// Force an update check (optional but helpful on GitHub Pages)
-try { await swReg.update(); } catch {}
-
-// Log SW state
-logDiag("SW registered/ready. controller=" + (!!navigator.serviceWorker.controller));
-logDiag("SW state active=" + (swReg.active?.state || "none"));
-
+    await navigator.serviceWorker.ready;
+    try { await swReg.update(); } catch {}
 
     messaging = getMessaging(app);
 
     const perm = await Notification.requestPermission();
     if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
-const check = validateVapid(VAPID);
-logDiag("VAPID check: " + check.ok + " - " + check.why);
-if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
+
+    const check = validateVapid(VAPID);
+    logDiag("VAPID check: " + check.ok + " - " + check.why);
+    if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
 
     const token = await getToken(messaging, {
-  vapidKey: VAPID,
-  serviceWorkerRegistration: swReg
-});
+      vapidKey: VAPID,
+      serviceWorkerRegistration: swReg
+    });
 
     if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
-    lastFcmToken = token;
-    await ensurePhoneTokenLink();
 
     const tokenId = token.slice(0, 32);
 
+    // Store token under the user (no phone mapping)
     await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), {
       token,
       createdAt: Date.now(),
@@ -1318,58 +1283,32 @@ if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
       enabled: true
     }, { merge:true });
 
-    const phone = normalizePhone(myPhoneInput.value || localStorage.getItem("myPhone") || "");
-    if (isE164(phone)) {
-      await setDoc(
-        doc(db, "phonePushTokens", phone, "tokens", tokenId),
-        { token, createdAt: Date.now(), ua: navigator.userAgent, enabled: true },
-        { merge: true }
-      );
-      logDiag("FCM token stored for phone " + phone);
-    } else {
-      logDiag("FCM token NOT stored (phone missing/invalid)");
-    }
-
     setStatus(pushStatus, "Push: enabled.");
-    logDiag("FCM token stored.");
+    logDiag("FCM token stored (users/{uid}/fcmTokens).");
 
     onMessage(messaging, (payload)=>{
       logDiag("FCM foreground message: " + JSON.stringify(payload));
       const data = payload?.data || {};
       if (data.roomId) roomIdInput.value = data.roomId;
-      // Attach call context if provided
+
       if (data.callId) {
         currentIncomingCall = { id: data.callId, data: data };
       }
+
       incomingText.textContent =
         payload?.notification?.body ||
-        (data.fromPhone ? `Call from ${data.fromPhone}` : "Incoming call…");
+        (data.fromName ? `Call from ${data.fromName}` : "Incoming call…");
 
       incomingOverlay.style.display = "flex";
       startRingtone();
     });
 
   } catch (e) {
-  setStatus(pushStatus, "Push: failed (see diagnostics).");
-
-  // Log complete error details (not just message)
-  try {
-    logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e)));
-  } catch {
-    logDiag("Push error props: (stringify failed)");
+    setStatus(pushStatus, "Push: failed (see diagnostics).");
+    try { logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    logDiag("Push enable failed: " + (e?.message || e));
+    showError(e);
   }
-  logDiag("Push enable failed: name=" + (e?.name || "") +
-          " code=" + (e?.code || "") +
-          " message=" + (e?.message || e));
-
-  // Helpful context
-  logDiag("Context: isSecureContext=" + window.isSecureContext);
-  logDiag("Context: Notification.permission=" + (("Notification" in window) ? Notification.permission : "n/a"));
-  logDiag("Context: SW controller=" + (!!navigator.serviceWorker.controller));
-
-  showError(e);
-}
-
 }
 
 /* HARD WIRING: always run push enable when the button is clicked */
@@ -1377,10 +1316,7 @@ enablePushBtn.addEventListener("click", (ev) => {
   ev.preventDefault();
   ev.stopPropagation();
   logDiag("Enable Push HARD listener fired");
-  enablePush().catch((e) => {
-    logDiag("enablePush() error: " + (e?.message || e));
-    showError(e);
-  });
+  enablePush().catch(showError);
 });
 
 /* ================== BUTTON WIRING ================== */
@@ -1401,25 +1337,21 @@ joinBtn.onclick   = ()=> joinRoom().catch(showError);
 roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
 refreshCopyInviteState();
 
-savePhoneBtn.onclick = ()=> saveMyPhone().catch(showError);
-
-callBtn.onclick = async () => {
-  logDiag("Call button clicked");
-  try { await startPhoneCall(); } catch(e){ showError(e); }
-};
-
-hangupBtn.onclick = ()=> hangup().catch(showError);
-
 testSoundBtn.onclick = async ()=>{
   await unlockAudio();
   startRingtone();
   setTimeout(()=>stopRingtone(), 1800);
 };
 
-myPhoneInput.addEventListener("input", ()=>{
-  savePhoneBtn.disabled = !isAuthed || !isE164(normalizePhone(myPhoneInput.value));
+hangupBtn.onclick = ()=> hangup().catch(showError);
+
+/* C-lite directory buttons */
+saveNameBtn.onclick = ()=> saveMyName().catch(showError);
+refreshUsersBtn.onclick = ()=> loadAllAllowedUsers().catch(showError);
+myNameInput.addEventListener("input", ()=>{
+  saveNameBtn.disabled = !isAuthed || !String(myNameInput.value||"").trim();
 });
-calleePhoneInput.addEventListener("input", refreshCallButtonState);
+userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
@@ -1439,15 +1371,21 @@ onAuthStateChanged(auth, async (user)=>{
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    savePhoneBtn.disabled = !isE164(normalizePhone(myPhoneInput.value));
     testSoundBtn.disabled = false;
     enablePushBtn.disabled = false;
 
-    refreshCopyInviteState();
-    refreshCallButtonState();
+    saveNameBtn.disabled = !String(myNameInput.value||"").trim();
+    refreshUsersBtn.disabled = false;
 
-    try{ await loadMyPhoneFromFirestore(); } catch(e){ logDiag("Load phone failed: " + (e?.message || e)); }
+    hangupBtn.disabled = true;
+
+    refreshCopyInviteState();
+
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+
+    // Ensure profile + load directory
+    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
+    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
@@ -1457,15 +1395,19 @@ onAuthStateChanged(auth, async (user)=>{
     logoutBtn.style.display = "none";
     stopAll();
 
-    savePhoneBtn.disabled = true;
-    callBtn.disabled = true;
-    hangupBtn.disabled = true;
     testSoundBtn.disabled = true;
     enablePushBtn.disabled = true;
 
-    setStatus(phoneStatus, "Not set.");
-    setStatus(phoneCallStatus, "Idle.");
+    saveNameBtn.disabled = true;
+    refreshUsersBtn.disabled = true;
+
     setStatus(pushStatus, "Push: not enabled.");
+    setStatus(dirCallStatus, "Idle.");
+    myNameStatus.textContent = "Not set.";
+
+    usersList.innerHTML = "";
+    allUsersCache = [];
+    myDisplayName = "";
   }
 });
 
