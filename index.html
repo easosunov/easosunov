@@ -22,6 +22,7 @@
     }
   </style>
 </head>
+
 <body>
   <h1>Easosunov</h1>
   <p>Welcome to my website 👋</p>
@@ -30,5 +31,81 @@
     <h2>About</h2>
     <p>This is my first website hosted for free using GitHub Pages.</p>
   </div>
+
+  <!-- ================= FIREBASE SCRIPTS ================= -->
+  <script src="/easosunov/firebase-app-compat.js"></script>
+  <script src="/easosunov/firebase-messaging-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js"></script>
+
+  <!-- ================= FIREBASE INIT ================= -->
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
+      authDomain: "easosunov-webrtc.firebaseapp.com",
+      projectId: "easosunov-webrtc",
+      storageBucket: "easosunov-webrtc.firebasestorage.app",
+      messagingSenderId: "100169991412",
+      appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
+    });
+
+    const db = firebase.firestore();
+  </script>
+
+  <!-- ================= SERVICE WORKER + FCM ================= -->
+  <script>
+    const VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
+
+    async function registerSW() {
+      if (!("serviceWorker" in navigator)) {
+        console.log("Service workers not supported");
+        return null;
+      }
+
+      const reg = await navigator.serviceWorker.register(
+        "/easosunov/firebase-messaging-sw.js",
+        { scope: "/easosunov/" }
+      );
+
+      console.log("Service Worker registered:", reg.scope);
+      return reg;
+    }
+
+    async function enablePushAndSaveToken(uid) {
+      const reg = await registerSW();
+      if (!reg) return;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        console.warn("Notifications not allowed");
+        return;
+      }
+
+      const messaging = firebase.messaging();
+
+      const token = await messaging.getToken({
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: reg
+      });
+
+      console.log("FCM token:", token);
+
+      await db
+        .collection("users")
+        .doc(uid)
+        .collection("fcmTokens")
+        .doc(token)
+        .set({
+          token,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          ua: navigator.userAgent
+        }, { merge: true });
+    }
+
+    // ================= DEMO: FAKE LOGIN =================
+    // Replace this with your real login / phone number logic
+    const demoUserId = "demo-user";
+
+    enablePushAndSaveToken(demoUserId);
+  </script>
 </body>
 </html>
