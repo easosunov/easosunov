@@ -515,9 +515,9 @@ async function startMedia(opts={skipAutoJoin:false}){
     await loadIceServers();
 
     startBtn.disabled = true;
-    stopBtn.disabled  = false;
     createBtn.disabled = false;
     joinBtn.disabled   = false;
+
   })();
 
   try{ await startingPromise; }
@@ -591,7 +591,6 @@ function stopAll(){
   localVideo.srcObject=null;
 
   startBtn.disabled = !isAuthed;
-  stopBtn.disabled = true;
   createBtn.disabled = true;
   joinBtn.disabled = true;
 
@@ -609,7 +608,6 @@ function stopAll(){
 
   pinnedRoomId = null;
 }
-stopBtn.onclick = () => stopAll();
 
 /* ================== REJOIN SUPPORT ================== */
 let lastSeenJoinRequestA = 0;
