@@ -316,9 +316,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/fireba
 import {
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
   onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp,
-  documentId
+  documentId, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
+
+import { getMessaging, getToken, onMessage, deleteToken }
+  from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
+
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
   setPersistence, inMemoryPersistence
@@ -473,17 +476,14 @@ loginBtn.onclick = async () => {
 
 logoutBtn.onclick = async () => {
   try{
-    // stop listeners/media first so nothing keeps running in this tab
-    stopAll();
-    clearDeviceOwner();
-    if(authBC){
-      try{ authBC.postMessage({ type:"OWNER_CLEARED", at: nowMs() }); }catch{}
-    }
+    stopAll();                 // stop listeners/media/UI
+    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
     await signOut(auth);
   }catch(e){
     showError(e);
   }
 };
+
 
 
 /* ================== URL OPEN (from push click) ================== */
@@ -1360,6 +1360,62 @@ async function startCallToUid(toUid, toName=""){
 let messaging = null;
 let swReg = null;
 
+  // Remember which token belongs to THIS browser + which UID it was saved under
+const LS_PUSH_UID = "webrtc_push_uid";
+const LS_PUSH_TID = "webrtc_push_tokenId";
+
+function getSavedPushBinding(){
+  try{
+    const uid = localStorage.getItem(LS_PUSH_UID);
+    const tid = localStorage.getItem(LS_PUSH_TID);
+    return { uid: uid || null, tokenId: tid || null };
+  }catch{
+    return { uid:null, tokenId:null };
+  }
+}
+
+function savePushBinding(uid, tokenId){
+  try{
+    localStorage.setItem(LS_PUSH_UID, String(uid || ""));
+    localStorage.setItem(LS_PUSH_TID, String(tokenId || ""));
+  }catch{}
+}
+
+function clearPushBinding(){
+  try{
+    localStorage.removeItem(LS_PUSH_UID);
+    localStorage.removeItem(LS_PUSH_TID);
+  }catch{}
+}
+
+// Remove this browser's token doc from the PREVIOUS user's profile (and invalidate token)
+async function revokePushForCurrentDevice(){
+  const { uid, tokenId } = getSavedPushBinding();
+  if(!uid || !tokenId) return;
+
+  logDiag(`Revoking push token for this device: uid=${uid} tokenId=${tokenId}`);
+
+  // Delete token doc from Firestore (stops server from targeting this browser)
+  try{
+    await deleteDoc(doc(db, "users", uid, "fcmTokens", tokenId));
+    logDiag("Push token doc deleted from Firestore.");
+  }catch(e){
+    logDiag("Push token doc delete failed: " + (e?.message || e));
+    // don't throw; continue
+  }
+
+  // Invalidate token in browser
+  try{
+    if(!messaging) messaging = getMessaging(app);
+    await deleteToken(messaging);
+    logDiag("Browser FCM token deleted (deleteToken).");
+  }catch(e){
+    logDiag("deleteToken failed: " + (e?.message || e));
+  }
+
+  clearPushBinding();
+}
+
 function base64UrlToUint8Array(base64Url) {
   const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
   const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -1385,6 +1441,13 @@ async function enablePush(){
   logDiag("enablePush(): ENTER");
   if(!requireAuthOrPrompt()) return;
 
+// If this browser previously stored a token under a different UID, remove it first
+const prev = getSavedPushBinding();
+if(prev.uid && prev.uid !== myUid){
+  await revokePushForCurrentDevice();
+}
+
+  
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
   if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
@@ -1433,6 +1496,8 @@ async function enablePush(){
       ua: navigator.userAgent,
       enabled: true
     }, { merge:true });
+// Remember that THIS browser token now belongs to THIS uid
+savePushBinding(myUid, tokenId);
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored (users/{uid}/fcmTokens).");
