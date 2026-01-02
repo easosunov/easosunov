@@ -129,12 +129,12 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
       <div class="small">Your display name (shown to other users)</div>
       <input id="myNameInput" placeholder="e.g. Alex"/>
 
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="saveNameBtn" disabled>Save Name</button>
-        <button id="refreshUsersBtn" disabled>Refresh Users</button>
-        <button id="testSoundBtn" disabled>Test Ring Sound</button>
-        <button id="hangupBtn" disabled>Hang up</button>
-      </div>
+<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+  <button id="saveNameBtn" disabled>Save Name</button>
+  <button id="testSoundBtn" disabled>Test Ring Sound</button>
+  <button id="hangupBtn" disabled>Hang up</button>
+</div>
+
 
       <div class="status" id="myNameStatus">Not set.</div>
       <div class="status" id="pushStatus">Push: not enabled.</div>
@@ -156,6 +156,8 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
       <div class="small">All allowed users</div>
       <input id="userSearchInput" placeholder="Search users…" />
       <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+      <button id="refreshUsersBtn" disabled>Refresh Users</button>
     </div>
 
   </div>
