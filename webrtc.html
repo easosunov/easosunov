@@ -939,6 +939,7 @@ function stopRingtone(){
 let myPhone = "";
 let currentIncomingCall = null; // { id, data }
 let currentOutgoingCallId = null;
+let lastDismissedIncomingCallId = null;
 
 let unsubIncoming = null;
 let unsubOutgoing = null;
@@ -1152,16 +1153,19 @@ async function hangup(){
 /* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
   try{
-    // Always close UI + stop ringing, regardless of how popup was opened (push or Firestore)
+    // Capture call context FIRST (stopIncomingUI() clears currentIncomingCall)
+    const call = currentIncomingCall;
+
+    // Always close UI + stop ringing, regardless of how popup was opened
     stopIncomingUI();
 
     // If we don't have a call object, we can't update Firestore
-    if(!currentIncomingCall){
+    if(!call){
       setStatus(phoneCallStatus, "No call context. Please wait for the caller again.");
       return;
     }
 
-    const { id, data } = currentIncomingCall;
+    const { id, data } = call;
 
     await updateDoc(doc(db,"calls", id), { status: "accepted", updatedAt: serverTimestamp() });
 
@@ -1179,18 +1183,36 @@ answerBtn.onclick = async ()=>{
   }
 };
 
+
+    setStatus(phoneCallStatus, `Answered ${data.fromPhone || ""}. Joining room…`);
+    hangupBtn.disabled = true;
+    callBtn.disabled = !isAuthed;
+
+    await joinRoom();
+
+    try { await listenIncomingCalls(); } catch {}
+  }catch(e){
+    showError(e);
+  }
+};
+
 declineBtn.onclick = async ()=>{
   try{
-    if(!currentIncomingCall) return;
-    const { id } = currentIncomingCall;
+    const call = currentIncomingCall;
     stopIncomingUI();
+
+    if(!call) return;
+
+    const { id } = call;
     await updateDoc(doc(db,"calls", id), { status: "declined", updatedAt: serverTimestamp() });
+
     setStatus(phoneCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
   }catch(e){
     showError(e);
   }
 };
+
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
