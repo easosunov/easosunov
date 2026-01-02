@@ -197,6 +197,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 
 <script type="module">
 console.log("APP VERSION:", "2026-01-02-C-LITE-ALL-USERS-NO-PHONE");
+const NOTIFY_CALL_URL = "https://sendtestpush-wj6ikcsr2a-uc.a.run.app/notifyCall";
 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
@@ -252,6 +253,22 @@ const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 
 const setStatus = (el,msg)=> el.textContent = msg;
+async function notifyCall(callId){
+  try{
+    if(!callId) throw new Error("notifyCall: missing callId");
+
+    const url = new URL(NOTIFY_CALL_URL);
+    url.searchParams.set("callId", callId);
+
+    logDiag("notifyCall: calling " + url.toString());
+    const r = await fetch(url.toString(), { method: "GET" });
+
+    const text = await r.text().catch(()=> "");
+    logDiag(`notifyCall: status=${r.status} body=${text.slice(0, 200)}`);
+  }catch(e){
+    logDiag("notifyCall ERROR: " + (e?.message || e));
+  }
+}
 
 /* ================== DIAGNOSTICS ================== */
 let diagVisible = false;
@@ -1345,6 +1362,8 @@ async function startCallToUid(toUid, toName=""){
   });
 
   activeCallId = callRef.id;
+ await notifyCall(activeCallId);
+
   hangupBtn.disabled = false;
 
   // Watch the call doc for accepted/declined/ended/delivery/push status
