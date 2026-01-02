@@ -1183,19 +1183,6 @@ answerBtn.onclick = async ()=>{
   }
 };
 
-
-    setStatus(phoneCallStatus, `Answered ${data.fromPhone || ""}. Joining room…`);
-    hangupBtn.disabled = true;
-    callBtn.disabled = !isAuthed;
-
-    await joinRoom();
-
-    try { await listenIncomingCalls(); } catch {}
-  }catch(e){
-    showError(e);
-  }
-};
-
 declineBtn.onclick = async ()=>{
   try{
     const call = currentIncomingCall;
@@ -1212,6 +1199,7 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
+;
 
 
 /* ================== PUSH (optional) ================== */
