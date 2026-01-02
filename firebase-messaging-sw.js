@@ -7,8 +7,8 @@
   }
 
   try {
-    importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js");
-    importScripts("https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging-compat.js");
+    importScripts("/easosunov/firebase-app-compat.js");
+    importScripts("/easosunov/firebase-messaging-compat.js");
     log("importScripts OK");
   } catch (e) {
     log("importScripts FAILED: " + (e && e.message ? e.message : e));
