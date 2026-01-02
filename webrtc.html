@@ -975,6 +975,9 @@ async function saveMyPhone(){
 
   setStatus(phoneStatus, `Saved: ${myPhone}`);
   logDiag("Saved my phone (phones directory): " + myPhone);
+
+    // If push was enabled before phone existed, re-run token store now that phone is valid
+  try { await ensurePhoneTokenLink(); } catch (e) { logDiag("ensurePhoneTokenLink failed: " + (e?.message || e)); }
 }
 
 async function findUserByPhone(phone){
@@ -1034,22 +1037,30 @@ async function listenIncomingCalls(){
 }
 
 async function startPhoneCall(){
+  
+  logDiag("startPhoneCall(): ENTER");
+
   if(!requireAuthOrPrompt()) return;
 
   myPhone = normalizePhone(myPhoneInput.value || myPhone);
+  
+    logDiag("startPhoneCall(): myPhone=" + myPhone);
+
   if(!myPhone){
     setStatus(phoneCallStatus, "Set and Save your phone number first.");
     return;
   }
 
   const calleePhone = normalizePhone(calleePhoneInput.value);
-  if(!calleePhone){
+    logDiag("startPhoneCall(): calleePhone=" + calleePhone);
+if(!calleePhone){
     setStatus(phoneCallStatus, "Enter the other person's phone number.");
     return;
   }
 
   setStatus(phoneCallStatus, "Looking up user…");
-  const callee = await findUserByPhone(calleePhone);
+    logDiag("startPhoneCall(): looking up callee in phones/");
+ const callee = await findUserByPhone(calleePhone);
   if(!callee){
     setStatus(phoneCallStatus, "No signed-in user found with that phone number.");
     return;
@@ -1058,6 +1069,7 @@ async function startPhoneCall(){
     setStatus(phoneCallStatus, "You can’t call yourself.");
     return;
   }
+    logDiag("startPhoneCall(): callee uid=" + callee.uid + " phone=" + callee.phone);
 
   setStatus(phoneCallStatus, "Creating room…");
   const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
@@ -1169,6 +1181,26 @@ declineBtn.onclick = async ()=>{
 /* ================== PUSH (optional) ================== */
 let messaging = null;
 let swReg = null;
+
+  let lastFcmToken = null;
+
+async function ensurePhoneTokenLink(){
+  if(!lastFcmToken) { logDiag("ensurePhoneTokenLink: no lastFcmToken yet"); return; }
+
+  const phone = normalizePhone(myPhoneInput.value || localStorage.getItem("myPhone") || "");
+  if (!isE164(phone)) { logDiag("ensurePhoneTokenLink: phone missing/invalid"); return; }
+
+  const tokenId = lastFcmToken.slice(0, 32);
+
+  await setDoc(
+    doc(db, "phonePushTokens", phone, "tokens", tokenId),
+    { token: lastFcmToken, createdAt: Date.now(), ua: navigator.userAgent, enabled: true },
+    { merge: true }
+  );
+
+  logDiag("ensurePhoneTokenLink: token linked to phone " + phone);
+}
+
 function base64UrlToUint8Array(base64Url) {
   const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
   const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -1250,6 +1282,8 @@ if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
 });
 
     if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
+    lastFcmToken = token;
+    await ensurePhoneTokenLink();
 
     const tokenId = token.slice(0, 32);
 
