@@ -159,17 +159,19 @@
 
     // ====== Step C: Save token to Firestore ======
     async function saveToken(userId, token) {
-      // Save token as doc id so duplicates are naturally avoided
-      await db.collection("users")
-        .doc(userId)
-        .collection("fcmTokens")
-        .doc(token)
-        .set({
-          token,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          ua: navigator.userAgent
-        }, { merge: true });
-    }
+  const tokenId = token.slice(0, 32); // match webrtc.html
+  await db.collection("users")
+    .doc(userId)
+    .collection("fcmTokens")
+    .doc(tokenId)
+    .set({
+      token,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      ua: navigator.userAgent,
+      enabled: true
+    }, { merge: true });
+}
+
 
     // Full setup
     async function setupPush() {
