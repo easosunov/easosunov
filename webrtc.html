@@ -162,7 +162,6 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
     <div class="card">
       <b>Step 1</b><br/><br/>
       <button id="startBtn" disabled>Start</button>
-      <button id="stopBtn" disabled>Stop</button>
       <div class="status" id="mediaStatus">Not started.</div>
     </div>
 
@@ -215,7 +214,6 @@ const appRoot = document.getElementById("app");
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 const startBtn = document.getElementById("startBtn");
-const stopBtn  = document.getElementById("stopBtn");
 const createBtn= document.getElementById("createBtn");
 const joinBtn  = document.getElementById("joinBtn");
 const copyLinkBtn = document.getElementById("copyLinkBtn");
@@ -986,16 +984,22 @@ function cleanupOutgoingCallUI(){
 }
 
 async function hangup(){
-  if(!currentOutgoingCallId) return;
-  try{
-    await updateDoc(doc(db,"calls", currentOutgoingCallId), {
-      status: "ended",
-      updatedAt: serverTimestamp()
-    });
-  }catch{}
-  cleanupOutgoingCallUI();
+  // End signaling if there is an active outgoing call
+  if (currentOutgoingCallId) {
+    try{
+      await updateDoc(doc(db,"calls", currentOutgoingCallId), {
+        status: "ended",
+        updatedAt: serverTimestamp()
+      });
+    }catch{}
+  }
+
+  // FULL local cleanup (media, peer, listeners, UI)
+  stopAll();
+
   setStatus(dirCallStatus, "Ended.");
 }
+
 
 /* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
