@@ -335,6 +335,95 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
+/*
+  Goal: On this computer (same Chrome profile + same origin), only ONE UID may stay signed in.
+  If another UID logs in on any tab, all other tabs signed in as a different UID will signOut().
+*/
+
+const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
+const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
+
+const hasBroadcastChannel = ("BroadcastChannel" in window);
+const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
+
+function nowMs(){ return Date.now(); }
+
+function setDeviceOwner(uid){
+  try{
+    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
+    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
+  }catch{}
+}
+
+function clearDeviceOwner(){
+  try{
+    localStorage.removeItem(DEVICE_OWNER_KEY);
+    localStorage.removeItem(DEVICE_OWNER_AT);
+  }catch{}
+}
+
+function getDeviceOwner(){
+  try{
+    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
+  }catch{
+    return null;
+  }
+}
+
+async function forceSignOutBecauseDifferentUser(newUid){
+  // If this tab is signed in as someone else, sign out immediately.
+  const currentUid = auth.currentUser?.uid || null;
+  if (currentUid && newUid && currentUid !== newUid){
+    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
+    try{
+      stopAll(); // stop listeners/media before auth changes
+    }catch{}
+    try{
+      await signOut(auth);
+    }catch(e){
+      // If signOut fails, still show why
+      showError(e);
+    }
+  }
+}
+
+function broadcastNewOwner(uid){
+  if(authBC){
+    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
+  }
+}
+
+// Listen for owner changes via BroadcastChannel
+if(authBC){
+  authBC.onmessage = (ev)=>{
+    const msg = ev?.data || {};
+    if(msg.type === "NEW_OWNER" && msg.uid){
+      forceSignOutBecauseDifferentUser(String(msg.uid));
+    }
+    if(msg.type === "OWNER_CLEARED"){
+      // nothing required
+    }
+  };
+}
+
+// Also listen via localStorage (works even if BroadcastChannel is unavailable)
+window.addEventListener("storage", (ev)=>{
+  if(ev.key === DEVICE_OWNER_KEY && ev.newValue){
+    forceSignOutBecauseDifferentUser(String(ev.newValue));
+  }
+});
+
+// On load: if someone else is marked as owner and this tab is signed in as different UID -> sign out
+(async function enforceSingleUserOnStartup(){
+  const owner = getDeviceOwner();
+  const currentUid = auth.currentUser?.uid || null;
+  if(owner && currentUid && owner !== currentUid){
+    await forceSignOutBecauseDifferentUser(owner);
+  }
+})();
+
+  
 /* Force login every time (no stored session) */
 await setPersistence(auth, inMemoryPersistence);
 
@@ -366,6 +455,14 @@ loginBtn.onclick = async () => {
   loginStatus.textContent = "Signing in…";
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+
+    // Claim device owner immediately (forces other tabs with different UID to sign out)
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+
   } catch (e) {
     loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
     try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
@@ -373,7 +470,21 @@ loginBtn.onclick = async () => {
   }
 };
 
-logoutBtn.onclick = async () => { try { await signOut(auth); } catch(e){ showError(e); } };
+
+logoutBtn.onclick = async () => {
+  try{
+    // stop listeners/media first so nothing keeps running in this tab
+    stopAll();
+    clearDeviceOwner();
+    if(authBC){
+      try{ authBC.postMessage({ type:"OWNER_CLEARED", at: nowMs() }); }catch{}
+    }
+    await signOut(auth);
+  }catch(e){
+    showError(e);
+  }
+};
+
 
 /* ================== URL OPEN (from push click) ================== */
 (function handlePushOpen(){
@@ -1428,6 +1539,11 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await enforceAllowlist(user); }
     catch(e){ showError(e); return; }
 
+// Single-user lock: reaffirm ownership after allowlist passes
+setDeviceOwner(user.uid);
+broadcastNewOwner(user.uid);
+
+    
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
