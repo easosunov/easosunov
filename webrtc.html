@@ -1523,7 +1523,8 @@ if(prev.uid && prev.uid !== myUid){
 
   try {
     const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
-    swUrl.searchParams.set("v", "2026-01-02-no-phone");
+    swUrl.searchParams.set("v", "2026-01-02-sw-fcm-fix-1");
+
 
     const resp = await fetch(swUrl.toString(), { cache: "no-store" });
     const ct = resp.headers.get("content-type") || "";
