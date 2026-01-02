@@ -1232,12 +1232,15 @@ async function startCallToUid(toUid, toName=""){
   });
 
   activeCallId = callRef.id;
-hangupBtn.disabled = false;
+  hangupBtn.disabled = false;
 
-// Watch the call doc for accepted/declined/ended/delivery/push status
-listenActiveCall(activeCallId);
-);
+  // Watch the call doc for accepted/declined/ended/delivery/push status
+  listenActiveCall(activeCallId);
+
+  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
+  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
 }
+
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
