@@ -68,7 +68,7 @@ async function showCallNotification(payload) {
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
 
-  const title = payload?.notification?.title || "Incoming call";
+  const title = data.title || "Incoming call";
 
   // NEW: build body lines (call + optional message + local time)
   const lines = [];
