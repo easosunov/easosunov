@@ -2054,6 +2054,7 @@ onAuthStateChanged(auth, async (user)=>{
 
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
     await catchUpMissedRingingCall();
+    await catchUpMissedCallNotification();
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
