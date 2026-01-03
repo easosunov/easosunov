@@ -1361,6 +1361,68 @@ if (currentIncomingCall?.id === callId) return;
     logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
   }
 }
+// Catch-up: if Chrome was closed and the call became MISSED, show newest missed call after login
+async function catchUpMissedCallNotification() {
+  try {
+    if (!myUid) return;
+
+    // Query newest MISSED call addressed to me
+    const qy = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "missed"),
+      orderBy("missedAt", "desc"),
+      limit(1)
+    );
+
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+
+    const d = snap.docs[0];
+    const callId = d.id;
+    const call = d.data() || {};
+
+    // Avoid duplicating if we already opened from push or already showing some call UI
+    if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+    if (currentIncomingCall?.id === callId) return;
+
+    // Determine time
+    const missedMs =
+      (call.missedAt && typeof call.missedAt.toMillis === "function")
+        ? call.missedAt.toMillis()
+        : Date.now();
+
+    const fromName = call.fromName || "Unknown";
+    const note = String(call.note || "").trim();
+    const tsLocal = new Date(missedMs).toLocaleString();
+
+    // Show a SYSTEM notification if allowed
+    if ("Notification" in window && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+      if (reg) {
+        const body =
+          `Missed call from ${fromName}` +
+          (note ? ` — ${note}` : "") +
+          ` — ${tsLocal}`;
+
+        await reg.showNotification("Missed call", {
+          body,
+          tag: `webrtc-missed-${myUid}`,
+          renotify: true,
+          requireInteraction: false,
+          data: { callId, roomId: call.roomId || "", fromName, note }
+        });
+      }
+    }
+
+    // Also write something into your status line (optional but useful)
+    setStatus(dirCallStatus, `Missed call from ${fromName}.`);
+    logDiag("Catch-up: showed MISSED call " + callId);
+
+  } catch (e) {
+    logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
+  }
+}
 
 function cleanupCallUI(){
   hangupBtn.disabled = true;
