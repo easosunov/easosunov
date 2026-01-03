@@ -71,6 +71,12 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 .incomingActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 #answerBtn{background:#e8fff0;border-color:#bdeccc}
 #declineBtn{background:#fff0f0;border-color:#f1bcbc}
+
+/* ===== NEW: Video Quality UI ===== */
+select{
+  padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%;
+  background:#fff;
+}
 </style>
 </head>
 
@@ -126,16 +132,27 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
+      <!-- ===== NEW: Video quality selector (Location A) ===== -->
+      <div class="small">Video quality</div>
+      <select id="videoQualitySelect" disabled>
+        <option value="low">Low (360p)</option>
+        <option value="medium" selected>Medium (720p)</option>
+        <option value="high">High (1080p)</option>
+      </select>
+      <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
+      <div class="small">Tip: Choose before clicking <b>Start</b>. You can also change during a call.</div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
       <div class="small">Your display name (shown to other users)</div>
       <input id="myNameInput" placeholder="e.g. Alex"/>
 
-<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-  <button id="saveNameBtn" disabled>Save Name</button>
-  <button id="testSoundBtn" disabled>Test Ring Sound</button>
- <button id="resetPushBtn" disabled>Reset Push</button>
-  <button id="hangupBtn" disabled>Hang up</button>
-</div>
-
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="saveNameBtn" disabled>Save Name</button>
+        <button id="testSoundBtn" disabled>Test Ring Sound</button>
+        <button id="resetPushBtn" disabled>Reset Push</button>
+        <button id="hangupBtn" disabled>Hang up</button>
+      </div>
 
       <div class="status" id="myNameStatus">Not set.</div>
       <div class="status" id="pushStatus">Push: not enabled.</div>
@@ -158,7 +175,8 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
       <input id="userSearchInput" placeholder="Search users…" />
       <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
       <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-      <button id="refreshUsersBtn" disabled>Refresh Users</button>
+        <button id="refreshUsersBtn" disabled>Refresh Users</button>
+      </div>
     </div>
 
   </div>
@@ -253,7 +271,11 @@ const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 const resetPushBtn = document.getElementById("resetPushBtn");
- 
+
+/* ===== NEW: video quality UI elements ===== */
+const videoQualitySelect = document.getElementById("videoQualitySelect");
+const videoQualityStatus = document.getElementById("videoQualityStatus");
+
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
   try{
@@ -500,7 +522,7 @@ loginBtn.onclick = async () => {
   loginStatus.textContent = "Signing in…";
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-loginStatus.textContent = "Signed in. Checking allowlist…";
+    loginStatus.textContent = "Signed in. Checking allowlist…";
 
     // Claim device owner immediately (forces other tabs with different UID to sign out)
     const uid = auth.currentUser?.uid;
@@ -574,14 +596,82 @@ async function loadIceServers() {
   if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
   const data = await r.json();
   rtcConfig = { iceServers: data.iceServers };
- logDiag("ICE servers detail (urls only): " + JSON.stringify(
-  (data.iceServers || []).map(s => ({ urls: s.urls }))
-));
+  logDiag("ICE servers detail (urls only): " + JSON.stringify(
+    (data.iceServers || []).map(s => ({ urls: s.urls }))
+  ));
   logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
 }
 
 let localStream = null;
 let pc = null;
+
+/* ===== NEW: Video quality profiles =====
+   Low:    640x360 @ 15fps
+   Medium: 1280x720 @ 30fps
+   High:   1920x1080 @ 30fps
+*/
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+// Persist selection
+const LS_VIDEO_QUALITY = "webrtc_video_quality";
+function getSavedVideoQuality(){
+  try{
+    const v = String(localStorage.getItem(LS_VIDEO_QUALITY) || "").trim();
+    return (v && VIDEO_PROFILES[v]) ? v : "medium";
+  }catch{
+    return "medium";
+  }
+}
+function saveVideoQuality(v){
+  try{ localStorage.setItem(LS_VIDEO_QUALITY, String(v||"")); }catch{}
+}
+
+let selectedVideoQuality = getSavedVideoQuality();
+
+function updateVideoQualityUi(){
+  if(videoQualitySelect){
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if(videoQualityStatus) videoQualityStatus.textContent = `Video: ${label}.`;
+}
+
+updateVideoQualityUi();
+
+// Change handler
+videoQualitySelect?.addEventListener("change", async ()=>{
+  const v = String(videoQualitySelect.value || "medium");
+  selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+  saveVideoQuality(selectedVideoQuality);
+  updateVideoQualityUi();
+
+  // If camera already started, apply immediately
+  if(localStream){
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+      logDiag("Video quality applied while running: " + selectedVideoQuality);
+    }catch(e){
+      logDiag("applyVideoQuality error: " + (e?.message || e));
+      showError(e);
+    }
+  }
+});
+
+async function applyVideoQualityToCurrentStream(quality){
+  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  const vTrack = localStream?.getVideoTracks?.()[0];
+  if(!vTrack) throw new Error("No video track to apply constraints to.");
+  await vTrack.applyConstraints(profile.constraints);
+
+  const s = vTrack.getSettings ? vTrack.getSettings() : {};
+  logDiag("Video track settings now: " + JSON.stringify({
+    width: s.width, height: s.height, frameRate: s.frameRate
+  }));
+}
 
 /* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
@@ -662,8 +752,22 @@ async function startMedia(opts={skipAutoJoin:false}){
     setStatus(mediaStatus,"Requesting camera/mic…");
     logDiag("Requesting getUserMedia…");
 
-    localStream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
+    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: profile.constraints,
+      audio: true
+    });
+
     localVideo.srcObject = localStream;
+
+    // Also try to apply constraints again (some cameras ignore initial ideals)
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+    }catch(e){
+      logDiag("Initial applyConstraints failed (non-fatal): " + (e?.message || e));
+    }
 
     setStatus(mediaStatus,"Camera/mic started.");
     logDiag("Camera/mic started (stream attached).");
@@ -1255,6 +1359,7 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
+
 /* ================== USER DIRECTORY (C-lite) ================== */
 let myDisplayName = "";
 let allUsersCache = []; // [{uid, displayName}]
@@ -1391,7 +1496,7 @@ async function startCallToUid(toUid, toName=""){
   });
 
   activeCallId = callRef.id;
- await notifyCall(activeCallId);
+  await notifyCall(activeCallId);
 
   hangupBtn.disabled = false;
 
@@ -1718,23 +1823,21 @@ onAuthStateChanged(auth, async (user)=>{
   if (isAuthed){
     try{ await enforceAllowlist(user); }
     catch(e){
-  showError(e);
+      showError(e);
 
-  // restore locked UI so login doesn't look frozen
-  loginOverlay.style.display = "flex";
-  appRoot.classList.add("locked");
-  logoutBtn.style.display = "none";
-  startBtn.disabled = true;
+      // restore locked UI so login doesn't look frozen
+      loginOverlay.style.display = "flex";
+      appRoot.classList.add("locked");
+      logoutBtn.style.display = "none";
+      startBtn.disabled = true;
 
-  return;
-}
+      return;
+    }
 
+    // Single-user lock: reaffirm ownership after allowlist passes
+    setDeviceOwner(user.uid);
+    broadcastNewOwner(user.uid);
 
-// Single-user lock: reaffirm ownership after allowlist passes
-setDeviceOwner(user.uid);
-broadcastNewOwner(user.uid);
-
-    
     loginOverlay.style.display = "none";
     appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
@@ -1743,10 +1846,14 @@ broadcastNewOwner(user.uid);
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    testSoundBtn.disabled = false;
-     resetPushBtn.disabled = false;
+    // ===== NEW: enable quality selector once authed =====
+    videoQualitySelect.disabled = false;
+    updateVideoQualityUi();
 
-await rotateFcmTokenIfUserChanged();
+    testSoundBtn.disabled = false;
+    resetPushBtn.disabled = false;
+
+    await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
@@ -1776,6 +1883,9 @@ await rotateFcmTokenIfUserChanged();
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
     stopAll();
+
+    // ===== NEW: lock quality selector when signed out =====
+    if(videoQualitySelect) videoQualitySelect.disabled = true;
 
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
