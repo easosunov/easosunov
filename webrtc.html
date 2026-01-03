@@ -906,6 +906,7 @@ function stopAll(){
   closePeer();
   stopCallListeners();
   stopIncomingUI();
+ stopRingback();
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
@@ -1231,6 +1232,65 @@ function stopRingtone(){
   ringOsc = null;
   ringGain = null;
 }
+/* ================== CALLER RINGBACK (quiet beeps) ================== */
+/*
+  When YOU place a call, play quiet "beep-beep" until:
+  - accepted / declined / missed / ended
+  - you hang up
+*/
+
+let ringbackTimer = null;
+
+function stopRingback(){
+  if(ringbackTimer){
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+}
+
+function playRingbackBeepOnce(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = 0.04;     // quiet volume
+    osc.type = "sine";
+    osc.frequency.value = 440;  // phone-ish
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    osc.onended = ()=>{
+      try{ osc.disconnect(); }catch{}
+      try{ gain.disconnect(); }catch{}
+    };
+  }catch{}
+}
+
+function startRingback(){
+  stopRingback();
+
+  // Ensure audio is unlocked (browser policy)
+  try{ unlockAudio(); }catch{}
+
+  // Pattern: beep, 250ms later beep, then ~2s pause, repeat
+  const cycleMs = 2500;
+
+  playRingbackBeepOnce();
+  setTimeout(()=> playRingbackBeepOnce(), 250);
+
+  ringbackTimer = setInterval(()=>{
+    playRingbackBeepOnce();
+    setTimeout(()=> playRingbackBeepOnce(), 250);
+  }, cycleMs);
+}
 
 /* ================== CALLS (UID-based) ================== */
 let currentIncomingCall = null; // { id, data }
@@ -1492,6 +1552,7 @@ function listenActiveCall(callId){
 
     // If the other side ends the call, clean everything up locally
     if(d.status === "ended"){
+      stopRingback();
       setStatus(dirCallStatus, "Ended.");
       logDiag("Call ended (remote).");
       cleanupCallUI();
@@ -1501,15 +1562,24 @@ function listenActiveCall(callId){
 
     // Optional: keep your existing status feedback
     if(d.status === "accepted"){
+      stopRingback();
       setStatus(dirCallStatus, "Answered. Connecting…");
       return;
     }
     if(d.status === "declined"){
+      stopRingback();
       setStatus(dirCallStatus, "Declined.");
       logDiag("Call declined.");
       cleanupCallUI();
       return;
     }
+if(d.status === "missed"){
+  stopRingback();
+  setStatus(dirCallStatus, "Missed.");
+  logDiag("Call missed.");
+  cleanupCallUI();
+  return;
+}
 
     if (d.deliveredAt) {
       setStatus(dirCallStatus, "Delivered (callee page open).");
@@ -1526,6 +1596,7 @@ function listenActiveCall(callId){
 }
 
 async function hangup(){
+ stopRingback();
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
     try{
@@ -1778,7 +1849,8 @@ const callRef = await addDoc(collection(db,"calls"), {
   listenActiveCall(activeCallId);
 
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
-  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+ startRingback();
+ logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
 }
 
 
