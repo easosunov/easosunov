@@ -72,11 +72,12 @@ async function showCallNotification(data) {
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     // Always show debug proof that a push was received
-    await self.registration.showNotification("SW push received", {
-      body: "Debug: service worker got a push event",
-      tag: "webrtc-debug",
-      renotify: false
-    });
+await self.registration.showNotification("SW push received", {
+  body: "Debug: service worker got a push event",
+  tag: "webrtc-debug",
+  renotify: true
+});
+
 
     if (!event.data) return;
 
