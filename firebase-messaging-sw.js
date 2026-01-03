@@ -54,47 +54,42 @@ async function getNewestRingingCallIdFor(toUid) {
 async function showCallNotification(payload) {
   const data = payload?.data || {};
 
-  const callId  = data.callId || "";
-  const toUid   = data.toUid  || ""; // required for Option 1
-  const roomId  = data.roomId || "";
-   const fromName = data.fromName || "Unknown";
+  const callId   = data.callId || "";
+  const toUid    = data.toUid  || ""; // required for Option 1
+  const roomId   = data.roomId || "";
+  const fromName = data.fromName || "Unknown";
   const toName   = data.toName   || "";
 
-  // NEW: optional short message from caller
-  const note = data.note || "";
+  // Optional short message from caller
+  const note = String(data.note || "").trim();
 
-  // NEW: local-time timestamp (prefer caller-provided ms if present; fallback to "now")
+  // Local-time timestamp (prefer caller-provided ms; fallback to "now")
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
-
+  // Title: data-only pushes won't have payload.notification
   const title = data.title || "Incoming call";
 
-  // NEW: build body lines (call + optional message + local time)
-  const lines = [];
-  lines.push(`Call from ${fromName}`);
-  if (note) lines.push(String(note));
-  if (tsLocal) lines.push(String(tsLocal));
+  // SINGLE LINE body (no newlines)
+  // Example: "Call from Alex — let us talk at 3 pm — 1/3/2026, 5:41:50 AM"
+  const body =
+    `Call from ${fromName}` +
+    (note ? ` — ${note}` : "") +
+    (tsLocal ? ` — ${tsLocal}` : "");
 
-  const body = lines.join("\n");
-
-
-  // Option 2: use a stable tag so notifications REPLACE instead of stacking.
-  // Per-user tag prevents weirdness if the same browser ever signs into another UID.
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
-    const options = {
+  const options = {
     body,
     data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
-
-
-    // Replace instead of stacking:
+    requireInteraction: true,
     tag,
     renotify: false
   };
 
   await self.registration.showNotification(title, options);
 }
+
 
 /**
  * MAIN: background message handler
