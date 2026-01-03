@@ -137,6 +137,18 @@ select{
     <div class="status" id="pushStatus">Push: not enabled.</div>
     <div class="status" id="dirCallStatus">Idle.</div>
   </div>
+ <div style="margin-top:10px">
+  <div class="small">Message to send with call (optional)</div>
+  <input
+    id="callNoteInput"
+    placeholder="e.g. Let us talk at 3 pm"
+    maxlength="140"
+  />
+  <div class="small" style="color:#777">
+    This text will appear in the notification for Person B.
+  </div>
+</div>
+
 </div>
 
 
@@ -276,6 +288,7 @@ const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 const resetPushBtn = document.getElementById("resetPushBtn");
+const callNoteInput = document.getElementById("callNoteInput");
 
 /* ===== NEW: video quality UI elements ===== */
 const videoQualitySelect = document.getElementById("videoQualitySelect");
@@ -1489,16 +1502,20 @@ async function startCallToUid(toUid, toName=""){
 
   pinnedRoomId = created.roomId;
 
-  const callRef = await addDoc(collection(db,"calls"), {
-    fromUid: myUid,
-    toUid,
-    fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
-    toName: toName || "",
-    roomId: created.roomId,
-    status: "ringing",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
+  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
+
+const callRef = await addDoc(collection(db,"calls"), {
+  fromUid: myUid,
+  toUid,
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+  toName: toName || "",
+  roomId: created.roomId,
+  note, // <-- NEW
+  status: "ringing",
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp()
+});
+
 
   activeCallId = callRef.id;
   await notifyCall(activeCallId);
