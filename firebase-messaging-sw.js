@@ -57,20 +57,36 @@ async function showCallNotification(payload) {
   const callId  = data.callId || "";
   const toUid   = data.toUid  || ""; // required for Option 1
   const roomId  = data.roomId || "";
-  const fromName = data.fromName || "Unknown";
+   const fromName = data.fromName || "Unknown";
   const toName   = data.toName   || "";
 
+  // NEW: optional short message from caller
+  const note = data.note || "";
+
+  // NEW: local-time timestamp (prefer caller-provided ms if present; fallback to "now")
+  const tsMs = Number(data.sentAtMs || Date.now());
+  const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+
+
   const title = payload?.notification?.title || "Incoming call";
-  const body  = payload?.notification?.body  || `Call from ${fromName}`;
+
+  // NEW: build body lines (call + optional message + local time)
+  const lines = [];
+  lines.push(`Call from ${fromName}`);
+  if (note) lines.push(String(note));
+  if (tsLocal) lines.push(String(tsLocal));
+
+  const body = lines.join("\n");
+
 
   // Option 2: use a stable tag so notifications REPLACE instead of stacking.
   // Per-user tag prevents weirdness if the same browser ever signs into another UID.
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
-  const options = {
+    const options = {
     body,
-    data: { callId, toUid, roomId, fromName, toName },
-    requireInteraction: true,
+    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
+
 
     // Replace instead of stacking:
     tag,
@@ -136,6 +152,6 @@ self.addEventListener("notificationclick", (event) => {
   if (d.roomId) url.searchParams.set("roomId", d.roomId);
   if (d.fromName) url.searchParams.set("fromName", d.fromName);
   if (d.toName) url.searchParams.set("toName", d.toName);
-
+  if (d.note) url.searchParams.set("note", d.note);
   event.waitUntil(self.clients.openWindow(url.toString()));
 });
