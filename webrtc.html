@@ -1297,6 +1297,70 @@ async function listenIncomingCalls(){
     logDiag("Incoming call listener error: " + (err?.message || err));
   });
 }
+// Catch-up: if Chrome was closed and push was missed, show the newest ringing call after login
+async function catchUpMissedRingingCall() {
+  try {
+    if (!myUid) return;
+
+    // 1) Query newest ringing call addressed to me
+    const qy = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "ringing"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+
+    const d = snap.docs[0];
+    const callId = d.id;
+    const call = d.data() || {};
+if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+if (currentIncomingCall?.id === callId) return;
+
+    // 2) Derive created time (ms) safely
+    const createdMs =
+      (call.createdAt && typeof call.createdAt.toMillis === "function")
+        ? call.createdAt.toMillis()
+        : Date.now();
+
+    // 3) Show in-page incoming UI (works even if notifications are blocked)
+    roomIdInput.value = call.roomId || "";
+    currentIncomingCall = { id: callId, data: call };
+    incomingText.textContent = `Call from ${call.fromName || "unknown"}…`;
+    incomingOverlay.style.display = "flex";
+    startRingtone();
+
+    // 4) Optional: also show a system notification (if permission granted)
+    if ("Notification" in window && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+      if (reg) {
+        const fromName = call.fromName || "Unknown";
+        const note = String(call.note || "").trim();
+        const tsLocal = new Date(createdMs).toLocaleString();
+
+        const body =
+          `Call from ${fromName}` +
+          (note ? ` — ${note}` : "") +
+          ` — ${tsLocal}`;
+
+        await reg.showNotification("Incoming call", {
+          body,
+          tag: `webrtc-call-${myUid}`,
+          renotify: true,
+          requireInteraction: true,
+          data: { callId, roomId: call.roomId || "", fromName, note }
+        });
+      }
+    }
+
+    logDiag("Catch-up: showed ringing call " + callId);
+  } catch (e) {
+    logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
+  }
+}
 
 function cleanupCallUI(){
   hangupBtn.disabled = true;
@@ -1927,7 +1991,7 @@ onAuthStateChanged(auth, async (user)=>{
     refreshCopyInviteState();
 
     try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
-
+    await catchUpMissedRingingCall();
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
