@@ -1,9 +1,8 @@
-/* firebase-messaging-sw.js (Option 2: newest ringing call only + replace tag + local time + note)
-   - Uses Firestore in the SW to suppress old/duplicate queued pushes
-   - Shows notification ONLY if payload.callId matches newest ringing call for toUid
-   - Adds caller note + LOCAL timestamp in the body
-   - Uses tag to replace (no stacking)
-   - Uses raw "push" event only (avoid double notifications)
+/* firebase-messaging-sw.js
+   Option 2 (newest ringing call only) + replace tag + local time + caller note
+   - Uses Firestore in SW to ignore older queued pushes (prevents burst on restart)
+   - Shows notification ONLY if callId is newest ringing call for this toUid
+   - Body includes: Call from X — note — LOCAL timestamp
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
@@ -19,16 +18,13 @@ firebase.initializeApp({
   appId: "1:100169991412:web:27ef6820f9a59add6b4aa1",
 });
 
-// We keep messaging initialized (not used directly here, but OK)
-const messaging = firebase.messaging();
+firebase.messaging(); // initialized (ok even if unused directly)
 const db = firebase.firestore();
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 function extractData(payload) {
-  // Data-only payloads commonly arrive as { data: {...} }
-  // Some environments wrap it differently; keep a few fallbacks.
   return (
     payload?.data ||
     payload?.message?.data ||
@@ -38,11 +34,7 @@ function extractData(payload) {
   );
 }
 
-/**
- * Returns newest "ringing" callId for a given toUid, or:
- * - null if none
- * - "__unknown__" if query fails (fail-open signal)
- */
+// Newest ringing call for this user (fail-open if we cannot query)
 async function getNewestRingingCallIdFor(toUid) {
   try {
     if (!toUid) return null;
@@ -58,8 +50,7 @@ async function getNewestRingingCallIdFor(toUid) {
     if (snap.empty) return null;
     return snap.docs[0].id;
   } catch (e) {
-    // Missing index / permission / offline / etc.
-    // Fail-open: allow showing the notification rather than dropping all calls.
+    // If Firestore query fails (index/rules/offline), fail-open
     return "__unknown__";
   }
 }
@@ -68,7 +59,7 @@ async function showCallNotification(data) {
   data = data || {};
 
   const callId = String(data.callId || "");
-  if (!callId) return; // ignore non-call pushes
+  if (!callId) return;
 
   const toUid    = String(data.toUid || "");
   const roomId   = String(data.roomId || "");
@@ -76,19 +67,18 @@ async function showCallNotification(data) {
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
 
-  // LOCAL timestamp: we expect Cloud Function to send sentAtMs
+  // Local time (from Cloud Function ms)
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single-line body is more consistent across OSes
+  // Single line (more reliable on Windows/Chrome)
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
     (tsLocal ? ` — ${tsLocal}` : "");
 
-  // Replace instead of stacking (per-user)
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
   await self.registration.showNotification(title, {
@@ -100,27 +90,19 @@ async function showCallNotification(data) {
   });
 }
 
-/**
- * RAW PUSH EVENT (most reliable for data-only FCM webpush)
- * Option 2 filter is applied here.
- */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     if (!event.data) return;
 
     let payload = null;
-
-    // Try JSON first
     try { payload = event.data.json(); } catch {}
 
-    // Fallback: text -> JSON
     if (!payload) {
       try {
         const txt = await event.data.text();
         payload = txt ? JSON.parse(txt) : null;
       } catch {}
     }
-
     if (!payload) return;
 
     const data = extractData(payload);
@@ -129,20 +111,19 @@ self.addEventListener("push", (event) => {
 
     if (!callId) return;
 
-    // OPTION 2: only show if this callId is the newest ringing call for toUid
     if (toUid) {
       const newest = await getNewestRingingCallIdFor(toUid);
 
-      // Fail-open: if we can't check, still show
+      // fail-open if we cannot check
       if (newest === "__unknown__") {
         await showCallNotification(data);
         return;
       }
 
-      // No ringing calls anymore -> do not show
+      // no ringing calls => ignore
       if (!newest) return;
 
-      // Not newest -> ignore (prevents bursts / old queued)
+      // not newest => ignore
       if (newest !== callId) return;
     }
 
