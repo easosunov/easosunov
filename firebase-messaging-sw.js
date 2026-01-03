@@ -1,5 +1,5 @@
-/* firebase-messaging-sw.js (stable SW version) */
-/* Implements:
+/* firebase-messaging-sw.js (stable SW version)
+   Implements:
    - Option 1: show notification ONLY for the newest ringing call for this toUid
    - Option 2: use notification tag to REPLACE instead of stacking
 */
@@ -17,7 +17,7 @@ firebase.initializeApp({
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
 
-const messaging = firebase.messaging();
+const messaging = firebase.messaging(); // ok to keep even if we don't use onBackgroundMessage
 const db = firebase.firestore();
 
 self.addEventListener("install", () => self.skipWaiting());
@@ -25,7 +25,7 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 
 /**
  * Returns the newest "ringing" callId for a given toUid, or null if none.
- * If the query fails (missing index / offline / etc), returns null.
+ * If the query fails (missing index / offline / etc), returns "__unknown__" (fail-open signal).
  */
 async function getNewestRingingCallIdFor(toUid) {
   try {
@@ -42,36 +42,31 @@ async function getNewestRingingCallIdFor(toUid) {
     if (snap.empty) return null;
     return snap.docs[0].id;
   } catch (e) {
-    // If index is missing, Firestore can throw here.
-    // We fail open (return null) so user still gets something.
-    return null;
+    // fail-open signal: can't check newest (index/security/offline/etc)
+    return "__unknown__";
   }
 }
 
 /**
  * Show a call notification, but REPLACE existing via tag (Option 2).
  */
-async function showCallNotification(payload) {
-  const data = payload?.data || {};
+async function showCallNotification({ data }) {
+  data = data || {};
 
   const callId   = data.callId || "";
-  const toUid    = data.toUid  || ""; // required for Option 1
+  const toUid    = data.toUid  || "";
   const roomId   = data.roomId || "";
   const fromName = data.fromName || "Unknown";
   const toName   = data.toName   || "";
 
-  // Optional short message from caller
   const note = String(data.note || "").trim();
 
-  // Local-time timestamp (prefer caller-provided ms; fallback to "now")
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
-  // Title: data-only pushes won't have payload.notification
   const title = data.title || "Incoming call";
 
-  // SINGLE LINE body (no newlines)
-  // Example: "Call from Alex — let us talk at 3 pm — 1/3/2026, 5:41:50 AM"
+  // Single-line body (better cross-platform)
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
@@ -90,52 +85,54 @@ async function showCallNotification(payload) {
   await self.registration.showNotification(title, options);
 }
 
-
 /**
- * MAIN: background message handler
- * Option 1: Only show if this payload.callId matches newest ringing call for toUid.
- * Option 2: use tag to replace instead of stacking.
+ * MAIN push handler (works for data-only messages)
  */
-messaging.onBackgroundMessage((payload) => {
-  eventWaitUntil(async () => {
-    const data = payload?.data || {};
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    let payload = null;
+
+    // Try JSON first
+    try { payload = event.data?.json?.(); } catch {}
+
+    // Fallback: text -> JSON
+    if (!payload) {
+      try {
+        const txt = event.data?.text ? await event.data.text() : "";
+        payload = txt ? JSON.parse(txt) : null;
+      } catch {}
+    }
+
+    if (!payload) return;
+
+    // Support multiple possible shapes
+    const data =
+      payload?.data ||
+      payload?.message?.data ||
+      payload?.message?.notification?.data ||
+      {};
+
     const callId = data.callId || null;
     const toUid  = data.toUid  || null;
 
-    // Not a call => ignore (or you can show a generic notification if you want)
     if (!callId) return;
 
-    // Option 1:
-    // If we know toUid, only show the notification if this callId is the newest ringing call.
+    // Option 1: only newest ringing call (but fail-open if we can't query)
     if (toUid) {
       const newest = await getNewestRingingCallIdFor(toUid);
 
-      // If there is a newer ringing call, ignore this push to prevent spam on restart.
-      if (newest && newest !== callId) return;
+      if (newest === "__unknown__") {
+        await showCallNotification({ data });
+        return;
+      }
 
-      // If there are no ringing calls anymore, ignore (call already ended/accepted/declined).
       if (!newest) return;
+      if (newest !== callId) return;
     }
 
-    // Show single (replacing) notification
-    await showCallNotification(payload);
-  });
+    await showCallNotification({ data });
+  })());
 });
-
-/**
- * Helper: safely wrap async in SW so it doesn't get killed mid-flight.
- */
-function eventWaitUntil(fn) {
-  // If we’re in a context where we can use waitUntil, do it.
-  // For onBackgroundMessage, we don't get an event object, so we just run it.
-  // Most browsers still complete promises here, but this makes it robust when called from other listeners too.
-  try {
-    const p = Promise.resolve().then(fn);
-    return p;
-  } catch {
-    // ignore
-  }
-}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
@@ -148,5 +145,6 @@ self.addEventListener("notificationclick", (event) => {
   if (d.fromName) url.searchParams.set("fromName", d.fromName);
   if (d.toName) url.searchParams.set("toName", d.toName);
   if (d.note) url.searchParams.set("note", d.note);
+
   event.waitUntil(self.clients.openWindow(url.toString()));
 });
