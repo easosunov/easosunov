@@ -1,14 +1,14 @@
-/* firebase-messaging-sw.js
-   Option 2 (newest ringing call only) + replace tag + local time + caller note
-   - Works whether FCM arrives via Firebase handler OR raw push event
-   - Uses Firestore in SW to ignore older queued pushes (prevents burst on restart)
-   - Shows notification ONLY if callId is newest ringing call for this toUid
-   - Body includes: Call from X — note — LOCAL timestamp
+/* firebase-messaging-sw.js (RELIABLE: note + LOCAL timestamp + popup every call)
+   - Works when Chrome is running even if page is closed
+   - Handles BOTH delivery paths:
+       A) messaging.onBackgroundMessage (Firebase path)
+       B) self.addEventListener("push") (raw push path)
+   - Uses a per-user tag BUT forces a popup by closing old notifications first
+   - Includes caller note + LOCAL time in body
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
 
 firebase.initializeApp({
   apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
@@ -20,54 +20,40 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
-const db = firebase.firestore();
 
-self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
-
-// -------- helpers --------
+// --- tiny in-memory dedupe (prevents double popups if both handlers fire) ---
+const recentlyShown = new Map(); // callId -> ms
+const DEDUPE_MS = 4000;
 
 function extractData(payload) {
-  // Handles several real-world shapes
-  const d =
+  return (
     payload?.data ||
     payload?.message?.data ||
-    payload?.message?.notification?.data ||
     payload?.notification?.data ||
-    {};
-  return d || {};
+    payload?.message?.notification?.data ||
+    {}
+  );
 }
 
-/**
- * Returns newest "ringing" callId for toUid, or:
- * - null if none
- * - "__unknown__" if query fails (fail-open)
- */
-async function getNewestRingingCallIdFor(toUid) {
-  try {
-    if (!toUid) return null;
-
-    const snap = await db
-      .collection("calls")
-      .where("toUid", "==", toUid)
-      .where("status", "==", "ringing")
-      .orderBy("createdAt", "desc")
-      .limit(1)
-      .get();
-
-    if (snap.empty) return null;
-    return snap.docs[0].id;
-  } catch (e) {
-    // Missing index / rules / offline / etc -> fail-open
-    return "__unknown__";
+function shouldDedupe(callId) {
+  const now = Date.now();
+  // purge old
+  for (const [k, t] of recentlyShown.entries()) {
+    if (now - t > DEDUPE_MS) recentlyShown.delete(k);
   }
+  if (!callId) return false;
+  if (recentlyShown.has(callId)) return true;
+  recentlyShown.set(callId, now);
+  return false;
 }
 
 async function showCallNotification(data) {
   data = data || {};
 
   const callId = String(data.callId || "");
-  if (!callId) return; // ignore non-call pushes
+  if (!callId) return;
+
+  if (shouldDedupe(callId)) return;
 
   const toUid    = String(data.toUid || "");
   const roomId   = String(data.roomId || "");
@@ -75,67 +61,52 @@ async function showCallNotification(data) {
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
 
-  // LOCAL timestamp from sentAtMs
+  // LOCAL time on Person B computer
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single line is most consistent across OS/Chrome
+  // Single line is most reliable across Windows notification UI
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
     (tsLocal ? ` — ${tsLocal}` : "");
 
+  // Per-user tag so we don't stack endlessly
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
+
+  // IMPORTANT: force a new popup every time by closing previous with same tag
+  try {
+    const existing = await self.registration.getNotifications({ tag });
+    for (const n of existing) n.close();
+  } catch {}
 
   await self.registration.showNotification(title, {
     body,
     tag,
-    renotify: false,
-    requireInteraction: true,
+    renotify: true,              // re-alert if the OS treats it as a replacement
+    requireInteraction: true,    // keep it visible until user acts
+    timestamp: Number.isFinite(tsMs) ? tsMs : undefined,
+
     data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
   });
 }
 
-async function handleCallDataMaybeShow(data) {
-  data = data || {};
-  const callId = String(data.callId || "");
-  if (!callId) return;
-
-  const toUid = String(data.toUid || "");
-
-  // Option 2: newest ringing call only (but fail-open if cannot query)
-  if (toUid) {
-    const newest = await getNewestRingingCallIdFor(toUid);
-
-    if (newest === "__unknown__") {
-      await showCallNotification(data);
-      return;
-    }
-    if (!newest) return;          // no ringing calls anymore
-    if (newest !== callId) return; // not newest => ignore
-  }
-
-  await showCallNotification(data);
-}
-
-// -------- delivery paths --------
-
 /**
- * Path A: Firebase background handler (this is often the one used when Chrome is running)
+ * Path A: Firebase background handler (often used when Chrome is running)
  */
 messaging.onBackgroundMessage(async (payload) => {
   try {
     const data = extractData(payload);
-    await handleCallDataMaybeShow(data);
+    await showCallNotification(data);
   } catch {
     // ignore
   }
 });
 
 /**
- * Path B: Raw push event (this is often used when Chrome was closed / restarted)
+ * Path B: Raw push event (sometimes used depending on browser state)
  */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
@@ -153,7 +124,7 @@ self.addEventListener("push", (event) => {
     if (!payload) return;
 
     const data = extractData(payload);
-    await handleCallDataMaybeShow(data);
+    await showCallNotification(data);
   })());
 });
 
