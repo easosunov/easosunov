@@ -129,9 +129,16 @@ select{
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don’t hear yourself.</div>
-<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+<div style="margin-top:8px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
   <button id="hangupBtn" disabled>Hang up</button>
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div class="status" id="myNameStatus">Not set.</div>
+    <div class="status" id="pushStatus">Push: not enabled.</div>
+    <div class="status" id="dirCallStatus">Idle.</div>
+  </div>
 </div>
+
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
@@ -155,10 +162,6 @@ select{
         <button id="testSoundBtn" disabled>Test Ring Sound</button>
         <button id="resetPushBtn" disabled>Reset Push</button>
       </div>
-
-      <div class="status" id="myNameStatus">Not set.</div>
-      <div class="status" id="pushStatus">Push: not enabled.</div>
-      <div class="status" id="dirCallStatus">Idle.</div>
 
       <div class="small" style="margin-top:8px;color:#777">
         Tip: both users must be signed in and have this page open (unless push is implemented end-to-end via Cloud Functions).
