@@ -233,7 +233,46 @@ select{
 
 <script type="module">
 console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
-const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
+
+ // ===============================
+// SW BOOTSTRAP (runs even when NOT logged in)
+// This guarantees SW exists on both computers.
+// ===============================
+let swBootstrapReg = null;
+
+async function ensureServiceWorkerInstalled() {
+  if (!("serviceWorker" in navigator)) {
+    console.log("[SW] not supported");
+    return null;
+  }
+
+  // If already controlling the page, SW exists
+  if (navigator.serviceWorker.controller) {
+    console.log("[SW] controller already active");
+  }
+
+  const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+  // bump version when you change SW file
+  swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
+
+  try {
+    swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
+      scope: "/easosunov/",
+      updateViaCache: "none",
+    });
+    await navigator.serviceWorker.ready;
+    console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
+    return swBootstrapReg;
+  } catch (e) {
+    console.error("[SW] bootstrap register failed:", e);
+    return null;
+  }
+}
+
+// RUN IT NOW (top-level)
+await ensureServiceWorkerInstalled();
+
+ const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
@@ -1666,10 +1705,12 @@ if(prev.uid && prev.uid !== myUid){
     logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
     if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
-    swReg = await navigator.serviceWorker.register(swUrl.toString(), {
-      scope: "/easosunov/",
-      updateViaCache: "none",
-    });
+    // Reuse bootstrap SW registration (do NOT register again)
+swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
+if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
+
+await navigator.serviceWorker.ready;
+try { await swReg.update(); } catch {}
 
     await navigator.serviceWorker.ready;
     try { await swReg.update(); } catch {}
