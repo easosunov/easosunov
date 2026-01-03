@@ -1529,11 +1529,30 @@ async function hangup(){
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
     try{
-      await updateDoc(doc(db,"calls", activeCallId), {
-  status: "ended",
-  endedAt: serverTimestamp(),
-  updatedAt: serverTimestamp()
-});
+      const callRef = doc(db, "calls", activeCallId);
+const snap = await getDoc(callRef);
+
+if (snap.exists()) {
+  const call = snap.data() || {};
+
+  // If caller hangs up BEFORE callee answered/declined → MISSED
+  if (call.status === "ringing") {
+    await updateDoc(callRef, {
+      status: "missed",
+      missedAt: serverTimestamp(),
+      endedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    // Normal hangup after answer
+    await updateDoc(callRef, {
+      status: "ended",
+      endedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
     }catch(e){
       // If rules block it, you'll see it in the error box (we fix rules below)
       showError(e);
