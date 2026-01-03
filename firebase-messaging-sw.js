@@ -1,8 +1,8 @@
-/* firebase-messaging-sw.js (WORKING + SIMPLE)
-   - Shows: fromName + optional note + LOCAL time
-   - No Firestore queries (so it never suppresses notifications)
-   - Replaces instead of stacking using "tag"
-   - Handles data-only pushes reliably via raw "push" event
+/* firebase-messaging-sw.js (DEBUG + WORKING)
+   - Always shows notification for call pushes (no Firestore query)
+   - Includes note + LOCAL timestamp
+   - Adds a debug notification when ANY push arrives (helps diagnose “no notifications”)
+   - Replaces instead of stacking using tag
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
@@ -17,18 +17,15 @@ firebase.initializeApp({
   appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
 
-// Keep messaging init (not strictly required if we use only "push", but ok)
-firebase.messaging();
+const messaging = firebase.messaging();
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 function extractData(payload) {
-  // Support multiple possible shapes
   return (
     payload?.data ||
     payload?.message?.data ||
-    payload?.message?.notification?.data ||
     payload?.notification?.data ||
     {}
   );
@@ -37,7 +34,7 @@ function extractData(payload) {
 async function showCallNotification(data) {
   data = data || {};
 
-  const callId   = String(data.callId || "");
+  const callId = String(data.callId || "");
   if (!callId) return; // ignore non-call pushes
 
   const toUid    = String(data.toUid || "");
@@ -46,57 +43,68 @@ async function showCallNotification(data) {
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
 
-  // LOCAL timestamp (best effort)
+  // LOCAL time
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single-line body (more reliable across OSes)
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
     (tsLocal ? ` — ${tsLocal}` : "");
 
-  // Replace instead of stacking
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
-  const options = {
+  await self.registration.showNotification(title, {
     body,
     tag,
     renotify: false,
     requireInteraction: true,
     data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
-  };
-
-  await self.registration.showNotification(title, options);
+  });
 }
 
 /**
- * IMPORTANT: Use raw "push" handler (most reliable for data-only)
+ * 1) RAW PUSH EVENT (most reliable to prove delivery)
+ * If you don't see the "SW push received" notification, push isn't reaching the SW at all.
  */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
+    // Always show debug proof that a push was received
+    await self.registration.showNotification("SW push received", {
+      body: "Debug: service worker got a push event",
+      tag: "webrtc-debug",
+      renotify: false
+    });
+
     if (!event.data) return;
 
     let payload = null;
-
-    // Try JSON first
     try { payload = event.data.json(); } catch {}
 
-    // Fallback: text -> JSON
     if (!payload) {
       try {
         const txt = await event.data.text();
         payload = txt ? JSON.parse(txt) : null;
       } catch {}
     }
-
     if (!payload) return;
 
     const data = extractData(payload);
     await showCallNotification(data);
   })());
+});
+
+/**
+ * 2) Firebase handler (sometimes FCM routes here)
+ * We keep it too, but it won’t hurt because tag replaces.
+ */
+messaging.onBackgroundMessage(async (payload) => {
+  try {
+    const data = extractData(payload);
+    await showCallNotification(data);
+  } catch {}
 });
 
 self.addEventListener("notificationclick", (event) => {
