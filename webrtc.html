@@ -1362,62 +1362,113 @@ if (currentIncomingCall?.id === callId) return;
   }
 }
 // Catch-up: if Chrome was closed and the call became MISSED, show newest missed call after login
+// Catch-up: if Chrome was closed and call was MISSED (or ENDED without being answered), notify after login
 async function catchUpMissedCallNotification() {
   try {
     if (!myUid) return;
 
-    // Query newest MISSED call addressed to me
-    const qy = query(
-      collection(db, "calls"),
-      where("toUid", "==", myUid),
-      where("status", "==", "missed"),
-      orderBy("missedAt", "desc"),
-      limit(1)
-    );
+    // 0) Don't repeat the same missed call notification forever
+    const LS_LAST_MISSED = "webrtc_last_missed_call_id";
+    const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
 
-    const snap = await getDocs(qy);
-    if (snap.empty) return;
+    // Helper to show system notification
+    async function showMissed(callId, call, whenMs) {
+      const fromName = call.fromName || "Unknown";
+      const note = String(call.note || "").trim();
+      const tsLocal = new Date(whenMs).toLocaleString();
 
-    const d = snap.docs[0];
-    const callId = d.id;
-    const call = d.data() || {};
+      // Always update in-page status so you can debug even if notifications are blocked
+      setStatus(dirCallStatus, `Missed call from ${fromName}.`);
+      logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
 
-    // Avoid duplicating if we already opened from push or already showing some call UI
-    if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
-    if (currentIncomingCall?.id === callId) return;
+      if ("Notification" in window && Notification.permission === "granted") {
+        const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+        if (reg) {
+          const body =
+            `Missed call from ${fromName}` +
+            (note ? ` — ${note}` : "") +
+            ` — ${tsLocal}`;
 
-    // Determine time
-    const missedMs =
-      (call.missedAt && typeof call.missedAt.toMillis === "function")
-        ? call.missedAt.toMillis()
-        : Date.now();
+          await reg.showNotification("Missed call", {
+            body,
+            tag: `webrtc-missed-${myUid}`,
+            renotify: true,
+            requireInteraction: false,
+            data: { callId, roomId: call.roomId || "", fromName, note }
+          });
+        }
+      }
 
-    const fromName = call.fromName || "Unknown";
-    const note = String(call.note || "").trim();
-    const tsLocal = new Date(missedMs).toLocaleString();
+      localStorage.setItem(LS_LAST_MISSED, callId);
+    }
 
-    // Show a SYSTEM notification if allowed
-    if ("Notification" in window && Notification.permission === "granted") {
-      const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
-      if (reg) {
-        const body =
-          `Missed call from ${fromName}` +
-          (note ? ` — ${note}` : "") +
-          ` — ${tsLocal}`;
+    // 1) First, try newest explicit MISSED call
+    {
+      const q1 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "missed"),
+        orderBy("missedAt", "desc"),
+        limit(1)
+      );
 
-        await reg.showNotification("Missed call", {
-          body,
-          tag: `webrtc-missed-${myUid}`,
-          renotify: true,
-          requireInteraction: false,
-          data: { callId, roomId: call.roomId || "", fromName, note }
-        });
+      const s1 = await getDocs(q1);
+      if (!s1.empty) {
+        const d = s1.docs[0];
+        const callId = d.id;
+        const call = d.data() || {};
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const missedMs =
+            (call.missedAt && typeof call.missedAt.toMillis === "function")
+              ? call.missedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, missedMs);
+          return;
+        }
       }
     }
 
-    // Also write something into your status line (optional but useful)
-    setStatus(dirCallStatus, `Missed call from ${fromName}.`);
-    logDiag("Catch-up: showed MISSED call " + callId);
+    // 2) If not found, treat "ended" as missed IF it was never accepted/declined
+    {
+      const q2 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "ended"),
+        orderBy("endedAt", "desc"),
+        limit(5) // check a few, because newest ended might be a real answered call
+      );
+
+      const s2 = await getDocs(q2);
+      if (s2.empty) return;
+
+      for (const docSnap of s2.docs) {
+        const callId = docSnap.id;
+        const call = docSnap.data() || {};
+
+        // Skip if it was actually answered or declined
+        const hadAccept = !!call.acceptedAt;
+        const hadDecline = !!call.declinedAt;
+        if (hadAccept || hadDecline) continue;
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const endedMs =
+            (call.endedAt && typeof call.endedAt.toMillis === "function")
+              ? call.endedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, endedMs);
+          return;
+        }
+      }
+    }
 
   } catch (e) {
     logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
@@ -1479,9 +1530,10 @@ async function hangup(){
   if (activeCallId) {
     try{
       await updateDoc(doc(db,"calls", activeCallId), {
-        status: "ended",
-        updatedAt: serverTimestamp()
-      });
+  status: "ended",
+  endedAt: serverTimestamp(),
+  updatedAt: serverTimestamp()
+});
     }catch(e){
       // If rules block it, you'll see it in the error box (we fix rules below)
       showError(e);
@@ -1507,7 +1559,12 @@ answerBtn.onclick = async ()=>{
 
     const { id, data } = call;
 
-    await updateDoc(doc(db,"calls", id), { status: "accepted", updatedAt: serverTimestamp() });
+    await updateDoc(doc(db,"calls", id), {
+  status: "accepted",
+  acceptedAt: serverTimestamp(),
+  updatedAt: serverTimestamp()
+});
+
 
     // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
@@ -1534,7 +1591,12 @@ declineBtn.onclick = async ()=>{
     if(!call) return;
 
     const { id } = call;
-    await updateDoc(doc(db,"calls", id), { status: "declined", updatedAt: serverTimestamp() });
+    await updateDoc(doc(db,"calls", id), {
+  status: "declined",
+  declinedAt: serverTimestamp(),
+  updatedAt: serverTimestamp()
+});
+
 
     setStatus(dirCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
@@ -1675,11 +1737,17 @@ const callRef = await addDoc(collection(db,"calls"), {
   fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
   toName: toName || "",
   roomId: created.roomId,
-  note, // <-- NEW
+  note,
   status: "ringing",
   createdAt: serverTimestamp(),
-  updatedAt: serverTimestamp()
+  updatedAt: serverTimestamp(),
+
+  // NEW: lifecycle markers
+  acceptedAt: null,
+  declinedAt: null,
+  endedAt: null
 });
+
 
 
   activeCallId = callRef.id;
