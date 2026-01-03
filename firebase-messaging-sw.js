@@ -1,7 +1,9 @@
-/* firebase-messaging-sw.js (stable)
-   - Uses notification tag to REPLACE instead of stacking
-   - Shows note + LOCAL time timestamp
-   - No Firestore "newest ringing" query (prevents accidental drop)
+/* firebase-messaging-sw.js (robust for data-only web FCM)
+   - Shows: fromName + optional note + LOCAL time timestamp
+   - Replaces notifications via tag (no stacking)
+   - Handles BOTH:
+       (A) Firebase onBackgroundMessage (when it fires)
+       (B) Raw "push" event fallback (when it doesn't)
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
@@ -21,47 +23,87 @@ const messaging = firebase.messaging();
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-async function showCallNotification(payload) {
-  const data = payload?.data || {};
+function pickData(obj) {
+  // Try many shapes (FCM / Firebase SDK / raw push)
+  if (!obj) return {};
+  return (
+    obj.data ||
+    obj.message?.data ||
+    obj.message?.notification?.data ||
+    obj.notification?.data ||
+    {}
+  );
+}
+
+async function showCallNotificationFromData(data) {
+  data = data || {};
 
   const callId   = String(data.callId || "");
+  if (!callId) return; // not a call
+
   const toUid    = String(data.toUid || "");
   const roomId   = String(data.roomId || "");
   const fromName = String(data.fromName || "Unknown");
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
 
-  // LOCAL TIME (from server-supplied ms; fallback now)
+  // LOCAL TIME (use server-provided ms if present)
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single-line body is most reliable
+  // single line works best across OSes
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
     (tsLocal ? ` — ${tsLocal}` : "");
 
-  // Replace instead of stacking (per user if possible)
+  // Replace instead of stacking
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
   const options = {
     body,
-    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
-    requireInteraction: true,
     tag,
-    renotify: false
+    renotify: false,
+    requireInteraction: true,
+    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
   };
 
   await self.registration.showNotification(title, options);
 }
 
+/* (A) Firebase SDK handler */
 messaging.onBackgroundMessage((payload) => {
-  // DATA-ONLY push => payload.notification is empty; payload.data is what we use
-  const data = payload?.data || {};
-  if (!data.callId) return;
-  showCallNotification(payload);
+  try {
+    const data = pickData(payload);
+    showCallNotificationFromData(data);
+  } catch {
+    // ignore
+  }
+});
+
+/* (B) Raw push fallback handler */
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    let payload = null;
+
+    // Try JSON
+    try { payload = event.data?.json?.(); } catch {}
+
+    // Fallback: text -> JSON
+    if (!payload) {
+      try {
+        const txt = event.data?.text ? await event.data.text() : "";
+        payload = txt ? JSON.parse(txt) : null;
+      } catch {}
+    }
+
+    if (!payload) return;
+
+    const data = pickData(payload);
+    await showCallNotificationFromData(data);
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {
