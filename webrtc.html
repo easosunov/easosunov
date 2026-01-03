@@ -132,6 +132,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
   <button id="saveNameBtn" disabled>Save Name</button>
   <button id="testSoundBtn" disabled>Test Ring Sound</button>
+ <button id="resetPushBtn" disabled>Reset Push</button>
   <button id="hangupBtn" disabled>Hang up</button>
 </div>
 
@@ -251,7 +252,8 @@ const dirCallStatus = document.getElementById("dirCallStatus");
 const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
-
+const resetPushBtn = document.getElementById("resetPushBtn");
+ 
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
   try{
@@ -1683,6 +1685,17 @@ testSoundBtn.onclick = async ()=>{
   setTimeout(()=>stopRingtone(), 1800);
 };
 
+resetPushBtn.onclick = async ()=>{
+  try{
+    setStatus(pushStatus, "Push: resetting…");
+    await revokePushForCurrentDevice();   // deletes token doc + deleteToken()
+    await enablePush();                   // registers SW + gets fresh token + stores it
+    setStatus(pushStatus, "Push: enabled (reset).");
+  }catch(e){
+    showError(e);
+  }
+};
+ 
 hangupBtn.onclick = ()=> hangup().catch(showError);
 
 /* C-lite directory buttons */
@@ -1728,6 +1741,8 @@ broadcastNewOwner(user.uid);
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
     testSoundBtn.disabled = false;
+     resetPushBtn.disabled = false;
+
 await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
@@ -1760,6 +1775,7 @@ await rotateFcmTokenIfUserChanged();
     stopAll();
 
     testSoundBtn.disabled = true;
+    resetPushBtn.disabled = true;
 
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
