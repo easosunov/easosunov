@@ -1393,7 +1393,7 @@ async function catchUpMissedCallNotification() {
             body,
             tag: `webrtc-missed-${myUid}`,
             renotify: true,
-            requireInteraction: false,
+            requireInteraction: true,
             data: { callId, roomId: call.roomId || "", fromName, note }
           });
         }
