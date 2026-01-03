@@ -1,5 +1,6 @@
 /* firebase-messaging-sw.js
    Option 2 (newest ringing call only) + replace tag + local time + caller note
+   - Works whether FCM arrives via Firebase handler OR raw push event
    - Uses Firestore in SW to ignore older queued pushes (prevents burst on restart)
    - Shows notification ONLY if callId is newest ringing call for this toUid
    - Body includes: Call from X — note — LOCAL timestamp
@@ -18,23 +19,30 @@ firebase.initializeApp({
   appId: "1:100169991412:web:27ef6820f9a59add6b4aa1",
 });
 
-firebase.messaging(); // initialized (ok even if unused directly)
+const messaging = firebase.messaging();
 const db = firebase.firestore();
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
+// -------- helpers --------
+
 function extractData(payload) {
-  return (
+  // Handles several real-world shapes
+  const d =
     payload?.data ||
     payload?.message?.data ||
-    payload?.notification?.data ||
     payload?.message?.notification?.data ||
-    {}
-  );
+    payload?.notification?.data ||
+    {};
+  return d || {};
 }
 
-// Newest ringing call for this user (fail-open if we cannot query)
+/**
+ * Returns newest "ringing" callId for toUid, or:
+ * - null if none
+ * - "__unknown__" if query fails (fail-open)
+ */
 async function getNewestRingingCallIdFor(toUid) {
   try {
     if (!toUid) return null;
@@ -50,7 +58,7 @@ async function getNewestRingingCallIdFor(toUid) {
     if (snap.empty) return null;
     return snap.docs[0].id;
   } catch (e) {
-    // If Firestore query fails (index/rules/offline), fail-open
+    // Missing index / rules / offline / etc -> fail-open
     return "__unknown__";
   }
 }
@@ -59,7 +67,7 @@ async function showCallNotification(data) {
   data = data || {};
 
   const callId = String(data.callId || "");
-  if (!callId) return;
+  if (!callId) return; // ignore non-call pushes
 
   const toUid    = String(data.toUid || "");
   const roomId   = String(data.roomId || "");
@@ -67,13 +75,13 @@ async function showCallNotification(data) {
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
 
-  // Local time (from Cloud Function ms)
+  // LOCAL timestamp from sentAtMs
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single line (more reliable on Windows/Chrome)
+  // Single line is most consistent across OS/Chrome
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
@@ -90,6 +98,45 @@ async function showCallNotification(data) {
   });
 }
 
+async function handleCallDataMaybeShow(data) {
+  data = data || {};
+  const callId = String(data.callId || "");
+  if (!callId) return;
+
+  const toUid = String(data.toUid || "");
+
+  // Option 2: newest ringing call only (but fail-open if cannot query)
+  if (toUid) {
+    const newest = await getNewestRingingCallIdFor(toUid);
+
+    if (newest === "__unknown__") {
+      await showCallNotification(data);
+      return;
+    }
+    if (!newest) return;          // no ringing calls anymore
+    if (newest !== callId) return; // not newest => ignore
+  }
+
+  await showCallNotification(data);
+}
+
+// -------- delivery paths --------
+
+/**
+ * Path A: Firebase background handler (this is often the one used when Chrome is running)
+ */
+messaging.onBackgroundMessage(async (payload) => {
+  try {
+    const data = extractData(payload);
+    await handleCallDataMaybeShow(data);
+  } catch {
+    // ignore
+  }
+});
+
+/**
+ * Path B: Raw push event (this is often used when Chrome was closed / restarted)
+ */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
     if (!event.data) return;
@@ -106,28 +153,7 @@ self.addEventListener("push", (event) => {
     if (!payload) return;
 
     const data = extractData(payload);
-    const callId = String(data.callId || "");
-    const toUid  = String(data.toUid || "");
-
-    if (!callId) return;
-
-    if (toUid) {
-      const newest = await getNewestRingingCallIdFor(toUid);
-
-      // fail-open if we cannot check
-      if (newest === "__unknown__") {
-        await showCallNotification(data);
-        return;
-      }
-
-      // no ringing calls => ignore
-      if (!newest) return;
-
-      // not newest => ignore
-      if (newest !== callId) return;
-    }
-
-    await showCallNotification(data);
+    await handleCallDataMaybeShow(data);
   })());
 });
 
