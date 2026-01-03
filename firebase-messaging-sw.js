@@ -3,9 +3,6 @@
    - Option 1: show notification ONLY for the newest ringing call for this toUid (fail-open if query can't be done)
    - Option 2: use notification tag to REPLACE instead of stacking
    - Shows caller message (note) + LOCAL TIME timestamp (sentAtMs) in notification body
-   IMPORTANT:
-   - This file is for Firebase v9 compat SW (importScripts).
-   - Works with DATA-ONLY FCM pushes (no top-level "notification" in the message).
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
@@ -13,26 +10,20 @@ importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compa
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
 
 firebase.initializeApp({
-  apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
-  authDomain: "easosunov-webrtc.firebaseapp.com",
-  projectId: "easosunov-webrtc",
-  storageBucket: "easosunov-webrtc.firebasestorage.app",
-  messagingSenderId: "100169991412",
-  appId: "1:100169991412:web:27ef6820f9a59add6b4aa1",
+  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
+  authDomain:"easosunov-webrtc.firebaseapp.com",
+  projectId:"easosunov-webrtc",
+  storageBucket:"easosunov-webrtc.firebasestorage.app",
+  messagingSenderId:"100169991412",
+  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
 
+const messaging = firebase.messaging();
 const db = firebase.firestore();
-
-// Keep messaging init (not strictly required when using "push" handler, but harmless)
-firebase.messaging();
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-/**
- * Returns the newest "ringing" callId for a given toUid, or null if none.
- * If the query fails (missing index / blocked by rules / offline), returns "__unknown__" (fail-open signal).
- */
 async function getNewestRingingCallIdFor(toUid) {
   try {
     if (!toUid) return null;
@@ -47,34 +38,29 @@ async function getNewestRingingCallIdFor(toUid) {
 
     if (snap.empty) return null;
     return snap.docs[0].id;
-  } catch (e) {
-    // fail-open signal (we can't verify newest)
+  } catch {
+    // fail-open if we can't query (missing index/rules/offline)
     return "__unknown__";
   }
 }
 
-/**
- * Show a call notification, but REPLACE existing via tag (Option 2).
- * Expects data-only fields:
- * { callId, toUid, roomId, fromName, toName, note, sentAtMs, title }
- */
-async function showCallNotification(data) {
-  data = data || {};
+async function showCallNotification(payload) {
+  const data = payload?.data || {};
 
-  const callId = String(data.callId || "");
-  const toUid = String(data.toUid || "");
-  const roomId = String(data.roomId || "");
+  const callId   = String(data.callId || "");
+  const toUid    = String(data.toUid || "");
+  const roomId   = String(data.roomId || "");
   const fromName = String(data.fromName || "Unknown");
-  const toName = String(data.toName || "");
-  const note = String(data.note || "").trim();
+  const toName   = String(data.toName || "");
+  const note     = String(data.note || "").trim();
 
-  // LOCAL TIME timestamp (from caller/server)
+  // LOCAL TIME from caller/server ms
   const tsMs = Number(data.sentAtMs || Date.now());
   const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
   const title = String(data.title || "Incoming call");
 
-  // Single line (most reliable across platforms)
+  // Single line is most reliable cross-platform
   const body =
     `Call from ${fromName}` +
     (note ? ` — ${note}` : "") +
@@ -88,83 +74,47 @@ async function showCallNotification(data) {
     data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
     requireInteraction: true,
     tag,
-    renotify: false,
+    renotify: false
   };
 
   await self.registration.showNotification(title, options);
 }
 
 /**
- * Parse push event payload robustly.
- * Works with common shapes:
- *  - { data: {...} }
- *  - { message: { data: {...} } }
- *  - { message: { notification: { data: {...} } } }
+ * MAIN: Firebase background message handler
+ * Works reliably with Firebase Messaging on web.
  */
-async function parsePushEventData(event) {
-  if (!event || !event.data) return null;
-
-  // Try JSON first (await!)
-  try {
-    if (typeof event.data.json === "function") {
-      const payload = await event.data.json();
-      const data =
-        payload?.data ||
-        payload?.message?.data ||
-        payload?.message?.notification?.data ||
-        null;
-      if (data) return data;
-    }
-  } catch {}
-
-  // Fallback: text -> JSON
-  try {
-    if (typeof event.data.text === "function") {
-      const txt = await event.data.text();
-      if (!txt) return null;
-      const payload = JSON.parse(txt);
-      const data =
-        payload?.data ||
-        payload?.message?.data ||
-        payload?.message?.notification?.data ||
-        null;
-      if (data) return data;
-    }
-  } catch {}
-
-  return null;
-}
-
-/**
- * MAIN push handler (works for data-only messages).
- */
-self.addEventListener("push", (event) => {
-  event.waitUntil((async () => {
-    const data = await parsePushEventData(event);
-    if (!data) return;
-
+messaging.onBackgroundMessage((payload) => {
+  eventWaitUntil(async () => {
+    const data = payload?.data || {};
     const callId = data.callId || null;
-    const toUid = data.toUid || null;
-    if (!callId) return; // Not a call push
+    const toUid  = data.toUid  || null;
 
-    // Option 1: only notify for newest ringing call (fail-open if can't check)
+    if (!callId) return;
+
+    // Option 1: only newest ringing call
     if (toUid) {
       const newest = await getNewestRingingCallIdFor(toUid);
 
-      // fail-open: still show if we can't query Firestore
+      // fail-open if we can't check
       if (newest !== "__unknown__") {
-        if (!newest) return; // no ringing calls anymore
-        if (newest !== callId) return; // not the newest -> ignore
+        if (!newest) return;
+        if (newest !== callId) return;
       }
     }
 
-    await showCallNotification(data);
-  })());
+    await showCallNotification(payload);
+  });
 });
 
-/**
- * Open the web app on notification click.
- */
+function eventWaitUntil(fn) {
+  try {
+    return Promise.resolve().then(fn);
+  } catch {
+    return Promise.resolve();
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
