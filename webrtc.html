@@ -106,6 +106,28 @@ select{
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
+/* This media query will only apply styles for mobile screens (max-width: 720px) */
+@media (max-width: 720px) {
+  body {
+    font-size: 18px; /* Larger font size for body text */
+  }
+
+  h1 {
+    font-size: 24px; /* Increase header size */
+  }
+
+  h2 {
+    font-size: 20px; /* Larger sub-header size */
+  }
+
+  p, .status, .small {
+    font-size: 16px; /* Increase font size for paragraphs, status text, and small text */
+  }
+
+  .button {
+    font-size: 16px; /* Increase font size for buttons */
+  }
+}
 
 </style>
 </head>
