@@ -77,6 +77,35 @@ select{
   padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%;
   background:#fff;
 }
+ /* ===== BOTTOM PANEL LAYOUT ===== */
+.bottomPanel{
+  margin-top:12px;
+  border:1px solid #ddd;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+
+.bottomGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:12px;
+}
+
+.bottomCard{
+  border:1px solid #eee;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+
+@media (max-width: 980px){
+  .bottomGrid{ grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px){
+  .bottomGrid{ grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 
@@ -129,55 +158,25 @@ select{
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don’t hear yourself.</div>
-<div style="margin-top:8px;display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
   <button id="hangupBtn" disabled>Hang up</button>
 
-  <div style="display:flex;flex-direction:column;gap:4px">
-    <div class="status" id="myNameStatus">Not set.</div>
-    <div class="status" id="pushStatus">Push: not enabled.</div>
-    <div class="status" id="dirCallStatus">Idle.</div>
-  </div>
- <div style="margin-top:10px">
-  <div class="small">Message to send with call (optional)</div>
-  <input
-    id="callNoteInput"
-    placeholder="e.g. Let us talk at 3 pm"
-    maxlength="140"
-  />
-  <div class="small" style="color:#777">
-    This text will appear in the notification for Person B.
+  <div>
+    <div class="small">Message to send with call (optional)</div>
+    <input
+      id="callNoteInput"
+      placeholder="e.g. Let us talk at 3 pm"
+      maxlength="140"
+    />
+    <div class="small" style="color:#777">
+      This text will appear in the notification for Person B.
+    </div>
   </div>
 </div>
 
-</div>
 
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
-      <!-- ===== NEW: Video quality selector (Location A) ===== -->
-      <div class="small">Video quality</div>
-      <select id="videoQualitySelect" disabled>
-        <option value="low">Low (360p)</option>
-        <option value="medium" selected>Medium (720p)</option>
-        <option value="high">High (1080p)</option>
-      </select>
-      <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
-      <div class="small">Tip: Choose before clicking <b>Start</b>. You can also change during a call.</div>
-
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
-      <div class="small">Your display name (shown to other users)</div>
-      <input id="myNameInput" placeholder="e.g. Alex"/>
-
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="saveNameBtn" disabled>Save Name</button>
-        <button id="testSoundBtn" disabled>Test Ring Sound</button>
-        <button id="resetPushBtn" disabled>Reset Push</button>
-      </div>
-
-      <div class="small" style="margin-top:8px;color:#777">
-        Tip: both users must be signed in and have this page open (unless push is implemented end-to-end via Cloud Functions).
-      </div>
     </div>
 
     <!-- RIGHT: Person B video + directory list -->
@@ -191,44 +190,90 @@ select{
       <div class="small">All allowed users</div>
       <input id="userSearchInput" placeholder="Search users…" />
       <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="refreshUsersBtn" disabled>Refresh Users</button>
-      </div>
+   
     </div>
 
   </div>
 
-  <!-- ORIGINAL STEPS -->
-  <div class="row" style="margin-top:12px">
-    <div class="card">
-      <b>Step 1</b><br/><br/>
-      <button id="startBtn" disabled>Start</button>
-      <div class="status" id="mediaStatus">Not started.</div>
+<!-- ===== BOTTOM PANEL (everything except A hangup+note and B users list) ===== -->
+<div class="bottomPanel">
+  <div class="bottomGrid">
+
+    <!-- Status / Push -->
+    <div class="bottomCard">
+      <b>Status</b>
+      <div class="status" id="myNameStatus">Not set.</div>
+      <div class="status" id="pushStatus">Push: not enabled.</div>
+      <div class="status" id="dirCallStatus">Idle.</div>
     </div>
 
-    <div class="card">
-      <b>Step 2</b><br/><br/>
-      <button id="createBtn" disabled>Create Room</button>
-      <button id="joinBtn" disabled>Join Room</button>
-      <div class="small" style="margin-top:8px">Room ID</div>
+    <!-- Video Quality -->
+    <div class="bottomCard">
+      <b>Video quality</b>
+      <div class="small">Choose before Start (you can change during a call).</div>
+      <select id="videoQualitySelect" disabled>
+        <option value="low">Low (360p)</option>
+        <option value="medium" selected>Medium (720p)</option>
+        <option value="high">High (1080p)</option>
+      </select>
+      <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
+    </div>
+
+    <!-- Profile -->
+    <div class="bottomCard">
+      <b>Your name</b>
+      <div class="small">Shown to other users.</div>
+      <input id="myNameInput" placeholder="e.g. Alex"/>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="saveNameBtn" disabled>Save Name</button>
+      </div>
+    </div>
+
+    <!-- Call / Room -->
+    <div class="bottomCard">
+      <b>Call controls</b>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="startBtn" disabled>Start</button>
+        <button id="createBtn" disabled>Create Room</button>
+        <button id="joinBtn" disabled>Join Room</button>
+      </div>
+      <div class="status" id="mediaStatus">Not started.</div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <div class="small">Room ID</div>
       <input id="roomId" placeholder="Room ID"/>
-      <div style="margin-top:8px">
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
         <button id="copyLinkBtn" disabled>Copy Invite</button>
       </div>
+
       <div class="status" id="callStatus">No room yet.</div>
       <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
     </div>
-  </div>
 
-  <div class="card" style="margin-top:12px">
-    <button id="diagBtn">Diagnostics</button>
-    <div class="diagActions">
-      <button id="copyDiagBtn" disabled>Copy log</button>
-      <button id="clearDiagBtn" disabled>Clear log</button>
+    <!-- Utilities -->
+    <div class="bottomCard">
+      <b>Utilities</b>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="testSoundBtn" disabled>Test Ring Sound</button>
+        <button id="resetPushBtn" disabled>Reset Push</button>
+        <button id="refreshUsersBtn" disabled>Refresh Users</button>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <button id="diagBtn">Diagnostics</button>
+      <div class="diagActions">
+        <button id="copyDiagBtn" disabled>Copy log</button>
+        <button id="clearDiagBtn" disabled>Clear log</button>
+      </div>
+      <pre id="diagBox"></pre>
+      <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
     </div>
-    <pre id="diagBox"></pre>
-    <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
+
   </div>
+</div>
+
 </div>
 
 <script type="module">
@@ -1771,7 +1816,7 @@ function renderUsersList(filterText=""){
     div.style.padding = "10px";
 
     const left = document.createElement("div");
-    left.innerHTML = `<b>${u.displayName || "(no name)"}</b><div class="small" style="color:#666">${u.uid}</div>`;
+    left.innerHTML = `<b>${u.displayName || "(no name)"}</b>`;
 
     const btn = document.createElement("button");
     btn.textContent = "Call";
