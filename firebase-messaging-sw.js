@@ -75,11 +75,7 @@ const body =
 
   const title = String(data.title || "Incoming call");
 
-  // Single line is most reliable across Windows notification UI
-  const body =
-    `Call from ${fromName}` +
-    (note ? ` — ${note}` : "") +
-    (tsLocal ? ` — ${tsLocal}` : "");
+ 
 
   // Per-user tag so we don't stack endlessly
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
