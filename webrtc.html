@@ -690,6 +690,7 @@ logoutBtn.onclick = async () => {
     const toName = qs.get("toName");
 
     if(callId && roomId){
+      console.log('Incoming call details:', data.fromName, data.toName);
       incomingText.textContent = `Incoming call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
       incomingOverlay.style.display = "flex";
       if (typeof startRingtone === "function") startRingtone();
