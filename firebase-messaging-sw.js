@@ -73,8 +73,7 @@ const body =
   (note ? ` — ${note}` : "") +
   (tsLocal ? ` — ${tsLocal}` : "");  // Include timestamp in body
 
-  const title = String(data.title || "Incoming call");
-
+  
  
 
   // Per-user tag so we don't stack endlessly
