@@ -62,8 +62,16 @@ async function showCallNotification(data) {
   const note     = String(data.note || "").trim();
 
   // LOCAL time on Person B computer
-  const tsMs = Number(data.sentAtMs || Date.now());
-  const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+// LOCAL time on Person B computer
+const tsMs = Number(data.sentAtMs || Date.now());  // Ensure sentAtMs is used
+const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+
+// Notification title and body
+const title = String(data.title || "Incoming call");
+const body =
+  `Call from ${fromName}` +
+  (note ? ` — ${note}` : "") +
+  (tsLocal ? ` — ${tsLocal}` : "");  // Include timestamp in body
 
   const title = String(data.title || "Incoming call");
 
