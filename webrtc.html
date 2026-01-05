@@ -1916,12 +1916,16 @@ const callRef = await addDoc(collection(db,"calls"), {
   // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
 try {
   const messagePayload = {
-    toUid, // Callee's UID
-    callId: callRef.id,
-    fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
-    note: note,
-    timestamp: new Date().toLocaleString(), // Adding timestamp
-  };
+  toUid,          // Callee's UID
+  callId: callRef.id,
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+  note: note,
+  timestamp: new Date().toLocaleString(), // Adding timestamp
+  sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
+};
+
+await sendIncomingCallNotification(messagePayload);
+
 
   // Trigger the push notification for incoming call
   await sendIncomingCallNotification(messagePayload);
