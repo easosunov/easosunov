@@ -690,7 +690,7 @@ logoutBtn.onclick = async () => {
     const toName = qs.get("toName");
 
     if(callId && roomId){
-      incomingText.textContent = `Call from ${fromName || "unknown"}…`;
+      incomingText.textContent = `Incoming call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
       incomingOverlay.style.display = "flex";
       if (typeof startRingtone === "function") startRingtone();
 
@@ -1517,9 +1517,10 @@ async function catchUpMissedCallNotification() {
         const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
         if (reg) {
           const body =
-            `Missed call from ${fromName}` +
-            (note ? ` — ${note}` : "") +
-            ` — ${tsLocal}`;
+    `Missed call from ${fromName} to ${toName || "you"}` +
+    (note ? ` — ${note}` : "") +
+    ` — ${tsLocal}`;
+
 
           await reg.showNotification("Missed call", {
             body,
