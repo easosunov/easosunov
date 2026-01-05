@@ -116,7 +116,54 @@ select{
   body {
     font-size: 18px; /* Larger font size for body text */
   }
+/* iPhone-specific adjustments */
+@media (max-width: 428px) { /* iPhone 14 Pro Max */
+  body {
+    font-size: 16px;
+    margin: 12px;
+  }
+  
+  h1 {
+    font-size: 22px;
+  }
+  
+  .videos {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .card {
+    padding: 10px;
+  }
+  
+  video {
+    aspect-ratio: 4/3; /* Better for mobile */
+  }
+  
+  button {
+    padding: 12px 14px; /* Larger touch targets */
+    font-size: 16px;
+  }
+  
+  /* Stack bottom panel vertically */
+  .bottomGrid {
+    grid-template-columns: 1fr !important;
+  }
+}
 
+/* Safari-specific fixes */
+@supports (-webkit-touch-callout: none) {
+  /* Safari-only CSS */
+  input, select, button {
+    -webkit-appearance: none;
+    border-radius: 10px;
+  }
+  
+  /* Prevent zoom on input focus */
+  input, select {
+    font-size: 16px;
+  }
+}
   h1 {
     font-size: 24px; /* Increase header size */
   }
