@@ -1913,7 +1913,25 @@ const callRef = await addDoc(collection(db,"calls"), {
 
 
   activeCallId = callRef.id;
-  
+  // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
+try {
+  const messagePayload = {
+  toUid,          // Callee's UID
+  callId: callRef.id,
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+  note: note,
+  timestamp: new Date().toLocaleString(), // Adding timestamp
+  sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
+};
+
+await sendIncomingCallNotification(messagePayload);
+
+
+  // Trigger the push notification for incoming call
+  await sendIncomingCallNotification(messagePayload);
+} catch (e) {
+  console.error("Error sending incoming call push notification:", e);
+}
 
   hangupBtn.disabled = false;
 
@@ -1923,6 +1941,36 @@ const callRef = await addDoc(collection(db,"calls"), {
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
  startRingback();
  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+ sendIncomingCallNotification({
+  callId: callRef.id,    // the unique call identifier
+  fromName: myDisplayName, // the caller's name
+  toUid: toUid,           // the recipient's UID
+  note: note,             // the optional note/message
+  roomId: created.roomId, // the unique room ID
+});
+
+ // NEW: Function to send incoming call push notification
+async function sendIncomingCallNotification(message) {
+  try {
+    const response = await fetch("/easosunov/sendIncomingPush", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to send incoming call push notification");
+    }
+
+    const data = await response.json();
+    console.log("Incoming call push notification sent:", data);
+  } catch (error) {
+    console.error("Error sending incoming call notification:", error);
+  }
+}
+
 }
 
 
