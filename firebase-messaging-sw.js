@@ -1,11 +1,4 @@
-/* firebase-messaging-sw.js (RELIABLE: note + LOCAL timestamp + popup every call)
-   - Works when Chrome is running even if page is closed
-   - Handles BOTH delivery paths:
-       A) messaging.onBackgroundMessage (Firebase path)
-       B) self.addEventListener("push") (raw push path)
-   - Uses a per-user tag BUT forces a popup by closing old notifications first
-   - Includes caller note + LOCAL time in body
-*/
+/* firebase-messaging-sw.js - UPDATED FOR iOS COMPATIBILITY */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
@@ -21,8 +14,11 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// --- tiny in-memory dedupe (prevents double popups if both handlers fire) ---
-const recentlyShown = new Map(); // callId -> ms
+// === iOS FIX === Detect iOS
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+// === iOS FIX === Use different notification strategies for iOS
+const recentlyShown = new Map();
 const DEDUPE_MS = 4000;
 
 function extractData(payload) {
@@ -37,7 +33,6 @@ function extractData(payload) {
 
 function shouldDedupe(callId) {
   const now = Date.now();
-  // purge old
   for (const [k, t] of recentlyShown.entries()) {
     if (now - t > DEDUPE_MS) recentlyShown.delete(k);
   }
@@ -60,48 +55,82 @@ async function showCallNotification(data) {
   const fromName = String(data.fromName || "Unknown");
   const toName   = String(data.toName || "");
   const note     = String(data.note || "").trim();
+  const tsMs     = Number(data.sentAtMs || Date.now());
+  const tsLocal  = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
-  // LOCAL time on Person B computer
-// LOCAL time on Person B computer
-const tsMs = Number(data.sentAtMs || Date.now());  // Ensure sentAtMs is used
-const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+  // === iOS FIX === Different title/body format for iOS
+  const title = isIOS ? `📞 Call from ${fromName}` : "Incoming call";
+  const body = isIOS 
+    ? (note ? `${note}` : "Tap to answer")
+    : `Call from ${fromName}` + (note ? ` — ${note}` : "") + (tsLocal ? ` — ${tsLocal}` : "");
 
-// Notification title and body
-const title = String(data.title || "Incoming call");
-const body =
-  `Call from ${fromName}` +
-  (note ? ` — ${note}` : "") +
-  (tsLocal ? ` — ${tsLocal}` : "");  // Include timestamp in body
-
-  
- 
-
-  // Per-user tag so we don't stack endlessly
+  // Per-user tag
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
 
-  // IMPORTANT: force a new popup every time by closing previous with same tag
+  // === iOS FIX === Different notification options for iOS
+  const notificationOptions = {
+    body,
+    tag,
+    renotify: true,
+    requireInteraction: true,
+    timestamp: Number.isFinite(tsMs) ? tsMs : undefined,
+    icon: '/easosunov/icons/RTC192.png',
+    badge: '/easosunov/icons/RTC192.png',
+    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
+    
+    // === iOS FIX === Add actions for iOS (won't work in web, but included for future native wrapper)
+    actions: isIOS ? [
+      { action: 'answer', title: 'Answer' },
+      { action: 'decline', title: 'Decline' }
+    ] : []
+  };
+
+  // Close previous notifications
   try {
     const existing = await self.registration.getNotifications({ tag });
     for (const n of existing) n.close();
   } catch {}
 
-  await self.registration.showNotification(title, {
-    body,
-    tag,
-    renotify: true,              // re-alert if the OS treats it as a replacement
-    requireInteraction: true,    // keep it visible until user acts
-    timestamp: Number.isFinite(tsMs) ? tsMs : undefined,
+  // === iOS FIX === Use different notification strategy for iOS
+  if (isIOS) {
+    // iOS: Always show with vibration pattern
+    notificationOptions.vibrate = [200, 100, 200, 100, 200];
+    notificationOptions.silent = false;
+  }
 
-    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
-  });
+  await self.registration.showNotification(title, notificationOptions);
+  
+  // === iOS FIX === For iOS, also send a message to all clients
+  if (isIOS) {
+    try {
+      const clients = await self.clients.matchAll();
+      clients.forEach(client => {
+        client.postMessage({
+          type: 'INCOMING_CALL',
+          callId,
+          fromName,
+          roomId,
+          note
+        });
+      });
+    } catch {}
+  }
 }
 
 /**
- * Path A: Firebase background handler (often used when Chrome is running)
+ * Path A: Firebase background handler
  */
 messaging.onBackgroundMessage(async (payload) => {
   try {
     const data = extractData(payload);
+    
+    // === iOS FIX === For iOS, we need to handle foreground/background differently
+    if (isIOS) {
+      // iOS often doesn't fire onBackgroundMessage reliably
+      // Use both handlers
+      console.log('[iOS] Firebase background message:', data.callId);
+    }
+    
     await showCallNotification(data);
   } catch {
     // ignore
@@ -109,7 +138,7 @@ messaging.onBackgroundMessage(async (payload) => {
 });
 
 /**
- * Path B: Raw push event (sometimes used depending on browser state)
+ * Path B: Raw push event
  */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
@@ -127,6 +156,12 @@ self.addEventListener("push", (event) => {
     if (!payload) return;
 
     const data = extractData(payload);
+    
+    // === iOS FIX === Log for debugging
+    if (isIOS) {
+      console.log('[iOS] Raw push event:', data.callId);
+    }
+    
     await showCallNotification(data);
   })());
 });
@@ -137,11 +172,38 @@ self.addEventListener("notificationclick", (event) => {
   const d = event.notification.data || {};
   const url = new URL("/easosunov/webrtc.html", self.location.origin);
 
+  // === iOS FIX === Handle action buttons
+  if (event.action === 'answer') {
+    url.searchParams.set("autoAnswer", "true");
+  } else if (event.action === 'decline') {
+    url.searchParams.set("autoDecline", "true");
+  }
+
   if (d.callId) url.searchParams.set("callId", d.callId);
   if (d.roomId) url.searchParams.set("roomId", d.roomId);
   if (d.fromName) url.searchParams.set("fromName", d.fromName);
   if (d.toName) url.searchParams.set("toName", d.toName);
   if (d.note) url.searchParams.set("note", d.note);
 
-  event.waitUntil(self.clients.openWindow(url.toString()));
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then((clientList) => {
+      // Check if there's already a window/tab open
+      for (const client of clientList) {
+        if (client.url.includes('/easosunov/') && 'focus' in client) {
+          client.navigate(url.toString());
+          return client.focus();
+        }
+      }
+      // If no client is open, open a new window
+      return self.clients.openWindow(url.toString());
+    })
+  );
+});
+
+// === iOS FIX === Listen for messages from web page
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
