@@ -1,14 +1,13 @@
-/* firebase-messaging-sw.js (RELIABLE: note + LOCAL timestamp + popup every call)
+/* firebase-messaging-sw.js (ENHANCED: Direct Firestore Listener)
    - Works when Chrome is running even if page is closed
-   - Handles BOTH delivery paths:
-       A) messaging.onBackgroundMessage (Firebase path)
-       B) self.addEventListener("push") (raw push path)
-   - Uses a per-user tag BUT forces a popup by closing old notifications first
-   - Includes caller note + LOCAL time in body
+   - Listens to Firestore directly for incoming calls
+   - Shows notifications even when browser is closed
+   - Uses per-user tag to avoid duplicate notifications
 */
 
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
 
 firebase.initializeApp({
   apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
@@ -20,24 +19,141 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+const firestore = firebase.firestore();
 
-// --- tiny in-memory dedupe (prevents double popups if both handlers fire) ---
+// --- In-memory state ---
 const recentlyShown = new Map(); // callId -> ms
 const DEDUPE_MS = 4000;
+let currentUid = null;
+let unsubscribeCallListener = null;
 
-function extractData(payload) {
-  return (
-    payload?.data ||
-    payload?.message?.data ||
-    payload?.notification?.data ||
-    payload?.message?.notification?.data ||
-    {}
-  );
+// Message channel to communicate with web page
+const messageChannel = new BroadcastChannel('sw_firestore_channel');
+
+// Listen for messages from web page (when user logs in/out)
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  
+  if (data.type === 'SET_UID') {
+    currentUid = data.uid;
+    console.log('[SW] UID set:', currentUid);
+    
+    // Start listening for calls for this user
+    startFirestoreListener(data.uid);
+  }
+  
+  if (data.type === 'CLEAR_UID') {
+    currentUid = null;
+    console.log('[SW] UID cleared');
+    
+    // Stop listening
+    if (unsubscribeCallListener) {
+      unsubscribeCallListener();
+      unsubscribeCallListener = null;
+    }
+  }
+});
+
+// Start listening to Firestore for incoming calls
+function startFirestoreListener(uid) {
+  // Stop any existing listener
+  if (unsubscribeCallListener) {
+    unsubscribeCallListener();
+  }
+  
+  if (!uid) return;
+  
+  console.log('[SW] Starting Firestore listener for UID:', uid);
+  
+  try {
+    // Listen for incoming calls addressed to this UID
+    const callsQuery = firestore
+      .collection('calls')
+      .where('toUid', '==', uid)
+      .where('status', '==', 'ringing');
+    
+    unsubscribeCallListener = callsQuery.onSnapshot(
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const callData = change.doc.data();
+            const callId = change.doc.id;
+            
+            console.log('[SW] Firestore new call detected:', callId);
+            
+            // Check if web page is already showing this call
+            checkIfPageHandled(callId, callData).then((pageHandled) => {
+              if (!pageHandled) {
+                // Web page isn't handling it, show notification
+                showCallNotification({
+                  callId: callId,
+                  toUid: uid,
+                  roomId: callData.roomId,
+                  fromName: callData.fromName || 'Unknown',
+                  toName: callData.toName || '',
+                  note: callData.note || '',
+                  sentAtMs: Date.now()
+                });
+                
+                // Mark as delivered in Firestore
+                markAsDelivered(callId);
+              }
+            });
+          }
+        });
+      },
+      (error) => {
+        console.error('[SW] Firestore listener error:', error);
+      }
+    );
+    
+    console.log('[SW] Firestore listener started');
+  } catch (error) {
+    console.error('[SW] Error starting Firestore listener:', error);
+  }
+}
+
+// Check if the web page is already handling this call
+async function checkIfPageHandled(callId, callData) {
+  try {
+    // Send message to web page to check
+    messageChannel.postMessage({
+      type: 'CHECK_CALL',
+      callId: callId,
+      data: callData
+    });
+    
+    // Wait a bit to see if web page responds
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Check if call has been marked as delivered
+    const callDoc = await firestore.collection('calls').doc(callId).get();
+    if (callDoc.exists) {
+      const call = callDoc.data();
+      return !!call.deliveredAt;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[SW] Error checking if page handled:', error);
+    return false;
+  }
+}
+
+// Mark call as delivered in Firestore
+function markAsDelivered(callId) {
+  firestore.collection('calls').doc(callId).update({
+    deliveredAt: firebase.firestore.FieldValue.serverTimestamp(),
+    deliveredVia: 'service_worker',
+    deliveredAtMs: Date.now()
+  }).catch(error => {
+    console.error('[SW] Error marking as delivered:', error);
+  });
 }
 
 function shouldDedupe(callId) {
   const now = Date.now();
-  // purge old
+  // purge old entries
   for (const [k, t] of recentlyShown.entries()) {
     if (now - t > DEDUPE_MS) recentlyShown.delete(k);
   }
@@ -62,19 +178,15 @@ async function showCallNotification(data) {
   const note     = String(data.note || "").trim();
 
   // LOCAL time on Person B computer
-// LOCAL time on Person B computer
-const tsMs = Number(data.sentAtMs || Date.now());  // Ensure sentAtMs is used
-const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+  const tsMs = Number(data.sentAtMs || Date.now());
+  const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
 
-// Notification title and body
-const title = String(data.title || "Incoming call");
-const body =
-  `Call from ${fromName}` +
-  (note ? ` — ${note}` : "") +
-  (tsLocal ? ` — ${tsLocal}` : "");  // Include timestamp in body
-
-  
- 
+  // Notification title and body
+  const title = "📞 Incoming Call";
+  const body =
+    `Call from ${fromName}` +
+    (note ? ` — ${note}` : "") +
+    (tsLocal ? ` — ${tsLocal}` : "");
 
   // Per-user tag so we don't stack endlessly
   const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
@@ -91,25 +203,35 @@ const body =
     renotify: true,              // re-alert if the OS treats it as a replacement
     requireInteraction: true,    // keep it visible until user acts
     timestamp: Number.isFinite(tsMs) ? tsMs : undefined,
+    icon: '/easosunov/icon.png', // Make sure you have this icon
 
-    data: { callId, toUid, roomId, fromName, toName, note, sentAtMs: String(tsMs) },
+    data: { 
+      callId, 
+      toUid, 
+      roomId, 
+      fromName, 
+      toName, 
+      note, 
+      sentAtMs: String(tsMs),
+      source: 'service_worker_firestore'
+    },
   });
 }
 
 /**
- * Path A: Firebase background handler (often used when Chrome is running)
+ * Path A: Firebase background handler (FCM push)
  */
 messaging.onBackgroundMessage(async (payload) => {
   try {
-    const data = extractData(payload);
+    const data = payload?.data || payload?.message?.data || {};
     await showCallNotification(data);
-  } catch {
-    // ignore
+  } catch (error) {
+    console.error('[SW] Error in onBackgroundMessage:', error);
   }
 });
 
 /**
- * Path B: Raw push event (sometimes used depending on browser state)
+ * Path B: Raw push event
  */
 self.addEventListener("push", (event) => {
   event.waitUntil((async () => {
@@ -126,7 +248,7 @@ self.addEventListener("push", (event) => {
     }
     if (!payload) return;
 
-    const data = extractData(payload);
+    const data = payload?.data || payload?.message?.data || {};
     await showCallNotification(data);
   })());
 });
@@ -145,3 +267,11 @@ self.addEventListener("notificationclick", (event) => {
 
   event.waitUntil(self.clients.openWindow(url.toString()));
 });
+
+// Clean up on service worker shutdown
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activated');
+  event.waitUntil(self.clients.claim());
+});
+
+console.log('[SW] Enhanced Service Worker loaded with Firestore listener');
