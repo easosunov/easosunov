@@ -273,19 +273,20 @@ select{
       <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
     </div>
 
-    <!-- Utilities -->
-   <div class="bottomCard">
-  <b>Background Notifier</b>
-  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="startBgBtn" disabled>Start Background Service</button>
-    <button id="stopBgBtn" disabled>Stop Background Service</button>
-  </div>
-  <div class="status" id="bgStatus">Status: Not connected</div>
-  <div class="small">
-    Runs in system tray to show notifications when browser is closed.
-    <a href="#" id="downloadBgLink">Download background app</a>
-  </div>
-</div>
+    <!-- Background Service -->
+    <div class="bottomCard">
+      <b>Background Notifications</b>
+      <div class="status" id="swStatus">Service Worker: Loading...</div>
+      <div class="small">
+        Notifications work even when browser is closed.<br>
+        <span id="swCapabilities"></span>
+      </div>
+      
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="testSwBtn" disabled>Test Service Worker</button>
+        <button id="updateSwBtn">Update Service Worker</button>
+      </div>
+    </div>
    
     <div class="bottomCard">
       <b>Utilities</b>
@@ -397,6 +398,60 @@ async function ensureServiceWorkerInstalled() {
 // RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
 
+// ===============================
+// SERVICE WORKER COMMUNICATION
+// ===============================
+const swMessageChannel = new BroadcastChannel('sw_firestore_channel');
+
+// Send UID to Service Worker when user logs in
+function notifyServiceWorkerOfAuth(uid) {
+  if (swMessageChannel) {
+    swMessageChannel.postMessage({
+      type: 'SET_UID',
+      uid: uid
+    });
+    logDiag('Notified Service Worker of UID: ' + uid);
+  }
+  
+  // Also try to send via postMessage to the SW directly
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({
+      type: 'SET_UID',
+      uid: uid
+    });
+  }
+}
+
+// Clear UID when user logs out
+function notifyServiceWorkerOfLogout() {
+  if (swMessageChannel) {
+    swMessageChannel.postMessage({
+      type: 'CLEAR_UID'
+    });
+    logDiag('Notified Service Worker to clear UID');
+  }
+}
+
+// Listen for messages from Service Worker
+if (swMessageChannel) {
+  swMessageChannel.onmessage = (event) => {
+    const data = event.data || {};
+    
+    if (data.type === 'CHECK_CALL') {
+      // Service Worker is checking if we're handling this call
+      const callId = data.callId;
+      
+      // If we're currently showing this call, respond
+      if (currentIncomingCall?.id === callId) {
+        swMessageChannel.postMessage({
+          type: 'CALL_HANDLED',
+          callId: callId
+        });
+      }
+    }
+  };
+}
+
  const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 
 /* ======== CONFIG ======== */
@@ -458,11 +513,11 @@ const callNoteInput = document.getElementById("callNoteInput");
 const videoQualitySelect = document.getElementById("videoQualitySelect");
 const videoQualityStatus = document.getElementById("videoQualityStatus");
 
-// Background service elements
-const startBgBtn = document.getElementById('startBgBtn');
-const stopBgBtn = document.getElementById('stopBgBtn');
-const bgStatus = document.getElementById('bgStatus');
-const downloadBgLink = document.getElementById('downloadBgLink');
+// Service Worker elements
+const swStatus = document.getElementById('swStatus');
+const swCapabilities = document.getElementById('swCapabilities');
+const testSwBtn = document.getElementById('testSwBtn');
+const updateSwBtn = document.getElementById('updateSwBtn');
 
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -572,119 +627,116 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ================== BACKGROUND SERVICE ================== */
-// Test if background service is running
-async function checkBackgroundService() {
+/* ================== SERVICE WORKER ENHANCEMENTS ================== */
+
+// Test Service Worker functionality
+async function testServiceWorker() {
   try {
-    const response = await fetch('http://localhost:3000/status', { 
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await response.json();
-    return data;
+    swStatus.textContent = 'Testing Service Worker...';
+    
+    if (!('serviceWorker' in navigator)) {
+      swStatus.textContent = '❌ Service Worker not supported';
+      return;
+    }
+    
+    const registration = await navigator.serviceWorker.getRegistration('/easosunov/');
+    if (!registration) {
+      swStatus.textContent = '❌ No Service Worker registered';
+      return;
+    }
+    
+    // Check if Service Worker is controlling the page
+    if (navigator.serviceWorker.controller) {
+      swStatus.textContent = '✅ Service Worker active';
+    } else {
+      swStatus.textContent = '⚠️ Service Worker registered but not controlling';
+    }
+    
+    // Check capabilities
+    const capabilities = [];
+    if ('Notification' in window) capabilities.push('Notifications');
+    if ('PushManager' in window) capabilities.push('Push API');
+    if ('indexedDB' in window) capabilities.push('Storage');
+    
+    swCapabilities.textContent = 'Capabilities: ' + capabilities.join(', ');
+    
   } catch (error) {
-    // Service is not running or not reachable
-    return { isRunning: false, uid: null };
+    swStatus.textContent = '❌ Test failed: ' + error.message;
+    logDiag('Service Worker test error: ' + error.message);
   }
 }
 
-// Start background service
-async function startBackgroundService() {
-  if (!isAuthed || !myUid) {
-    alert('Please sign in first');
-    return;
+// Update Service Worker
+async function updateServiceWorker() {
+  try {
+    swStatus.textContent = 'Updating Service Worker...';
+    
+    if (!('serviceWorker' in navigator)) {
+      swStatus.textContent = '❌ Service Worker not supported';
+      return;
+    }
+    
+    const registration = await navigator.serviceWorker.getRegistration('/easosunov/');
+    if (!registration) {
+      swStatus.textContent = '❌ No Service Worker to update';
+      return;
+    }
+    
+    await registration.update();
+    swStatus.textContent = '✅ Service Worker updated';
+    
+    // Reload to activate new SW
+    setTimeout(() => {
+      if (confirm('Service Worker updated. Reload page to activate?')) {
+        location.reload();
+      }
+    }, 1000);
+    
+  } catch (error) {
+    swStatus.textContent = '❌ Update failed: ' + error.message;
+    logDiag('Service Worker update error: ' + error.message);
   }
+}
+
+// Check Service Worker status periodically
+async function checkServiceWorkerStatus() {
+  if (!isAuthed) return;
   
   try {
-    bgStatus.textContent = 'Connecting to background service...';
-    
-    const response = await fetch('http://localhost:3000/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: myUid
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = '✅ Background service active';
-      startBgBtn.disabled = true;
-      stopBgBtn.disabled = false;
-      logDiag('Background service started for UID: ' + myUid);
-    } else {
-      throw new Error(data.error || 'Failed to start');
+    if (!('serviceWorker' in navigator)) {
+      swStatus.textContent = '❌ Service Worker not supported';
+      return;
     }
-  } catch (error) {
-    bgStatus.textContent = '❌ Failed to connect';
-    logDiag('Background service error: ' + error.message);
     
-    // Show helpful message
-    if (error.message.includes('fetch') || error.message.includes('network')) {
-      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
-    }
-  }
-}
-
-// Stop background service
-async function stopBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = 'Background service stopped';
-      startBgBtn.disabled = false;
-      stopBgBtn.disabled = true;
-      logDiag('Background service stopped');
-    }
-  } catch (error) {
-    logDiag('Error stopping background service: ' + error.message);
-  }
-}
-
-// Update service status
-async function updateServiceStatus() {
-  if (isAuthed) {
-    startBgBtn.disabled = false;
-    
-    try {
-      const status = await checkBackgroundService();
-      if (status.isRunning && status.uid === myUid) {
-        bgStatus.textContent = '✅ Background service active';
-        startBgBtn.disabled = true;
-        stopBgBtn.disabled = false;
+    const registration = await navigator.serviceWorker.getRegistration('/easosunov/');
+    if (registration) {
+      if (registration.active) {
+        swStatus.textContent = '✅ Background listener active';
+        testSwBtn.disabled = false;
+        
+        // Send UID to Service Worker if we're logged in
+        if (myUid) {
+          notifyServiceWorkerOfAuth(myUid);
+        }
       } else {
-        bgStatus.textContent = 'Background service ready';
-        stopBgBtn.disabled = true;
+        swStatus.textContent = '⚠️ Service Worker installing...';
       }
-    } catch (error) {
-      bgStatus.textContent = 'Background app not detected';
-      stopBgBtn.disabled = true;
+    } else {
+      swStatus.textContent = '❌ Service Worker not registered';
     }
-  } else {
-    startBgBtn.disabled = true;
-    stopBgBtn.disabled = true;
-    bgStatus.textContent = 'Sign in required';
+  } catch (error) {
+    swStatus.textContent = '❌ Check failed';
+    logDiag('SW status check error: ' + error.message);
   }
 }
 
 // Event listeners
-startBgBtn.onclick = startBackgroundService;
-stopBgBtn.onclick = stopBackgroundService;
+testSwBtn.onclick = testServiceWorker;
+updateSwBtn.onclick = updateServiceWorker;
 
-// Download link
-downloadBgLink.onclick = (e) => {
-  e.preventDefault();
-  // You can host the app somewhere or use a local path
-  const downloadUrl = 'https://your-server.com/webrtc-notifier-win32-x64.zip';
-  window.open(downloadUrl, '_blank');
-};
+// Check SW status on page load and periodically
+setTimeout(checkServiceWorkerStatus, 2000);
+setInterval(checkServiceWorkerStatus, 30000); // Check every 30 seconds
 
 /* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
 const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
@@ -838,6 +890,7 @@ logoutBtn.onclick = async () => {
   try{
     stopAll();                 // stop listeners/media/UI
     await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
+    notifyServiceWorkerOfLogout(); // <-- ADD THIS LINE
     await signOut(auth);
   }catch(e){
     showError(e);
@@ -2519,6 +2572,9 @@ onAuthStateChanged(auth, async (user)=>{
     testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
 
+    // Enable Service Worker test button
+    testSwBtn.disabled = false;
+
     await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
@@ -2535,6 +2591,9 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
+    // Send UID to Service Worker
+    notifyServiceWorkerOfAuth(myUid);
+
     // Process any pending notifications after auth
     await processPendingNotifications();
 
@@ -2545,10 +2604,6 @@ onAuthStateChanged(auth, async (user)=>{
         deliveredVia: "push_open"
       }).catch(()=>{});
     }
-
-    // Update background service status
-    updateServiceStatus();
-    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
@@ -2564,16 +2619,18 @@ onAuthStateChanged(auth, async (user)=>{
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
 
+    // Disable Service Worker test button
+    testSwBtn.disabled = true;
+
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
+
+    // Notify Service Worker of logout
+    notifyServiceWorkerOfLogout();
 
     setStatus(pushStatus, "Push: not enabled.");
     setStatus(dirCallStatus, "Idle.");
     myNameStatus.textContent = "Not set.";
-
-    bgStatus.textContent = 'Sign in required';
-    startBgBtn.disabled = true;
-    stopBgBtn.disabled = true;
 
     usersList.innerHTML = "";
     allUsersCache = [];
