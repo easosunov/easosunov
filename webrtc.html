@@ -319,48 +319,63 @@ select{
 <script type="module">
 console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
- // Handle notification redirects
+ // Track if we showed a notification (for background app coordination)
+let webPageShowedNotification = false;
+
+// Handle notification redirects
 (function handleNotificationRedirect() {
   try {
-    // Check URL parameters for notification click
+    // Check URL parameters for notification click (from background app)
     const urlParams = new URLSearchParams(window.location.search);
-    const notificationClick = urlParams.get('notificationClick');
     const callId = urlParams.get('callId');
     const roomId = urlParams.get('roomId');
     const fromName = urlParams.get('fromName');
+    const toName = urlParams.get('toName');
+    const note = urlParams.get('note');
     
-    if (notificationClick && callId && roomId) {
-      // Store for later use when user signs in
+    // Store for later use when user signs in
+    if (callId && roomId) {
       localStorage.setItem('pendingNotificationCall', JSON.stringify({
         callId: callId,
         roomId: roomId,
-        fromName: fromName,
+        fromName: fromName || 'Unknown',
+        toName: toName || '',
+        note: note || '',
         timestamp: Date.now()
       }));
       
-      // Clear URL parameters
-      window.history.replaceState({}, document.title, window.location.pathname);
+      // Clear URL parameters for a clean URL
+      const cleanUrl = window.location.origin + window.location.pathname;
+      if (window.location.hash) {
+        window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
+      } else {
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
       
-      // If already signed in, show incoming call UI
+      // If already signed in, show incoming call UI immediately
       if (isAuthed && myUid) {
         showIncomingUI(callId, { 
           roomId: roomId, 
-          fromName: fromName || 'Unknown' 
+          fromName: fromName || 'Unknown',
+          toName: toName || '',
+          note: note || ''
         });
       }
     }
     
-    // Also check localStorage for pending notifications
+    // Also check localStorage for pending notifications (from previous session)
     const pending = localStorage.getItem('pendingNotificationCall');
     if (pending) {
       try {
         const pendingData = JSON.parse(pending);
-        // If notification is less than 30 seconds old
-        if (Date.now() - pendingData.timestamp < 30000) {
+        // If notification is less than 60 seconds old
+        if (Date.now() - pendingData.timestamp < 60000) {
           if (isAuthed && myUid) {
             showIncomingUI(pendingData.callId, {
               roomId: pendingData.roomId,
-              fromName: pendingData.fromName || 'Unknown'
+              fromName: pendingData.fromName || 'Unknown',
+              toName: pendingData.toName || '',
+              note: pendingData.note || ''
             });
           }
         }
@@ -374,6 +389,7 @@ console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
     console.warn('Notification redirect handler error:', e);
   }
 })();
+
  // ===============================
 // SW BOOTSTRAP (runs even when NOT logged in)
 // This guarantees SW exists on both computers.
@@ -1599,9 +1615,14 @@ function showIncomingUI(callId, data){
   if (!data?.deliveredAt) {
     updateDoc(doc(db,"calls", callId), {
       deliveredAt: serverTimestamp(),
-      deliveredVia: "firestore"
+      deliveredVia: "firestore",
+      deliveredAtMs: Date.now()  // Add milliseconds timestamp for precise timing
     }).catch(()=>{});
   }
+
+  // MARK THAT WEB PAGE HANDLED NOTIFICATION
+  webPageShowedNotification = true;
+  console.log('Web page showing incoming call UI, marking as delivered');
 
   incomingOverlay.style.display = "flex";
   startRingtone();
@@ -1934,11 +1955,14 @@ answerBtn.onclick = async ()=>{
     const { id, data } = call;
 
     await updateDoc(doc(db,"calls", id), {
-  status: "accepted",
-  acceptedAt: serverTimestamp(),
-  updatedAt: serverTimestamp()
-});
+      status: "accepted",
+      acceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
+    // Clear notification flag
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
 
     // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
@@ -1966,11 +1990,14 @@ declineBtn.onclick = async ()=>{
 
     const { id } = call;
     await updateDoc(doc(db,"calls", id), {
-  status: "declined",
-  declinedAt: serverTimestamp(),
-  updatedAt: serverTimestamp()
-});
+      status: "declined",
+      declinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
 
+    // Clear notification flag
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
 
     setStatus(dirCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
