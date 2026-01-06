@@ -274,6 +274,19 @@ select{
     </div>
 
     <!-- Utilities -->
+   <div class="bottomCard">
+  <b>Background Notifier</b>
+  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="startBgBtn" disabled>Start Background Service</button>
+    <button id="stopBgBtn" disabled>Stop Background Service</button>
+  </div>
+  <div class="status" id="bgStatus">Status: Not connected</div>
+  <div class="small">
+    Runs in system tray to show notifications when browser is closed.
+    <a href="#" id="downloadBgLink">Download background app</a>
+  </div>
+</div>
+   
     <div class="bottomCard">
       <b>Utilities</b>
 <div style="margin-top:8px">
@@ -507,7 +520,131 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 const auth = getAuth(app);
+/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
+ // Background service elements
+const startBgBtn = document.getElementById('startBgBtn');
+const stopBgBtn = document.getElementById('stopBgBtn');
+const bgStatus = document.getElementById('bgStatus');
+const downloadBgLink = document.getElementById('downloadBgLink');
 
+// Background service functions
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { isRunning: false };
+  }
+}
+
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    // Generate a custom token (you need to implement this Firebase Function)
+    // For now, we'll use a simple approach
+    const customToken = await generateCustomTokenForBackground();
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid,
+        token: customToken
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Status: Connected and listening';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started');
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    bgStatus.textContent = 'Status: Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    alert('Make sure the background app is running (check system tray)');
+  }
+}
+
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Status: Disconnected';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+// Simple token generator (replace with Firebase Function later)
+async function generateCustomTokenForBackground() {
+  // For now, create a simple token based on UID and timestamp
+  // IMPORTANT: Implement a proper Firebase Function for production
+  const timestamp = Date.now();
+  const token = btoa(`${myUid}:${timestamp}:${Math.random()}`);
+  return token;
+}
+
+// Check service status on page load and auth
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    const status = await checkBackgroundService();
+    if (status.isRunning) {
+      bgStatus.textContent = 'Status: Connected';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+    } else {
+      bgStatus.textContent = 'Status: Ready to connect';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Status: Sign in required';
+  }
+}
+
+// Event listeners
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+// Update download link
+downloadBgLink.onclick = (e) => {
+  e.preventDefault();
+  // Host your webrtc-notifier-win32-x64 folder on a server
+  // For testing, you can use a local file share
+  alert('Share the webrtc-notifier-win32-x64 folder with users');
+};
+
+// Add to your existing onAuthStateChanged callback:
+// Inside the if (isAuthed) { ... } block, add:
+updateServiceStatus();
+setInterval(updateServiceStatus, 10000); // Check every 10 seconds
+ 
 /* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
 /*
   Goal: On this computer (same Chrome profile + same origin), only ONE UID may stay signed in.
