@@ -4,13 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>WebRTC</title>
-<link rel="manifest" href="manifest.json">
-
-<!-- === IOS FIX === iOS specific meta tags for PWA -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="WebRTC">
-<link rel="apple-touch-icon" href="icons/RTC192.png">
+ <link rel="manifest" href="manifest.json">
 
 <style>
 body{font-family:system-ui;margin:16px} 
@@ -59,7 +53,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:8px;
   border-radius:8px;
   font-size:12px;
-  white-space:pre-wrap
+  white-space:pre-wrap;
 }
 .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 
@@ -112,105 +106,27 @@ select{
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
-
-/* === IOS FIX === Enhanced mobile styles for iOS */
+/* This media query will only apply styles for mobile screens (max-width: 720px) */
 @media (max-width: 720px) {
   body {
-    font-size: 18px;
-    margin: 12px;
+    font-size: 18px; /* Larger font size for body text */
   }
 
   h1 {
-    font-size: 24px;
+    font-size: 24px; /* Increase header size */
   }
 
   h2 {
-    font-size: 20px;
+    font-size: 20px; /* Larger sub-header size */
   }
 
   p, .status, .small {
-    font-size: 16px;
+    font-size: 16px; /* Increase font size for paragraphs, status text, and small text */
   }
 
   .button {
-    font-size: 16px;
-    padding: 12px 14px; /* Larger touch targets for iOS */
+    font-size: 16px; /* Increase font size for buttons */
   }
-  
-  /* iPhone-specific adjustments */
-  @media (max-width: 428px) {
-    .videos {
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
-    
-    .card {
-      padding: 10px;
-    }
-    
-    video {
-      aspect-ratio: 4/3; /* Better for mobile */
-    }
-    
-    button {
-      padding: 14px 16px;
-      min-height: 44px; /* Apple recommended minimum touch target */
-    }
-    
-    input, select {
-      font-size: 16px; /* Prevents iOS zoom on focus */
-      min-height: 44px;
-    }
-  }
-}
-
-/* Safari-specific fixes */
-@supports (-webkit-touch-callout: none) {
-  /* Safari-only CSS */
-  input, select, button {
-    -webkit-appearance: none;
-    border-radius: 10px;
-  }
-}
-
-/* iOS Install Prompt */
-#iosInstallPrompt {
-  position: fixed; 
-  bottom: 20px; 
-  left: 20px; 
-  right: 20px;
-  background: linear-gradient(135deg, #4CAF50, #45a049);
-  color: white; 
-  padding: 18px 20px;
-  border-radius: 16px; 
-  text-align: center; 
-  z-index: 10000;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-  border: 1px solid rgba(255,255,255,0.2);
-  backdrop-filter: blur(10px);
-  animation: slideUp 0.3s ease-out;
-}
-
-@keyframes slideUp {
-  from { transform: translateY(100px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-
-#iosInstallPrompt button {
-  margin-top: 12px;
-  background: white;
-  color: #4CAF50;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 25px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: transform 0.2s;
-  min-height: 44px;
-}
-
-#iosInstallPrompt button:active {
-  transform: scale(0.95);
 }
 
 </style>
@@ -226,7 +142,7 @@ select{
   <div id="incomingCard">
     <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
     <div id="incomingText" class="status">Someone is calling…</div>
-    <div class="small">If you don't hear ringing, tap once anywhere to enable sound.</div>
+    <div class="small">If you don’t hear ringing, tap once anywhere to enable sound.</div>
     <div class="incomingActions">
       <button id="answerBtn">Answer</button>
       <button id="declineBtn">Decline</button>
@@ -264,7 +180,7 @@ select{
     <div class="card">
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
-      <div class="small">Muted so you don't hear yourself.</div>
+      <div class="small">Muted so you don’t hear yourself.</div>
 <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
   <button id="hangupBtn" disabled>Hang up</button>
 
@@ -290,7 +206,7 @@ select{
     <div class="card">
       <b>Person B (Other)</b>
       <video id="remoteVideo" autoplay playsinline></video>
-      <div class="small">If audio doesn't play, click the video once.</div>
+      <div class="small">If audio doesn’t play, click the video once.</div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
@@ -379,42 +295,18 @@ select{
         <button id="clearDiagBtn" disabled>Clear log</button>
       </div>
       <pre id="diagBox"></pre>
-      <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
+      <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
     </div>
 
   </div>
 </div>
 
-</div>
-
-<!-- === IOS FIX === iOS Install Instructions Modal -->
-<div id="iosInstructions" style="display:none; position:fixed; inset:0; z-index:10001; background:rgba(0,0,0,0.85); align-items:center; justify-content:center;">
-  <div style="background:white; border-radius:20px; padding:25px; max-width:400px; margin:20px; text-align:center;">
-    <h3 style="margin-top:0;">📱 Install WebRTC App</h3>
-    <ol style="text-align:left; padding-left:20px;">
-      <li>Tap the <strong>Share</strong> button <span style="background:#f0f0f0; padding:2px 8px; border-radius:4px;">⎋</span></li>
-      <li>Scroll down, tap <strong>"Add to Home Screen"</strong></li>
-      <li>Tap <strong>"Add"</strong> in top right</li>
-      <li>Launch from your Home Screen like a regular app</li>
-    </ol>
-    <div style="margin:20px 0; padding:15px; background:#f9f9f9; border-radius:10px; font-size:14px;">
-      <strong>Benefits:</strong><br>
-      • Works offline<br>
-      • No browser address bar<br>
-      • Push notifications<br>
-      • Faster loading
-    </div>
-    <button onclick="document.getElementById('iosInstructions').style.display='none'" 
-            style="background:#4CAF50; color:white; border:none; padding:12px 30px; border-radius:10px; font-size:16px; cursor:pointer;">
-      Got It!
-    </button>
-  </div>
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2026-01-06-ios-adapted");
+console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
-// ===============================
+ // ===============================
 // SW BOOTSTRAP (runs even when NOT logged in)
 // This guarantees SW exists on both computers.
 // ===============================
@@ -433,7 +325,7 @@ async function ensureServiceWorkerInstalled() {
 
   const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
   // bump version when you change SW file
-  swUrl.searchParams.set("v", "2026-01-06-ios-fix-1");
+  swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
 
   try {
     swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
@@ -452,23 +344,7 @@ async function ensureServiceWorkerInstalled() {
 // RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
 
-// === IOS FIX === Platform detection
-const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-console.log("Platform:", { isSafari, isIOS, isMobile });
-
-// === IOS FIX === Audio unlock for iOS
-document.addEventListener('click', function unlockAudio() {
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-  // Remove listener after first successful unlock
-  document.removeEventListener('click', unlockAudio);
-}, { once: true });
-
-const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
+ const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
@@ -814,8 +690,7 @@ logoutBtn.onclick = async () => {
     const toName = qs.get("toName");
 
     if(callId && roomId){
-      console.log('Incoming call details:', data.fromName, data.toName);
-      incomingText.textContent = `Incoming call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
+      incomingText.textContent = `Call from ${fromName || "unknown"}…`;
       incomingOverlay.style.display = "flex";
       if (typeof startRingtone === "function") startRingtone();
 
@@ -844,43 +719,16 @@ if (openedFromInvite) {
 /* ================== WEBRTC ================== */
 let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
-// === IOS FIX === Updated loadIceServers for Safari compatibility
 async function loadIceServers() {
   logDiag("Fetching ICE servers …");
-  
-  try {
-    const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
-    if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
-    const data = await r.json();
-    
-    // Configure for Safari/iOS compatibility
-    rtcConfig = { 
-      iceServers: data.iceServers,
-      iceTransportPolicy: 'all',
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
-    };
-    
-    // Safari-specific SDP configuration
-    if (isSafari) {
-      rtcConfig.sdpSemantics = 'unified-plan';
-      // Safari prefers these codecs
-      rtcConfig.optional = [
-        { googDscp: true },
-        { googCpuOveruseDetection: true }
-      ];
-    }
-    
-    logDiag(`ICE servers loaded (${data.iceServers?.length || 0}) for ${isSafari ? 'Safari' : 'Other'}`);
-    
-  } catch (e) {
-    logDiag("ICE load failed, using fallback: " + (e?.message || e));
-    // Fallback with STUN only
-    rtcConfig = { 
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      ...(isSafari ? { sdpSemantics: 'unified-plan' } : {})
-    };
-  }
+  const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
+  if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
+  const data = await r.json();
+  rtcConfig = { iceServers: data.iceServers };
+  logDiag("ICE servers detail (urls only): " + JSON.stringify(
+    (data.iceServers || []).map(s => ({ urls: s.urls }))
+  ));
+  logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
 }
 
 let localStream = null;
@@ -982,20 +830,10 @@ async function ensurePeer() {
   const rs = new MediaStream();
   remoteVideo.srcObject = rs;
 
-  // === IOS FIX === Updated ontrack handler for iOS autoplay
   pc.ontrack = (e) => {
     e.streams[0].getTracks().forEach(t => rs.addTrack(t));
-    
-    // iOS-safe: only play after user interaction
-    const playVideo = () => {
-      remoteVideo.muted = false;
-      remoteVideo.play().catch(e => console.log("Play failed:", e));
-    };
-    
-    // Try to play immediately, but attach click handler as fallback
-    playVideo();
-    remoteVideo.addEventListener('click', playVideo, { once: true });
-    
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(() => {});
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
   };
 
@@ -1429,8 +1267,6 @@ async function unlockAudio(){
     if(ctx.state !== "running") await ctx.resume();
   }catch{}
 }
-// === IOS FIX === Keep audio unlock listener active
-window.addEventListener("touchstart", ()=>{ unlockAudio(); }, { once:false, passive:true });
 window.addEventListener("click", ()=>{ unlockAudio(); }, { once:false, passive:true });
 
 function startRingtone(){
@@ -1681,10 +1517,9 @@ async function catchUpMissedCallNotification() {
         const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
         if (reg) {
           const body =
-    `Missed call from ${fromName} to ${toName || "you"}` +
-    (note ? ` — ${note}` : "") +
-    ` — ${tsLocal}`;
-
+            `Missed call from ${fromName}` +
+            (note ? ` — ${note}` : "") +
+            ` — ${tsLocal}`;
 
           await reg.showNotification("Missed call", {
             body,
@@ -2048,7 +1883,7 @@ async function startCallToUid(toUid, toName=""){
 
   if(!requireAuthOrPrompt()) return;
   if(!toUid) throw new Error("Missing toUid.");
-  if(toUid === myUid) throw new Error("You can't call yourself.");
+  if(toUid === myUid) throw new Error("You can’t call yourself.");
 
   setStatus(dirCallStatus, "Creating room…");
   const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
@@ -2264,7 +2099,8 @@ if(prev.uid && prev.uid !== myUid){
 
   try {
     const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
-    swUrl.searchParams.set("v", "2026-01-06-ios-fix-1");
+    swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
+
 
     const resp = await fetch(swUrl.toString(), { cache: "no-store" });
     const ct = resp.headers.get("content-type") || "";
@@ -2435,15 +2271,8 @@ resetPushBtn.onclick = async ()=>{
     showError(e);
   }
 };
-
-// === IOS FIX === Updated hangup button handler for iOS prompt
-hangupBtn.onclick = async () => {
-  await hangup().catch(showError);
-  // Show install prompt after call ends on iOS
-  if (isIOS && !window.navigator.standalone) {
-    setTimeout(showiOSInstallPrompt, 1000);
-  }
-};
+ 
+hangupBtn.onclick = ()=> hangup().catch(showError);
 
 /* C-lite directory buttons */
 saveNameBtn.onclick = ()=> saveMyName().catch(showError);
@@ -2518,11 +2347,6 @@ onAuthStateChanged(auth, async (user)=>{
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
-    // === IOS FIX === Show iOS install prompt after login
-    if (isIOS && !window.navigator.standalone) {
-      setTimeout(showiOSInstallPrompt, 3000);
-    }
-
   } else {
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
@@ -2547,76 +2371,6 @@ onAuthStateChanged(auth, async (user)=>{
     myDisplayName = "";
   }
 });
-
-// === IOS FIX === iOS PWA Install Prompt Functions
-function showiOSInstallPrompt() {
-  // Only show on iOS Safari that's not already installed
-  if (!isIOS) return;
-  if (window.navigator.standalone) return; // Already installed
-  
-  // Don't show too frequently
-  const lastPrompt = localStorage.getItem('lastIOSPrompt');
-  const now = Date.now();
-  if (lastPrompt && (now - parseInt(lastPrompt)) < 7 * 24 * 60 * 60 * 1000) {
-    return; // Only prompt once per week
-  }
-  
-  // Create prompt element
-  const installDiv = document.createElement('div');
-  installDiv.id = 'iosInstallPrompt';
-  installDiv.style.cssText = `
-    position: fixed; bottom: 20px; left: 20px; right: 20px;
-    background: linear-gradient(135deg, #4CAF50, #45a049);
-    color: white; padding: 18px 20px;
-    border-radius: 16px; text-align: center; z-index: 10000;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-    border: 1px solid rgba(255,255,255,0.2);
-    backdrop-filter: blur(10px);
-    animation: slideUp 0.3s ease-out;
-  `;
-  
-  installDiv.innerHTML = `
-    <strong style="font-size: 16px; display: block; margin-bottom: 6px;">
-      📱 Install as App
-    </strong>
-    <div style="font-size: 14px; opacity: 0.95;">
-      For better experience, add to Home Screen
-    </div>
-    <div style="margin-top: 12px; display: flex; gap: 10px; justify-content: center;">
-      <button onclick="dismissIOSPrompt()" style="background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); padding: 10px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; min-height: 44px;">
-        Later
-      </button>
-      <button onclick="window.showIOSInstructions()" 
-              style="background: white; color: #4CAF50; border: none; padding: 10px 20px; border-radius: 25px; font-weight: bold; cursor: pointer; min-height: 44px;">
-        How To
-      </button>
-    </div>
-  `;
-  
-  document.body.appendChild(installDiv);
-  localStorage.setItem('lastIOSPrompt', now.toString());
-  
-  // Auto-dismiss after 15 seconds
-  setTimeout(() => {
-    dismissIOSPrompt();
-  }, 15000);
-}
-
-function dismissIOSPrompt() {
-  const prompt = document.getElementById('iosInstallPrompt');
-  if (prompt) {
-    prompt.style.animation = 'slideUp 0.3s ease-out reverse';
-    setTimeout(() => {
-      if (prompt.parentNode) prompt.remove();
-    }, 300);
-  }
-}
-
-// Make instructions function globally available
-window.showIOSInstructions = function() {
-  document.getElementById('iosInstructions').style.display = 'flex';
-  dismissIOSPrompt();
-};
 
 window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
