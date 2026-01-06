@@ -53,7 +53,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:8px;
   border-radius:8px;
   font-size:12px;
-  white-space:pre-wrap;
+  white-space:pre-wrap
 }
 .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 
@@ -142,7 +142,7 @@ select{
   <div id="incomingCard">
     <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
     <div id="incomingText" class="status">Someone is calling…</div>
-    <div class="small">If you don’t hear ringing, tap once anywhere to enable sound.</div>
+    <div class="small">If you don't hear ringing, tap once anywhere to enable sound.</div>
     <div class="incomingActions">
       <button id="answerBtn">Answer</button>
       <button id="declineBtn">Decline</button>
@@ -180,7 +180,7 @@ select{
     <div class="card">
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
-      <div class="small">Muted so you don’t hear yourself.</div>
+      <div class="small">Muted so you don't hear yourself.</div>
 <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
   <button id="hangupBtn" disabled>Hang up</button>
 
@@ -206,7 +206,7 @@ select{
     <div class="card">
       <b>Person B (Other)</b>
       <video id="remoteVideo" autoplay playsinline></video>
-      <div class="small">If audio doesn’t play, click the video once.</div>
+      <div class="small">If audio doesn't play, click the video once.</div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
@@ -308,7 +308,7 @@ select{
         <button id="clearDiagBtn" disabled>Clear log</button>
       </div>
       <pre id="diagBox"></pre>
-      <div class="small">Diagnostics are hidden by default. Click “Diagnostics” to show/hide.</div>
+      <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
     </div>
 
   </div>
@@ -352,38 +352,7 @@ let webPageShowedNotification = false;
         window.history.replaceState({}, document.title, cleanUrl);
       }
       
-      // If already signed in, show incoming call UI immediately
-      if (isAuthed && myUid) {
-        showIncomingUI(callId, { 
-          roomId: roomId, 
-          fromName: fromName || 'Unknown',
-          toName: toName || '',
-          note: note || ''
-        });
-      }
-    }
-    
-    // Also check localStorage for pending notifications (from previous session)
-    const pending = localStorage.getItem('pendingNotificationCall');
-    if (pending) {
-      try {
-        const pendingData = JSON.parse(pending);
-        // If notification is less than 60 seconds old
-        if (Date.now() - pendingData.timestamp < 60000) {
-          if (isAuthed && myUid) {
-            showIncomingUI(pendingData.callId, {
-              roomId: pendingData.roomId,
-              fromName: pendingData.fromName || 'Unknown',
-              toName: pendingData.toName || '',
-              note: pendingData.note || ''
-            });
-          }
-        }
-        // Clear after processing
-        localStorage.removeItem('pendingNotificationCall');
-      } catch (e) {
-        localStorage.removeItem('pendingNotificationCall');
-      }
+      console.log('Notification stored, waiting for auth...');
     }
   } catch (e) {
     console.warn('Notification redirect handler error:', e);
@@ -489,6 +458,17 @@ const callNoteInput = document.getElementById("callNoteInput");
 const videoQualitySelect = document.getElementById("videoQualitySelect");
 const videoQualityStatus = document.getElementById("videoQualityStatus");
 
+// Background service elements
+const startBgBtn = document.getElementById('startBgBtn');
+const stopBgBtn = document.getElementById('stopBgBtn');
+const bgStatus = document.getElementById('bgStatus');
+const downloadBgLink = document.getElementById('downloadBgLink');
+
+/* ================== STATE VARIABLES ================== */
+let isAuthed = false;
+let myUid = null;
+let pendingIncomingCallWhileLoggedOut = null;
+
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
   try{
@@ -591,12 +571,8 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 const auth = getAuth(app);
-/*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++*/
-// ================== BACKGROUND SERVICE ==================
-const startBgBtn = document.getElementById('startBgBtn');
-const stopBgBtn = document.getElementById('stopBgBtn');
-const bgStatus = document.getElementById('bgStatus');
 
+/* ================== BACKGROUND SERVICE ================== */
 // Test if background service is running
 async function checkBackgroundService() {
   try {
@@ -627,7 +603,6 @@ async function startBackgroundService() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         uid: myUid
-        // No custom token needed - background app listens without authentication
       })
     });
     
@@ -711,37 +686,7 @@ downloadBgLink.onclick = (e) => {
   window.open(downloadUrl, '_blank');
 };
 
-// Test notification button (add this to your HTML if needed)
-// <button id="testBgNotificationBtn">Test Notification</button>
-const testBgNotificationBtn = document.getElementById('testBgNotificationBtn');
-if (testBgNotificationBtn) {
-  testBgNotificationBtn.onclick = async () => {
-    try {
-      const response = await fetch('http://localhost:3000/test-notification');
-      const data = await response.json();
-      if (data.success) {
-        alert('Test notification sent! Check your system tray.');
-      }
-    } catch (error) {
-      alert('Background app is not running');
-    }
-  };
-}
-
-// Add to your existing onAuthStateChanged callback:
-// Inside the if (isAuthed) { ... } block, add:
-updateServiceStatus();
-setInterval(updateServiceStatus, 30000); // Check every 30 seconds
-
-// Also update when user logs out
-// Inside the else { ... } block for signed out state, add:
-bgStatus.textContent = 'Sign in required';
 /* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
-/*
-  Goal: On this computer (same Chrome profile + same origin), only ONE UID may stay signed in.
-  If another UID logs in on any tab, all other tabs signed in as a different UID will signOut().
-*/
-
 const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
 const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
 
@@ -824,7 +769,6 @@ window.addEventListener("storage", (ev)=>{
   }
 })();
 
-  
 /* Force login every time (no stored session) */
 await setPersistence(auth, inMemoryPersistence);
 
@@ -860,12 +804,7 @@ async function enforceAllowlist(user){
   }
 }
 
-
 /* ================== AUTH GATE ================== */
-let isAuthed = false;
-let myUid = null;
-let pendingIncomingCallWhileLoggedOut = null;
-
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
   loginOverlay.style.display = "flex";
@@ -895,7 +834,6 @@ loginBtn.onclick = async () => {
   }
 };
 
-
 logoutBtn.onclick = async () => {
   try{
     stopAll();                 // stop listeners/media/UI
@@ -906,7 +844,35 @@ logoutBtn.onclick = async () => {
   }
 };
 
-
+/* ================== PROCESS PENDING NOTIFICATIONS ================== */
+// Process pending notifications after authentication
+async function processPendingNotifications() {
+  try {
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        // If notification is less than 60 seconds old
+        if (Date.now() - pendingData.timestamp < 60000) {
+          if (isAuthed && myUid) {
+            showIncomingUI(pendingData.callId, {
+              roomId: pendingData.roomId,
+              fromName: pendingData.fromName || 'Unknown',
+              toName: pendingData.toName || '',
+              note: pendingData.note || ''
+            });
+          }
+        }
+        // Clear after processing
+        localStorage.removeItem('pendingNotificationCall');
+      } catch (e) {
+        localStorage.removeItem('pendingNotificationCall');
+      }
+    }
+  } catch (e) {
+    console.warn('processPendingNotifications error:', e);
+  }
+}
 
 /* ================== URL OPEN (from push click) ================== */
 (function handlePushOpen(){
@@ -1533,12 +1499,6 @@ function stopRingtone(){
   ringGain = null;
 }
 /* ================== CALLER RINGBACK (quiet beeps) ================== */
-/*
-  When YOU place a call, play quiet "beep-beep" until:
-  - accepted / declined / missed / ended
-  - you hang up
-*/
-
 let ringbackTimer = null;
 
 function stopRingback(){
@@ -1662,6 +1622,7 @@ async function listenIncomingCalls(){
     logDiag("Incoming call listener error: " + (err?.message || err));
   });
 }
+
 // Catch-up: if Chrome was closed and push was missed, show the newest ringing call after login
 async function catchUpMissedRingingCall() {
   try {
@@ -1726,8 +1687,8 @@ if (currentIncomingCall?.id === callId) return;
     logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
   }
 }
+
 // Catch-up: if Chrome was closed and the call became MISSED, show newest missed call after login
-// Catch-up: if Chrome was closed and call was MISSED (or ENDED without being answered), notify after login
 async function catchUpMissedCallNotification() {
   try {
     if (!myUid) return;
@@ -2122,7 +2083,7 @@ async function startCallToUid(toUid, toName=""){
 
   if(!requireAuthOrPrompt()) return;
   if(!toUid) throw new Error("Missing toUid.");
-  if(toUid === myUid) throw new Error("You can’t call yourself.");
+  if(toUid === myUid) throw new Error("You can't call yourself.");
 
   setStatus(dirCallStatus, "Creating room…");
   const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
@@ -2211,8 +2172,6 @@ async function sendIncomingCallNotification(message) {
 }
 
 }
-
-
 
 /* ================== PUSH (optional) ================== */
 let messaging = null;
@@ -2576,6 +2535,9 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
+    // Process any pending notifications after auth
+    await processPendingNotifications();
+
     if (pendingIncomingCallWhileLoggedOut?.id) {
       const callId = pendingIncomingCallWhileLoggedOut.id;
       updateDoc(doc(db,"calls", callId), {
@@ -2583,6 +2545,10 @@ onAuthStateChanged(auth, async (user)=>{
         deliveredVia: "push_open"
       }).catch(()=>{});
     }
+
+    // Update background service status
+    updateServiceStatus();
+    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
@@ -2604,6 +2570,10 @@ onAuthStateChanged(auth, async (user)=>{
     setStatus(pushStatus, "Push: not enabled.");
     setStatus(dirCallStatus, "Idle.");
     myNameStatus.textContent = "Not set.";
+
+    bgStatus.textContent = 'Sign in required';
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
 
     usersList.innerHTML = "";
     allUsersCache = [];
