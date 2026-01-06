@@ -319,6 +319,61 @@ select{
 <script type="module">
 console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
+ // Handle notification redirects
+(function handleNotificationRedirect() {
+  try {
+    // Check URL parameters for notification click
+    const urlParams = new URLSearchParams(window.location.search);
+    const notificationClick = urlParams.get('notificationClick');
+    const callId = urlParams.get('callId');
+    const roomId = urlParams.get('roomId');
+    const fromName = urlParams.get('fromName');
+    
+    if (notificationClick && callId && roomId) {
+      // Store for later use when user signs in
+      localStorage.setItem('pendingNotificationCall', JSON.stringify({
+        callId: callId,
+        roomId: roomId,
+        fromName: fromName,
+        timestamp: Date.now()
+      }));
+      
+      // Clear URL parameters
+      window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // If already signed in, show incoming call UI
+      if (isAuthed && myUid) {
+        showIncomingUI(callId, { 
+          roomId: roomId, 
+          fromName: fromName || 'Unknown' 
+        });
+      }
+    }
+    
+    // Also check localStorage for pending notifications
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        // If notification is less than 30 seconds old
+        if (Date.now() - pendingData.timestamp < 30000) {
+          if (isAuthed && myUid) {
+            showIncomingUI(pendingData.callId, {
+              roomId: pendingData.roomId,
+              fromName: pendingData.fromName || 'Unknown'
+            });
+          }
+        }
+        // Clear after processing
+        localStorage.removeItem('pendingNotificationCall');
+      } catch (e) {
+        localStorage.removeItem('pendingNotificationCall');
+      }
+    }
+  } catch (e) {
+    console.warn('Notification redirect handler error:', e);
+  }
+})();
  // ===============================
 // SW BOOTSTRAP (runs even when NOT logged in)
 // This guarantees SW exists on both computers.
