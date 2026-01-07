@@ -371,6 +371,7 @@ let webPageShowedNotification = false;
     console.warn('Notification redirect handler error:', e);
   }
 })();
+
  // ===============================
 // SW BOOTSTRAP (runs even when NOT logged in)
 // This guarantees SW exists on both computers.
@@ -572,106 +573,7 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
   setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-/* ================== PLATFORM DETECTION ================== */
-function detectPlatform() {
-  const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-  const platform = {
-    isWindows: navigator.platform.indexOf('Win') > -1,
-    isMac: navigator.platform.indexOf('Mac') > -1,
-    isLinux: navigator.platform.indexOf('Linux') > -1,
-    isIOS: /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream,
-    isAndroid: /android/i.test(userAgent),
-    isMobile: /iPhone|iPad|iPod|Android/i.test(userAgent),
-    isChrome: /Chrome/.test(userAgent) && /Google Inc/.test(navigator.vendor),
-    isSafari: /^((?!chrome|android).)*safari/i.test(userAgent),
-    isStandalone: window.matchMedia('(display-mode: standalone)').matches
-  };
-  
-  platform.supportsBackgroundSync = 'serviceWorker' in navigator && 
-                                    'SyncManager' in window &&
-                                    !platform.isIOS; // iOS doesn't support Background Sync well
-  
-  platform.supportsPeriodicSync = 'serviceWorker' in navigator && 
-                                  'periodicSync' in window.registration &&
-                                  !platform.isIOS;
-  
-  console.log('[PLATFORM] Detected:', platform);
-  return platform;
-}
 
-const platform = detectPlatform();
-
- /* ================== PWA INSTALLATION PROMPT ================== */
-function showPWAInstallPrompt() {
-  if (!platform.isMobile || platform.isStandalone) return;
-  
-  const installPrompt = document.createElement('div');
-  installPrompt.id = 'pwaInstallPrompt';
-  installPrompt.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #4CAF50;
-    color: white;
-    padding: 15px;
-    border-radius: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 10000;
-    max-width: 300px;
-    display: none;
-  `;
-  
-  installPrompt.innerHTML = `
-    <div style="margin-bottom: 10px; font-weight: bold;">
-      ${platform.isIOS ? '📱 For better notifications:' : '📱 Install as app:'}
-    </div>
-    <div style="font-size: 14px; margin-bottom: 10px;">
-      ${platform.isIOS ? 
-        'Tap Share → "Add to Home Screen" for background notifications' :
-        'Install this app for background call notifications'}
-    </div>
-    <button id="installPwaBtn" style="background: white; color: #4CAF50; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">
-      ${platform.isIOS ? 'Show Instructions' : 'Install'}
-    </button>
-    <button id="closePwaPrompt" style="background: transparent; color: white; border: none; margin-left: 10px; cursor: pointer;">
-      ×
-    </button>
-  `;
-  
-  document.body.appendChild(installPrompt);
-  
-  document.getElementById('installPwaBtn').onclick = () => {
-    if (platform.isIOS) {
-      alert('To install on iOS:\n1. Tap the Share button (📤)\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" in top right');
-    } else {
-      // Trigger PWA installation
-      if (window.deferredPrompt) {
-        window.deferredPrompt.prompt();
-      }
-    }
-  };
-  
-  document.getElementById('closePwaPrompt').onclick = () => {
-    installPrompt.style.display = 'none';
-  };
-  
-  // Show after 5 seconds if on mobile
-  setTimeout(() => {
-    if (platform.isMobile && !platform.isStandalone) {
-      installPrompt.style.display = 'block';
-    }
-  }, 5000);
-}
-
-// Check for PWA installation support
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  logDiag('PWA installation available');
-});
-
- 
 const app = initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
@@ -2396,22 +2298,11 @@ async function enablePush(){
   logDiag("enablePush(): ENTER");
   if(!requireAuthOrPrompt()) return;
 
-  // If this browser previously stored a token under a different UID, remove it first
-  const prev = getSavedPushBinding();
-  if(prev.uid && prev.uid !== myUid){
-    await revokePushForCurrentDevice();
-  }
-  
-  // Check platform capabilities
-  if (platform.isIOS) {
-    logDiag("iOS detected - push requires user interaction and may have limitations");
-    setStatus(pushStatus, "iOS: Tap to enable notifications (add to home screen for best experience)");
-  }
-  
-  if (platform.isAndroid) {
-    logDiag("Android detected - PWA installation recommended for background notifications");
-    setStatus(pushStatus, "Android: Enable notifications (install app for background)");
-  }
+// If this browser previously stored a token under a different UID, remove it first
+const prev = getSavedPushBinding();
+if(prev.uid && prev.uid !== myUid){
+  await revokePushForCurrentDevice();
+}
 
   
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
@@ -2525,6 +2416,8 @@ savePushBinding(myUid, tokenId);
   }
 }
 
+let autoPushClickArmed = false;
+
 function autoEnablePushOnLogin(){
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
@@ -2534,37 +2427,16 @@ function autoEnablePushOnLogin(){
   if (perm === "granted") {
     logDiag("Auto-push: permission granted -> enabling push now");
     enablePush().catch((e)=> logDiag("Auto-push enable failed: " + (e?.message || e)));
-    
-    // Show PWA prompt if on mobile
-    if (platform.isMobile) {
-      setTimeout(showPWAInstallPrompt, 2000);
-    }
-    
     return;
   }
 
   if (perm === "denied") {
-    // Platform-specific messaging
-    if (platform.isIOS) {
-      setStatus(pushStatus, "iOS: Enable in Settings → Safari → Notifications");
-    } else if (platform.isAndroid) {
-      setStatus(pushStatus, "Android: Enable in Chrome → Site Settings → Notifications");
-    } else {
-      setStatus(pushStatus, "Push: blocked in browser settings (Notifications = Block).");
-    }
+    setStatus(pushStatus, "Push: blocked in browser settings (Notifications = Block).");
     logDiag("Auto-push: permission denied");
     return;
   }
 
-  // Platform-specific permission request messaging
-  if (platform.isIOS) {
-    setStatus(pushStatus, "iOS: Tap anywhere to enable notifications (required for calls)");
-  } else if (platform.isAndroid) {
-    setStatus(pushStatus, "Android: Tap anywhere to enable notifications");
-  } else {
-    setStatus(pushStatus, "Push: click anywhere once to enable notifications.");
-  }
-  
+  setStatus(pushStatus, "Push: click anywhere once to enable notifications.");
   if (autoPushClickArmed) return;
   autoPushClickArmed = true;
 
@@ -2572,11 +2444,6 @@ function autoEnablePushOnLogin(){
     autoPushClickArmed = false;
     logDiag("Auto-push: user click detected -> enabling push");
     enablePush().catch((e)=>{ logDiag("Auto-push enable failed: " + (e?.message || e)); showError(e); });
-    
-    // Show PWA prompt for mobile after permission granted
-    if (platform.isMobile) {
-      setTimeout(showPWAInstallPrompt, 3000);
-    }
   };
 
   window.addEventListener("click", handler, { once:true, capture:true });
@@ -2646,12 +2513,7 @@ onAuthStateChanged(auth, async (user)=>{
 
       return;
     }
-   
-    // Initialize PWA prompt for mobile users
-    if (platform.isMobile) {
-      showPWAInstallPrompt();
-    }
-   
+
     // Single-user lock: reaffirm ownership after allowlist passes
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
