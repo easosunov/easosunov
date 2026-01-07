@@ -371,75 +371,6 @@ let webPageShowedNotification = false;
     console.warn('Notification redirect handler error:', e);
   }
 })();
-/* ================== PWA INSTALLATION PROMPT ================== */
-function showPWAInstallPrompt() {
-  if (!platform.isMobile || platform.isStandalone) return;
-  
-  const installPrompt = document.createElement('div');
-  installPrompt.id = 'pwaInstallPrompt';
-  installPrompt.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #4CAF50;
-    color: white;
-    padding: 15px;
-    border-radius: 10px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 10000;
-    max-width: 300px;
-    display: none;
-  `;
-  
-  installPrompt.innerHTML = `
-    <div style="margin-bottom: 10px; font-weight: bold;">
-      ${platform.isIOS ? '📱 For better notifications:' : '📱 Install as app:'}
-    </div>
-    <div style="font-size: 14px; margin-bottom: 10px;">
-      ${platform.isIOS ? 
-        'Tap Share → "Add to Home Screen" for background notifications' :
-        'Install this app for background call notifications'}
-    </div>
-    <button id="installPwaBtn" style="background: white; color: #4CAF50; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">
-      ${platform.isIOS ? 'Show Instructions' : 'Install'}
-    </button>
-    <button id="closePwaPrompt" style="background: transparent; color: white; border: none; margin-left: 10px; cursor: pointer;">
-      ×
-    </button>
-  `;
-  
-  document.body.appendChild(installPrompt);
-  
-  document.getElementById('installPwaBtn').onclick = () => {
-    if (platform.isIOS) {
-      alert('To install on iOS:\n1. Tap the Share button (📤)\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" in top right');
-    } else {
-      // Trigger PWA installation
-      if (window.deferredPrompt) {
-        window.deferredPrompt.prompt();
-      }
-    }
-  };
-  
-  document.getElementById('closePwaPrompt').onclick = () => {
-    installPrompt.style.display = 'none';
-  };
-  
-  // Show after 5 seconds if on mobile
-  setTimeout(() => {
-    if (platform.isMobile && !platform.isStandalone) {
-      installPrompt.style.display = 'block';
-    }
-  }, 5000);
-}
-
-// Check for PWA installation support
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  logDiag('PWA installation available');
-});
  // ===============================
 // SW BOOTSTRAP (runs even when NOT logged in)
 // This guarantees SW exists on both computers.
@@ -669,6 +600,78 @@ function detectPlatform() {
 }
 
 const platform = detectPlatform();
+
+ /* ================== PWA INSTALLATION PROMPT ================== */
+function showPWAInstallPrompt() {
+  if (!platform.isMobile || platform.isStandalone) return;
+  
+  const installPrompt = document.createElement('div');
+  installPrompt.id = 'pwaInstallPrompt';
+  installPrompt.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #4CAF50;
+    color: white;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 10000;
+    max-width: 300px;
+    display: none;
+  `;
+  
+  installPrompt.innerHTML = `
+    <div style="margin-bottom: 10px; font-weight: bold;">
+      ${platform.isIOS ? '📱 For better notifications:' : '📱 Install as app:'}
+    </div>
+    <div style="font-size: 14px; margin-bottom: 10px;">
+      ${platform.isIOS ? 
+        'Tap Share → "Add to Home Screen" for background notifications' :
+        'Install this app for background call notifications'}
+    </div>
+    <button id="installPwaBtn" style="background: white; color: #4CAF50; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;">
+      ${platform.isIOS ? 'Show Instructions' : 'Install'}
+    </button>
+    <button id="closePwaPrompt" style="background: transparent; color: white; border: none; margin-left: 10px; cursor: pointer;">
+      ×
+    </button>
+  `;
+  
+  document.body.appendChild(installPrompt);
+  
+  document.getElementById('installPwaBtn').onclick = () => {
+    if (platform.isIOS) {
+      alert('To install on iOS:\n1. Tap the Share button (📤)\n2. Scroll down and tap "Add to Home Screen"\n3. Tap "Add" in top right');
+    } else {
+      // Trigger PWA installation
+      if (window.deferredPrompt) {
+        window.deferredPrompt.prompt();
+      }
+    }
+  };
+  
+  document.getElementById('closePwaPrompt').onclick = () => {
+    installPrompt.style.display = 'none';
+  };
+  
+  // Show after 5 seconds if on mobile
+  setTimeout(() => {
+    if (platform.isMobile && !platform.isStandalone) {
+      installPrompt.style.display = 'block';
+    }
+  }, 5000);
+}
+
+// Check for PWA installation support
+let deferredPrompt;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  logDiag('PWA installation available');
+});
+
+ 
 const app = initializeApp({
   apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain:"easosunov-webrtc.firebaseapp.com",
