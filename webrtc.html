@@ -2524,8 +2524,6 @@ savePushBinding(myUid, tokenId);
 
 let autoPushClickArmed = false;
 
-let autoPushClickArmed = false;
-
 function autoEnablePushOnLogin(){
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
