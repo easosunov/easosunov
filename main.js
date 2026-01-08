@@ -678,23 +678,25 @@ function autoEnablePushOnLogin(){
 function refreshCopyInviteState(){
   if (!copyLinkBtn || !roomIdInput) return;
   
-  const hasRoomId = !!roomIdInput.value.trim();
-  const canCopy = isAuthed && hasRoomId;
-  
-  copyLinkBtn.disabled = !canCopy;
-  
-  // Also update copy link button text
-  if (canCopy) {
-    copyLinkBtn.title = "Copy invite link to clipboard";
-  } else if (!isAuthed) {
-    copyLinkBtn.title = "Sign in to copy invite";
-  } else {
-    copyLinkBtn.title = "Create or join a room first";
-  }
-  
-  logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId=${hasRoomId}, disabled=${copyLinkBtn.disabled}`);
+  // Add a small delay to ensure DOM is updated
+  setTimeout(() => {
+    const hasRoomId = !!roomIdInput.value.trim();
+    const canCopy = isAuthed && hasRoomId;
+    
+    copyLinkBtn.disabled = !canCopy;
+    
+    // Also update copy link button text
+    if (canCopy) {
+      copyLinkBtn.title = "Copy invite link to clipboard";
+    } else if (!isAuthed) {
+      copyLinkBtn.title = "Sign in to copy invite";
+    } else {
+      copyLinkBtn.title = "Create or join a room first";
+    }
+    
+    logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId=${hasRoomId}, disabled=${copyLinkBtn.disabled}`);
+  }, 100);
 }
-
 // ==================== COPY INVITE LINK ====================
 async function copyTextRobust(text){
   if (navigator.clipboard && window.isSecureContext) {
