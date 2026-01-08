@@ -1158,7 +1158,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
   if(!requireAuthOrPrompt()) return null;
 
   suppressAutoJoin = true;
-  autoJoinDone = true;
+  
   cancelPendingAutoJoin();
 
   stopListeners();
