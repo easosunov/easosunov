@@ -126,7 +126,8 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 let isAuthed = false;
 let myUid = null;
 let pendingIncomingCallWhileLoggedOut = null;
-
+let incomingCallsUnsubscribe = null;
+let roomCallsUnsubscribe = null;
 const setStatus = (el,msg) => el.textContent = msg;
 
 // ==================== BACKGROUND SERVICE FUNCTIONS ====================
@@ -451,12 +452,18 @@ loginBtn.onclick = async () => {
     // Set device owner
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
+    
+    // Force refresh - sometimes needed
+    window.location.reload();
 
   } catch (e) {
     loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
     logDiag(`Login error: ${e?.code} - ${e?.message}`);
     console.error("Login error details:", e);
     showError(e);
+    
+    // Clear inputs on error
+    passInput.value = "";
   }
 };
 
@@ -1004,8 +1011,8 @@ function setupIncomingCallListener() {
       query(roomsRef, 
         where("calledToUid", "==", myUid),
         where("status", "==", "calling"),
-        where("createdAt", ">", new Date(Date.now() - 60000)), // Last 60 seconds
-        orderBy("createdAt", "desc"),
+        where("updatedAt", ">", Date.now() - 60000), // Last 60 seconds
+        orderBy("updatedAt", "desc"),
         limit(1)
       ),
       (snapshot) => {
@@ -1566,13 +1573,32 @@ function stopAll(){
   
   // Clean up call listeners
   if (incomingCallsUnsubscribe) {
-    incomingCallsUnsubscribe();
+    try {
+      incomingCallsUnsubscribe();
+    } catch (e) {
+      logDiag("Error unsubscribing incoming calls: " + e.message);
+    }
     incomingCallsUnsubscribe = null;
   }
   
   if (roomCallsUnsubscribe) {
-    roomCallsUnsubscribe();
+    try {
+      roomCallsUnsubscribe();
+    } catch (e) {
+      logDiag("Error unsubscribing room calls: " + e.message);
+    }
     roomCallsUnsubscribe = null;
+  }
+  
+  // Clean up direct call listeners
+  if (window._directCallUnsubscribers) {
+    try {
+      if (window._directCallUnsubscribers.room) window._directCallUnsubscribers.room();
+      if (window._directCallUnsubscribers.callee) window._directCallUnsubscribers.callee();
+    } catch (e) {
+      logDiag("Error cleaning up direct call subscribers: " + e.message);
+    }
+    window._directCallUnsubscribers = null;
   }
   
   // Close peer connection
@@ -1600,7 +1626,7 @@ function stopAll(){
   setStatus(dirCallStatus, "Idle.");
   
   // Hide incoming call UI
-  incomingOverlay.style.display = "none";
+  if (incomingOverlay) incomingOverlay.style.display = "none";
   stopRingtone();
   stopRingback();
   window.currentIncomingCall = null;
@@ -1609,7 +1635,6 @@ function stopAll(){
   refreshCopyInviteState();
   
   logDiag("All stopped and cleaned up");
-}ed and cleaned up");
 }
 
 // ==================== AUDIO MANAGEMENT ====================
