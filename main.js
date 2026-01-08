@@ -511,7 +511,7 @@ async function processPendingNotifications() {
     const toName = qs.get("toName");
 
     if(callId && roomId){
-      incomingText.textContent = `Call from ${fromName || "unknown"}…`;
+      incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
       incomingOverlay.style.display = "flex";
       if (typeof startRingtone === "function") startRingtone();
 
