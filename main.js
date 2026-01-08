@@ -884,9 +884,18 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await processPendingNotifications(); } catch(e){}
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
+    
+    // ADD THIS: Start listening for incoming calls
+    try{ listenForIncomingCalls(); } catch(e){ logDiag("listenForIncomingCalls failed: " + (e?.message || e)); }
+    
+    // Also listen for incoming calls through rooms (for backward compatibility)
+    try{ setupIncomingCallListener(); } catch(e){ logDiag("setupIncomingCallListener failed: " + (e?.message || e)); }
 
     updateServiceStatus();
     setInterval(updateServiceStatus, 30000);
+
+    // Check for any pending calls that came in while logged out
+    try{ checkPendingDirectCalls(); } catch(e){ logDiag("checkPendingDirectCalls failed: " + (e?.message || e)); }
 
   } else {
     loginOverlay.style.display = "flex";
@@ -913,15 +922,125 @@ onAuthStateChanged(auth, async (user)=>{
     usersList.innerHTML = "";
     allUsersCache = [];
     myDisplayName = "";
+    
+    // Clear any incoming call UI if user logs out during a call
+    try{ 
+      incomingOverlay.style.display = "none";
+      stopRingtone();
+      window.currentIncomingCall = null;
+    } catch(e){}
   }
 });
-
 // ==================== WINDOW EVENT LISTENERS ====================
 window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
 });
+let incomingCallsUnsubscribe = null;
 
+async function listenForIncomingCalls() {
+  if (!isAuthed || !myUid) return;
+  
+  // Clean up previous listener if exists
+  if (incomingCallsUnsubscribe) {
+    incomingCallsUnsubscribe();
+    incomingCallsUnsubscribe = null;
+  }
+  
+  try {
+    const incomingCallsRef = collection(db, "users", myUid, "incomingCalls");
+    
+    incomingCallsUnsubscribe = onSnapshot(
+      query(incomingCallsRef, where("status", "==", "ringing"), orderBy("createdAt", "desc"), limit(1)),
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const callData = change.doc.data();
+            
+            // Check if this call is recent (within last 60 seconds)
+            const now = Date.now();
+            const createdAt = callData.createdAt?.toMillis ? callData.createdAt.toMillis() : now;
+            const callAge = now - createdAt;
+            
+            if (callAge < 60000) { // Only show calls from last minute
+              logDiag(`Incoming call detected: ${callData.callId} from ${callData.fromName} (${Math.round(callAge/1000)}s ago)`);
+              
+              // Show incoming call UI
+              showIncomingCallUI(callData);
+              
+              // Mark as displayed to prevent duplicates
+              updateDoc(change.doc.ref, { 
+                displayed: true,
+                displayedAt: serverTimestamp() 
+              }).catch(e => logDiag("Failed to mark call as displayed: " + e.message));
+            }
+          }
+        });
+      }
+    );
+    
+    logDiag("Listening for incoming direct calls");
+  } catch (error) {
+    logDiag("listenForIncomingCalls error: " + error.message);
+    console.error("Incoming calls listener error details:", error);
+  }
+}
+
+let roomCallsUnsubscribe = null;
+
+function setupIncomingCallListener() {
+  if (!isAuthed || !myUid) return;
+  
+  // Clean up previous listener if exists
+  if (roomCallsUnsubscribe) {
+    roomCallsUnsubscribe();
+    roomCallsUnsubscribe = null;
+  }
+  
+  try {
+    const roomsRef = collection(db, "rooms");
+    
+    roomCallsUnsubscribe = onSnapshot(
+      query(roomsRef, 
+        where("calledToUid", "==", myUid),
+        where("status", "==", "calling"),
+        where("createdAt", ">", new Date(Date.now() - 60000)), // Last 60 seconds
+        orderBy("createdAt", "desc"),
+        limit(1)
+      ),
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            const roomData = change.doc.data();
+            const roomId = change.doc.id;
+            
+            logDiag(`Room-based call detected: ${roomId} from ${roomData.createdByName}`);
+            
+            // Create call data from room info
+            const callData = {
+              callId: `room-${roomId}`,
+              roomId: roomId,
+              fromUid: roomData.createdBy,
+              fromName: roomData.createdByName || "Unknown",
+              toUid: myUid,
+              toName: roomData.calledToName || "",
+              note: roomData.callNote || "",
+              createdAt: new Date(roomData.updatedAt || Date.now())
+            };
+            
+            // Show incoming call UI
+            showIncomingCallUI(callData);
+          }
+        });
+      }
+    );
+    
+    logDiag("Listening for room-based incoming calls");
+  } catch (error) {
+    logDiag("setupIncomingCallListener error: " + error.message);
+    console.error("Room call listener error details:", error);
+  }
+}
 // ==================== SIMPLE PWA DETECTION ====================
 let deferredPrompt = null;
 
@@ -1445,6 +1564,17 @@ function stopAll(){
   // Clean up room listeners
   cleanupRoom();
   
+  // Clean up call listeners
+  if (incomingCallsUnsubscribe) {
+    incomingCallsUnsubscribe();
+    incomingCallsUnsubscribe = null;
+  }
+  
+  if (roomCallsUnsubscribe) {
+    roomCallsUnsubscribe();
+    roomCallsUnsubscribe = null;
+  }
+  
   // Close peer connection
   closePeer();
   
@@ -1469,10 +1599,17 @@ function stopAll(){
   setStatus(callStatus, "No room yet.");
   setStatus(dirCallStatus, "Idle.");
   
+  // Hide incoming call UI
+  incomingOverlay.style.display = "none";
+  stopRingtone();
+  stopRingback();
+  window.currentIncomingCall = null;
+  
   // Refresh copy invite state
   refreshCopyInviteState();
   
   logDiag("All stopped and cleaned up");
+}ed and cleaned up");
 }
 
 // ==================== AUDIO MANAGEMENT ====================
@@ -1545,11 +1682,153 @@ function stopRingtone(){
 // ==================== CALL MANAGEMENT ====================
 function hangup(){
   stopRingtone();
+  stopRingback();
+  
+  // Clean up direct call listeners
+  if (window._directCallUnsubscribers) {
+    if (window._directCallUnsubscribers.room) window._directCallUnsubscribers.room();
+    if (window._directCallUnsubscribers.callee) window._directCallUnsubscribers.callee();
+    window._directCallUnsubscribers = null;
+  }
+  
+  // Update room status if we were in a direct call
+  const roomId = roomIdInput.value.trim();
+  if (roomId) {
+    const roomRef = doc(db, "rooms", roomId);
+    updateDoc(roomRef, {
+      status: "ended",
+      endedAt: Date.now(),
+      endedBy: myUid
+    }).catch(e => logDiag("Failed to update room status: " + e.message));
+  }
+  
   stopAll();
   setStatus(dirCallStatus, "Call ended.");
   logDiag("Call hung up");
 }
 
+
+function showIncomingCallUI(callData) {
+  // Don't show if we already have an incoming call
+  if (window.currentIncomingCall || incomingOverlay.style.display === "flex") {
+    logDiag("Already showing incoming call, skipping duplicate");
+    return;
+  }
+  
+  // Stop any existing ringback (if we were calling someone)
+  stopRingback();
+  
+  // Start ringtone
+  startRingtone();
+  
+  // Show the incoming call overlay
+  incomingText.innerHTML = `
+    <strong>Incoming call from:</strong><br>
+    ${callData.fromName}<br>
+    ${callData.note ? `<small>Note: ${callData.note}</small><br>` : ''}
+    <small>Click Answer to join the call</small>
+  `;
+  
+  incomingOverlay.style.display = "flex";
+  
+  // Store current call data
+  window.currentIncomingCall = {
+    callId: callData.callId,
+    roomId: callData.roomId,
+    fromUid: callData.fromUid,
+    fromName: callData.fromName,
+    data: callData
+  };
+  
+  // Set up answer button
+  answerBtn.onclick = async () => {
+    stopRingtone();
+    incomingOverlay.style.display = "none";
+    
+    // Update call status in Firestore if it exists
+    if (callData.callId && !callData.callId.startsWith('room-')) {
+      try {
+        const callRef = doc(db, "users", myUid, "incomingCalls", callData.callId);
+        await updateDoc(callRef, { 
+          status: "answered", 
+          answeredAt: serverTimestamp() 
+        });
+      } catch (e) {
+        logDiag("Failed to update call status: " + e.message);
+      }
+    }
+    
+    // Also update room status if it's a room-based call
+    if (callData.roomId) {
+      try {
+        const roomRef = doc(db, "rooms", callData.roomId);
+        await updateDoc(roomRef, { 
+          status: "answered", 
+          answeredAt: serverTimestamp(),
+          answeredBy: myUid,
+          answeredByName: myDisplayName || "User"
+        });
+      } catch (e) {
+        logDiag("Failed to update room status: " + e.message);
+      }
+    }
+    
+    // Join the room
+    roomIdInput.value = callData.roomId;
+    setStatus(callStatus, `Answering call from ${callData.fromName}...`);
+    setStatus(dirCallStatus, "Connecting...");
+    
+    // Small delay to ensure UI updates
+    setTimeout(async () => {
+      await joinRoom();
+      window.currentIncomingCall = null;
+    }, 500);
+  };
+  
+  // Set up decline button
+  declineBtn.onclick = async () => {
+    stopRingtone();
+    incomingOverlay.style.display = "none";
+    
+    // Update call status in Firestore if it exists
+    if (callData.callId && !callData.callId.startsWith('room-')) {
+      try {
+        const callRef = doc(db, "users", myUid, "incomingCalls", callData.callId);
+        await updateDoc(callRef, { 
+          status: "declined", 
+          declinedAt: serverTimestamp() 
+        });
+      } catch (e) {
+        logDiag("Failed to update call status: " + e.message);
+      }
+    }
+    
+    // Update room status
+    if (callData.roomId) {
+      try {
+        const roomRef = doc(db, "rooms", callData.roomId);
+        await updateDoc(roomRef, { 
+          status: "declined", 
+          declinedAt: serverTimestamp(),
+          declinedBy: myUid
+        });
+      } catch (e) {
+        logDiag("Failed to update room status: " + e.message);
+      }
+    }
+    
+    setStatus(dirCallStatus, "Call declined.");
+    window.currentIncomingCall = null;
+  };
+  
+  // Auto-decline after 60 seconds if not answered
+  setTimeout(() => {
+    if (incomingOverlay.style.display === "flex" && window.currentIncomingCall) {
+      logDiag("Auto-declining call after timeout");
+      declineBtn.click();
+    }
+  }, 60000);
+}
 // ==================== USER MANAGEMENT ====================
 let myDisplayName = "";
 let allUsersCache = [];
@@ -1684,14 +1963,223 @@ function renderUsersList(filterText = ""){
   });
 }
 
+// ==================== PENDING DIRECT CALLS CHECK ====================
+async function checkPendingDirectCalls() {
+  if (!isAuthed || !myUid) return;
+  
+  try {
+    // Check for pending calls in localStorage
+    const pendingCall = localStorage.getItem('pendingDirectCall');
+    if (pendingCall) {
+      try {
+        const pendingData = JSON.parse(pendingCall);
+        if (Date.now() - pendingData.timestamp < 60000) {
+          logDiag(`Processing pending direct call from ${pendingData.fromName}`);
+          
+          // Create call data
+          const callData = {
+            callId: pendingData.callId,
+            roomId: pendingData.roomId,
+            fromUid: pendingData.fromUid,
+            fromName: pendingData.fromName || 'Unknown',
+            toUid: myUid,
+            toName: pendingData.toName || '',
+            note: pendingData.note || '',
+            createdAt: new Date(pendingData.timestamp)
+          };
+          
+          // Show incoming call UI
+          showIncomingCallUI(callData);
+        }
+        localStorage.removeItem('pendingDirectCall');
+      } catch (e) {
+        localStorage.removeItem('pendingDirectCall');
+        logDiag("Error processing pending call: " + e.message);
+      }
+    }
+    
+  } catch (error) {
+    logDiag("checkPendingDirectCalls error: " + error.message);
+  }
+}
+
+
+
 async function startCallToUid(toUid, toName = ""){
   if(!requireAuthOrPrompt()) return;
   
-  logDiag("Starting call to: " + toUid);
+  logDiag(`Starting call to: ${toUid} (${toName})`);
   setStatus(dirCallStatus, `Calling ${toName || "user"}...`);
   
-  // This is a placeholder - you'll need to implement the actual call logic
-  alert(`Call functionality to ${toName || toUid} would start here`);
+  try {
+    // Start media if not already started
+    if (!localStream) {
+      await startMedia();
+    }
+    
+    // Close any existing connection
+    closePeer();
+    
+    // Create a new room for this call
+    const roomRef = doc(collection(db, "rooms"));
+    const roomId = roomRef.id;
+    
+    logDiag(`Creating room ${roomId} for direct call to ${toUid}`);
+    
+    // Update UI
+    roomIdInput.value = roomId;
+    location.hash = roomId;
+    setStatus(callStatus, `Calling ${toName || "user"}...`);
+    refreshCopyInviteState();
+    
+    // Create collections
+    const callerCandidates = collection(roomRef, "callerCandidates");
+    const calleeCandidates = collection(roomRef, "calleeCandidates");
+    
+    // Create peer connection
+    await ensurePeer();
+    
+    // Handle ICE candidates
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        addDoc(callerCandidates, { 
+          session: 1, 
+          ...e.candidate.toJSON() 
+        })
+        .then(() => logDiag("Caller ICE candidate written"))
+        .catch(err => console.error("Failed to write caller candidate:", err));
+      }
+    };
+    
+    // Create offer
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    
+    // Save room data with special metadata for direct call
+    await setDoc(roomRef, {
+      session: 1,
+      offer: { type: offer.type, sdp: offer.sdp },
+      answer: null,
+      updatedAt: Date.now(),
+      createdBy: myUid,
+      createdByName: myDisplayName || "Unknown",
+      calledToUid: toUid,
+      calledToName: toName,
+      status: "calling",
+      callNote: callNoteInput.value.trim() || "",
+      isDirectCall: true
+    });
+    
+    setStatus(callStatus, `✅ Room created. Waiting for ${toName || "user"} to answer...`);
+    logDiag("Created and saved offer for direct call");
+    
+    // Listen for answer
+    const unsubscribe = onSnapshot(roomRef, async (snap) => {
+      if (!snap.exists()) return;
+      
+      const data = snap.data();
+      if (data.answer && pc.signalingState === "have-local-offer") {
+        try {
+          await pc.setRemoteDescription(data.answer);
+          setStatus(callStatus, "✅ Connected!");
+          setStatus(dirCallStatus, `In call with ${toName || "user"}...`);
+          logDiag("Remote answer accepted for direct call");
+          stopRingback();
+        } catch (e) {
+          logDiag("Failed to set remote description: " + e.message);
+        }
+      }
+      
+      // Check if call was declined
+      if (data.status === "declined") {
+        setStatus(dirCallStatus, `Call declined by ${toName || "user"}`);
+        setStatus(callStatus, "Call ended");
+        logDiag("Call was declined");
+        stopRingback();
+        hangup();
+      }
+    });
+    
+    // Listen for callee ICE candidates
+    const unsubscribeCallee = onSnapshot(calleeCandidates, (snap) => {
+      snap.docChanges().forEach(change => {
+        if (change.type === "added" && pc) {
+          try {
+            pc.addIceCandidate(change.doc.data());
+          } catch (e) {
+            console.error("Failed to add ICE candidate:", e);
+          }
+        }
+      });
+    });
+    
+    // Store unsubscribe functions
+    window._directCallUnsubscribers = {
+      room: unsubscribe,
+      callee: unsubscribeCallee
+    };
+    
+    // Enable hangup button
+    hangupBtn.disabled = false;
+    
+    // Send push notification to the called user
+    await sendCallNotification(toUid, toName, roomId);
+    
+    // Start ringback tone
+    startRingback();
+    
+    logDiag(`Direct call initiated to ${toUid} via room ${roomId}`);
+    
+  } catch (error) {
+    setStatus(dirCallStatus, `❌ Failed to call ${toName || "user"}: ${error.message}`);
+    logDiag("startCallToUid error: " + error.message);
+    console.error("Direct call error details:", error);
+  }
+}
+
+
+async function sendCallNotification(toUid, toName, roomId) {
+  try {
+    logDiag(`Sending call notification to ${toUid} for room ${roomId}`);
+    
+    // Create a call document in the user's incoming calls collection
+    const callRef = doc(collection(db, "users", toUid, "incomingCalls"));
+    const callId = callRef.id;
+    
+    await setDoc(callRef, {
+      callId: callId,
+      roomId: roomId,
+      fromUid: myUid,
+      fromName: myDisplayName || "Unknown",
+      toUid: toUid,
+      toName: toName || "",
+      note: callNoteInput.value.trim() || "",
+      createdAt: serverTimestamp(),
+      status: "ringing"
+    });
+    
+    logDiag(`Call notification ${callId} saved for user ${toUid}`);
+    
+    // Trigger push notification via your cloud function
+    await fetch(NOTIFY_CALL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        toUid: toUid,
+        roomId: roomId,
+        fromName: myDisplayName || "Unknown",
+        toName: toName || "",
+        note: callNoteInput.value.trim() || "",
+        callId: callId
+      })
+    });
+    
+    logDiag("Push notification triggered");
+    
+  } catch (error) {
+    logDiag("sendCallNotification error: " + error.message);
+    console.error("Notification error details:", error);
+  }
 }
 
 // ==================== INITIALIZE ====================
