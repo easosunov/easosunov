@@ -1173,7 +1173,29 @@ async function createRoom(){
     
     // Initialize peer connection for this room
     await ensurePeer();
+    // In createRoom function, after ensurePeer():
+pc.onicecandidate = (e) => {
+  console.log("🔥 CALLER ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
+  
+  if (e.candidate) {
+    console.log("🔥 Candidate details:", {
+      type: e.candidate.type,
+      protocol: e.candidate.protocol,
+      candidate: e.candidate.candidate.substring(0, 100) + "..."
+    });
     
+    // Try to write with error handling
+    addDoc(caller, { session, ...e.candidate.toJSON() })
+      .then(() => console.log("✅ Caller candidate written to Firestore"))
+      .catch(err => {
+        console.error("❌ Failed to write caller candidate:", err);
+        console.error("Error code:", err.code);
+        console.error("Error message:", err.message);
+      });
+  } else {
+    console.log("🔥 Caller ICE gathering complete");
+  }
+};
     // Create initial offer
     try {
       const offer = await pc.createOffer();
@@ -1285,7 +1307,26 @@ async function joinRoom(){
     
     // Initialize peer connection
     await ensurePeer();
+    // In joinRoom function:
+pc.onicecandidate = (e) => {
+  console.log("🔥 CALLEE ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
+  
+  if (e.candidate) {
+    console.log("🔥 Callee candidate details:", {
+      type: e.candidate.type,
+      protocol: e.candidate.protocol
+    });
     
+    addDoc(callee, { session, ...e.candidate.toJSON() })
+      .then(() => console.log("✅ Callee candidate written to Firestore"))
+      .catch(err => {
+        console.error("❌ Failed to write callee candidate:", err);
+        console.error("Error code:", err.code);
+      });
+  } else {
+    console.log("🔥 Callee ICE gathering complete");
+  }
+};
     // Set remote offer
     await pc.setRemoteDescription(roomData.offer);
     
