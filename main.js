@@ -1,3 +1,71 @@
+<!-- Add this RIGHT BEFORE your modules.js script -->
+<script>
+// DIAGNOSTIC SCRIPT - REMOVE AFTER FIXING
+console.log('=== STARTING DIAGNOSTICS ===');
+
+// Test 1: Check if modules load
+console.log('1. Testing module imports...');
+try {
+  // This will fail if modules.js has issues
+  import('./modules.js').then(() => {
+    console.log('✅ modules.js loads successfully');
+  }).catch(e => {
+    console.error('❌ modules.js failed:', e.message);
+  });
+} catch (e) {
+  console.error('❌ Import syntax error:', e.message);
+}
+
+// Test 2: Check for global errors
+window.addEventListener('error', (e) => {
+  console.error('🔥 GLOBAL ERROR:', {
+    message: e.message,
+    filename: e.filename,
+    lineno: e.lineno,
+    colno: e.colno,
+    error: e.error
+  });
+});
+
+// Test 3: Check for unhandled promise rejections
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('🔥 UNHANDLED PROMISE:', e.reason);
+});
+
+// Test 4: Simple Firebase test
+console.log('2. Testing Firebase...');
+console.log('Firebase available:', typeof firebase !== 'undefined');
+if (typeof firebase !== 'undefined') {
+  console.log('Firebase apps:', firebase.apps?.length);
+}
+
+// Test 5: Check if page is loading
+let loadTimeout = setTimeout(() => {
+  console.log('⚠️ Page seems stuck. Check for:');
+  console.log('- Module import failures');
+  console.log('- Syntax errors in main.js');
+  console.log('- Infinite loops');
+}, 5000);
+
+window.addEventListener('load', () => {
+  clearTimeout(loadTimeout);
+  console.log('✅ Page loaded completely');
+});
+</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ==================== IMPORT MODULES ====================
 import { 
   initializeApp,
