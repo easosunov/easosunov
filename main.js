@@ -674,6 +674,113 @@ function autoEnablePushOnLogin(){
   window.addEventListener("click", handler, { once:true, capture:true });
 }
 
+// ==================== UI STATE MANAGEMENT ====================
+function refreshCopyInviteState(){
+  if (!copyLinkBtn || !roomIdInput) return;
+  
+  const hasRoomId = !!roomIdInput.value.trim();
+  const canCopy = isAuthed && hasRoomId;
+  
+  copyLinkBtn.disabled = !canCopy;
+  
+  // Also update copy link button text
+  if (canCopy) {
+    copyLinkBtn.title = "Copy invite link to clipboard";
+  } else if (!isAuthed) {
+    copyLinkBtn.title = "Sign in to copy invite";
+  } else {
+    copyLinkBtn.title = "Create or join a room first";
+  }
+  
+  logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId=${hasRoomId}, disabled=${copyLinkBtn.disabled}`);
+}
+
+// ==================== COPY INVITE LINK ====================
+async function copyTextRobust(text){
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (e) {
+      console.warn("Clipboard write failed:", e);
+    }
+  }
+  
+  // Fallback for older browsers or insecure contexts
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.position = "fixed";
+  textArea.style.left = "-999999px";
+  textArea.style.top = "-999999px";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  
+  try {
+    document.execCommand('copy');
+    return true;
+  } catch (e) {
+    console.warn("Fallback copy failed:", e);
+  } finally {
+    document.body.removeChild(textArea);
+  }
+  
+  // Last resort: prompt
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
+// Update the copyLinkBtn event handler
+if (copyLinkBtn) {
+  copyLinkBtn.onclick = async () => {
+    const roomId = roomIdInput?.value.trim();
+    if (!roomId) {
+      setStatus(callStatus, "No room ID to copy");
+      return;
+    }
+    
+    const inviteUrl = `${window.location.origin}${window.location.pathname}#${roomId}`;
+    const success = await copyTextRobust(inviteUrl);
+    
+    if (success) {
+      setStatus(callStatus, "✅ Invite link copied!");
+      logDiag(`Copied invite: ${inviteUrl}`);
+      
+      // Show temporary success message
+      setTimeout(() => {
+        setStatus(callStatus, `Room: ${roomId}`);
+      }, 2000);
+    } else {
+      setStatus(callStatus, "⚠️ Could not copy automatically");
+    }
+  };
+}
+
+// ==================== ROOM INPUT LISTENER ====================
+if (roomIdInput) {
+  roomIdInput.addEventListener("input", () => {
+    refreshCopyInviteState();
+  });
+}
+
+// ==================== AUTO-JOIN FROM URL HASH ====================
+(function checkUrlHashForRoom() {
+  if (location.hash && location.hash.length > 1) {
+    const roomIdFromHash = location.hash.substring(1);
+    if (roomIdInput && roomIdFromHash) {
+      roomIdInput.value = roomIdFromHash;
+      logDiag(`Room ID from URL hash: ${roomIdFromHash}`);
+      setStatus(callStatus, `Room detected in URL: ${roomIdFromHash}`);
+      
+      // Auto-enable copy button if user is logged in
+      setTimeout(() => refreshCopyInviteState(), 100);
+    }
+  }
+})();
+
+
+
+
 // ==================== BUTTON EVENT HANDLERS ====================
 startBtn.onclick = async ()=>{
   try{
@@ -1011,87 +1118,245 @@ async function startMedia(){
 }
 
 // ==================== ROOM MANAGEMENT ====================
+// ==================== ROOM CREATION ====================
 async function createRoom(){
-  if(!requireAuthOrPrompt()) return null;
+  if(!requireAuthOrPrompt()) {
+    setStatus(callStatus, "Please sign in first");
+    return null;
+  }
 
   try {
+    // Ensure media is started first
     await startMedia();
+
+    // Clear any existing peer connection
+    closePeer();
 
     // Create room reference
     const roomRef = doc(collection(db, "rooms"));
     const roomId = roomRef.id;
     
-    roomIdInput.value = roomId;
+    // Update UI
+    if (roomIdInput) {
+      roomIdInput.value = roomId;
+      roomIdInput.focus();
+    }
+    
+    // Update URL hash
     location.hash = roomId;
     
-    logDiag("Created room: " + roomId);
-    setStatus(callStatus, `Room created: ${roomId}`);
-
+    // Create initial room data
+    await setDoc(roomRef, {
+      createdAt: serverTimestamp(),
+      createdBy: myUid,
+      createdByName: myDisplayName || "Unknown",
+      status: "waiting",
+      session: 1,
+      offer: null,
+      answer: null,
+      updatedAt: Date.now()
+    });
+    
+    // Update status
+    setStatus(callStatus, `✅ Room created: ${roomId}`);
+    setStatus(dirCallStatus, "Waiting for someone to join...");
+    
+    // Refresh UI state
     refreshCopyInviteState();
+    
+    // Enable hangup button
+    if (hangupBtn) {
+      hangupBtn.disabled = false;
+    }
+    
+    logDiag(`Room created: ${roomId} by ${myUid}`);
+    
+    // Initialize peer connection for this room
+    await ensurePeer();
+    
+    // Create initial offer
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      // Save offer to Firestore
+      await updateDoc(roomRef, {
+        offer: { type: offer.type, sdp: offer.sdp },
+        updatedAt: Date.now()
+      });
+      
+      logDiag("Created and saved offer");
+      setStatus(callStatus, `Room active: ${roomId} - waiting for answer`);
+      
+    } catch (offerError) {
+      logDiag("Failed to create offer: " + offerError.message);
+      setStatus(callStatus, `Room created but offer failed: ${offerError.message}`);
+    }
 
+    // Set up listeners for this room
+    setupRoomListeners(roomRef);
+    
     return { roomId, roomRef };
+    
   } catch (e) {
-    setStatus(callStatus, "Failed to create room: " + e.message);
+    setStatus(callStatus, "❌ Failed to create room: " + e.message);
     logDiag("createRoom error: " + e.message);
-    throw e;
+    showError(e);
+    return null;
   }
 }
 
-async function joinRoom(){
-  if(!requireAuthOrPrompt()) return;
+// ==================== ROOM LISTENERS ====================
+function setupRoomListeners(roomRef) {
+  // Listen for answers
+  const unsubscribe = onSnapshot(roomRef, async (snap) => {
+    if (!snap.exists()) return;
+    
+    const data = snap.data();
+    
+    // Check for answer
+    if (data.answer && pc && pc.signalingState === "have-local-offer") {
+      try {
+        await pc.setRemoteDescription(data.answer);
+        logDiag("Remote answer accepted");
+        setStatus(callStatus, "✅ Connected!");
+        setStatus(dirCallStatus, "In call...");
+      } catch (e) {
+        logDiag("Failed to set remote description: " + e.message);
+      }
+    }
+    
+    // Check for ICE candidates
+    if (data.iceCandidates) {
+      // Handle incoming ICE candidates
+    }
+  });
+  
+  // Store unsubscribe function for cleanup
+  window.currentRoomUnsubscribe = unsubscribe;
+}
 
-  const roomId = roomIdInput.value.trim();
+// ==================== CLEANUP FUNCTION ====================
+function cleanupRoom() {
+  if (window.currentRoomUnsubscribe) {
+    window.currentRoomUnsubscribe();
+    window.currentRoomUnsubscribe = null;
+  }
+  closePeer();
+}
+// ==================== JOIN ROOM ====================
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) {
+    setStatus(callStatus, "Please sign in first");
+    return;
+  }
+
+  const roomId = roomIdInput?.value.trim();
   if(!roomId) {
     setStatus(callStatus, "Please enter a room ID");
     return;
   }
 
   try {
+    // Ensure media is started
     await startMedia();
-
+    
+    // Clear any existing connection
+    closePeer();
+    
     const roomRef = doc(db, "rooms", roomId);
     const snap = await getDoc(roomRef);
     
     if(!snap.exists()) {
-      throw new Error("Room not found");
+      throw new Error(`Room "${roomId}" not found`);
     }
-
+    
+    const roomData = snap.data();
+    
+    if (!roomData.offer) {
+      throw new Error("Room has no offer yet");
+    }
+    
+    // Update URL
     location.hash = roomId;
-    setStatus(callStatus, "Joining room: " + roomId);
-    logDiag("Joining room: " + roomId);
-
-    // TODO: Add WebRTC signaling logic here
+    
+    setStatus(callStatus, `Joining room: ${roomId}`);
+    logDiag(`Joining room: ${roomId}`);
+    
+    // Initialize peer connection
+    await ensurePeer();
+    
+    // Set remote offer
+    await pc.setRemoteDescription(roomData.offer);
+    
+    // Create answer
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    
+    // Send answer back
+    await updateDoc(roomRef, {
+      answer: { type: answer.type, sdp: answer.sdp },
+      answeredBy: myUid,
+      answeredByName: myDisplayName || "Unknown",
+      answeredAt: serverTimestamp(),
+      status: "connected",
+      updatedAt: Date.now()
+    });
+    
+    setStatus(callStatus, `✅ Joined room: ${roomId}`);
+    setStatus(dirCallStatus, "Connecting...");
+    
+    // Enable hangup button
+    if (hangupBtn) {
+      hangupBtn.disabled = false;
+    }
+    
+    // Setup listeners
+    setupRoomListeners(roomRef);
+    
+    logDiag(`Successfully joined room ${roomId}`);
     
   } catch (e) {
-    setStatus(callStatus, "Failed to join: " + e.message);
+    setStatus(callStatus, "❌ Failed to join: " + e.message);
     logDiag("joinRoom error: " + e.message);
-    throw e;
+    showError(e);
   }
 }
 
 // ==================== SYSTEM CLEANUP ====================
+
 function stopAll(){
+  // Clean up room listeners
+  cleanupRoom();
+  
+  // Close peer connection
   closePeer();
   
+  // Stop local media
   if(localStream){
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
   }
   
+  // Clear video elements
   if(localVideo) localVideo.srcObject = null;
   if(remoteVideo) remoteVideo.srcObject = null;
-
-  startBtn.disabled = !isAuthed;
-  createBtn.disabled = true;
-  joinBtn.disabled = true;
-
+  
+  // Update UI buttons
+  if(startBtn) startBtn.disabled = !isAuthed;
+  if(createBtn) createBtn.disabled = true;
+  if(joinBtn) joinBtn.disabled = true;
+  if(hangupBtn) hangupBtn.disabled = true;
+  
+  // Update status
   setStatus(mediaStatus, "Not started.");
   setStatus(callStatus, "No room yet.");
-
-  hangupBtn.disabled = true;
   setStatus(dirCallStatus, "Idle.");
-
-  logDiag("All stopped");
+  
+  // Refresh copy invite state
+  refreshCopyInviteState();
+  
+  logDiag("All stopped and cleaned up");
 }
 
 // ==================== AUDIO MANAGEMENT ====================
