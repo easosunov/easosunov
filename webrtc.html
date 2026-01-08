@@ -4,18 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>WebRTC</title>
-<link rel="manifest" href="manifest.json">
-
-<meta name="mobile-web-app-capable" content="yes">
- <!-- iOS meta tags for PWA -->
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="WebRTC Communicator">
-<link rel="apple-touch-icon" href="icons/RTC192.png">
-
-<!-- For iOS splash screens (optional but recommended) -->
-<link rel="apple-touch-startup-image" href="splash/apple-splash-2048-2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
-<link rel="apple-touch-startup-image" href="splash/apple-splash-2732-2048.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)">
+ <link rel="manifest" href="manifest.json">
 
 <style>
 body{font-family:system-ui;margin:16px} 
@@ -117,71 +106,26 @@ select{
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
-
-/* PWA Installation Prompt */
-#pwaInstallPrompt {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: white;
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-  z-index: 10000;
-  max-width: 320px;
-  display: none;
-}
-#pwaInstallPrompt button {
-  margin-top: 10px;
-  width: 100%;
-}
-
-/* Mobile optimizations */
+/* This media query will only apply styles for mobile screens (max-width: 720px) */
 @media (max-width: 720px) {
   body {
-    font-size: 18px;
-    margin: 8px;
+    font-size: 18px; /* Larger font size for body text */
   }
 
   h1 {
-    font-size: 24px;
+    font-size: 24px; /* Increase header size */
   }
 
   h2 {
-    font-size: 20px;
+    font-size: 20px; /* Larger sub-header size */
   }
 
   p, .status, .small {
-    font-size: 16px;
+    font-size: 16px; /* Increase font size for paragraphs, status text, and small text */
   }
 
-  button {
-    font-size: 16px;
-    padding: 12px 14px;
-  }
-
-  .card {
-    padding: 16px;
-  }
-
-  /* Improve touch targets */
-  button, input, select {
-    min-height: 44px;
-  }
-}
-
-/* iOS specific optimizations */
-@supports (-webkit-touch-callout: none) {
-  /* iOS specific styles */
-  video {
-    -webkit-transform: translateZ(0);
-    transform: translateZ(0);
-  }
-  
-  /* Prevent zoom on input focus */
-  input, select, textarea {
-    font-size: 16px !important;
+  .button {
+    font-size: 16px; /* Increase font size for buttons */
   }
 }
 
@@ -192,14 +136,6 @@ select{
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
 
 <div id="errorBox"></div>
-
-<!-- PWA Install Prompt -->
-<div id="pwaInstallPrompt">
-  <h3 style="margin:0 0 10px;">📱 Install App</h3>
-  <div class="small">Install this app on your device for better notifications and offline access.</div>
-  <button id="installPwaBtn">Install App</button>
-  <button id="dismissPwaBtn" style="background:#eee;margin-top:8px;">Not Now</button>
-</div>
 
 <!-- INCOMING CALL -->
 <div id="incomingOverlay">
@@ -261,6 +197,8 @@ select{
   </div>
 </div>
 
+
+
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
     </div>
 
@@ -288,7 +226,6 @@ select{
       <b>Status</b>
       <div class="status" id="myNameStatus">Not set.</div>
       <div class="status" id="pushStatus">Push: not enabled.</div>
-      <div class="status" id="pwaStatus">PWA: Not installed</div>
       <div class="status" id="dirCallStatus">Idle.</div>
     </div>
 
@@ -336,25 +273,30 @@ select{
       <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
     </div>
 
-        <!-- PWA / Background Service -->
+        <!-- Utilities -->
    <div class="bottomCard">
-  <b>Background Notifications</b>
-  <div class="small">
-    <strong>For best experience:</strong><br>
-    1. Install as PWA (click "Install" prompt)<br>
-    2. Allow notifications<br>
-    3. Keep installed for background calls<br>
-  </div>
+  <b>Background Notifier</b>
   <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="startBackgroundSyncBtn" disabled>Enable Background Sync</button>
-    <button id="checkPwaInstallBtn">Check PWA Status</button>
+    <button id="startBgBtn" disabled>Start Background Service</button>
+    <button id="stopBgBtn" disabled>Stop Background Service</button>
   </div>
-  <div class="status" id="pwaServiceStatus">Background service: Not active</div>
+  <div class="status" id="bgStatus">Status: Not connected</div>
   <div class="small">
-    <strong>Platform support:</strong><br>
-    • Android: Full PWA support ✓<br>
-    • iOS: Limited background (needs app open)<br>
-    • Windows: PWA or Electron app<br>
+    Runs in system tray to show notifications when browser is closed.<br>
+    <strong>Download installer:</strong><br>
+    <a href="https://github.com/easosunov/easosunov/releases/download/v1.0.0/webrtc-notifier-installer.zip" 
+       id="downloadBgLink"
+       target="_blank"
+       download="webrtc-notifier-installer.zip"
+       style="color:#1976d2; text-decoration:underline">
+      webrtc-notifier-installer.zip
+    </a>
+    <div class="small" style="color:#666; margin-top:4px; font-size:11px">
+      After downloading:<br>
+      1. Extract the ZIP file<br>
+      2. Run <code style="background:#f5f5f5; padding:2px 6px">webrtc-notifier-installer.exe</code><br>
+      3. Look for 📞 icon in system tray
+    </div>
   </div>
 </div>
    
@@ -369,7 +311,6 @@ select{
         <button id="testSoundBtn" disabled>Test Ring Sound</button>
         <button id="resetPushBtn" disabled>Reset Push</button>
         <button id="refreshUsersBtn" disabled>Refresh Users</button>
-        <button id="testNotificationBtn" disabled>Test Notification</button>
       </div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
@@ -389,37 +330,10 @@ select{
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2026-01-08-pwa-enhanced-v1");
+console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
-// Add this at the top of your JavaScript, right after DOM ready
-document.addEventListener('DOMContentLoaded', function() {
-  // Create status element if it doesn't exist
-  if (!document.getElementById('status')) {
-    const statusEl = document.createElement('div');
-    statusEl.id = 'status';
-    statusEl.style.cssText = 'position:fixed;bottom:10px;left:10px;background:rgba(0,0,0,0.7);color:white;padding:5px;border-radius:3px;z-index:9999;font-size:12px;';
-    document.body.appendChild(statusEl);
-  }
-  
-  // Define setStatus function
-  window.setStatus = function(message) {
-    const statusEl = document.getElementById('status');
-    if (statusEl) {
-      statusEl.textContent = message;
-    }
-    console.log('[Status]', message);
-  };
-  
-  // Now call your initialization functions
-  initializeApp();
-});
- 
-// Track if we showed a notification (for background app coordination)
+ // Track if we showed a notification (for background app coordination)
 let webPageShowedNotification = false;
-
-// Track PWA installation state
-let isPwaInstalled = false;
-let deferredPrompt = null;
 
 // Handle notification redirects
 (function handleNotificationRedirect() {
@@ -467,7 +381,6 @@ let swBootstrapReg = null;
 async function ensureServiceWorkerInstalled() {
   if (!("serviceWorker" in navigator)) {
     console.log("[SW] not supported");
-    setStatus(pwaStatus, "PWA: Service Worker not supported");
     return null;
   }
 
@@ -478,7 +391,7 @@ async function ensureServiceWorkerInstalled() {
 
   const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
   // bump version when you change SW file
-  swUrl.searchParams.set("v", "2026-01-08-pwa-enhanced-v1");
+  swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
 
   try {
     swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
@@ -487,104 +400,15 @@ async function ensureServiceWorkerInstalled() {
     });
     await navigator.serviceWorker.ready;
     console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
-    setStatus(pwaStatus, "PWA: Service Worker registered");
     return swBootstrapReg;
   } catch (e) {
     console.error("[SW] bootstrap register failed:", e);
-    setStatus(pwaStatus, "PWA: Failed to register");
     return null;
   }
 }
 
 // RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
-
-// PWA Installation Handling
-function setupPwaInstallPrompt() {
-  // Check if app is already installed
-  if (window.matchMedia('(display-mode: standalone)').matches ||
-      window.navigator.standalone === true) {
-    isPwaInstalled = true;
-    setStatus(pwaStatus, "PWA: Installed ✓");
-    document.getElementById('pwaInstallPrompt').style.display = 'none';
-  }
-  
-  // Listen for beforeinstallprompt event
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    
-    // Show install prompt if not already installed
-    if (!isPwaInstalled) {
-      document.getElementById('pwaInstallPrompt').style.display = 'block';
-    }
-  });
-  
-  // Listen for app installed event
-  window.addEventListener('appinstalled', (evt) => {
-    console.log('PWA installed successfully');
-    isPwaInstalled = true;
-    setStatus(pwaStatus, "PWA: Installed ✓");
-    document.getElementById('pwaInstallPrompt').style.display = 'none';
-    
-    // Request notification permission after installation
-    setTimeout(() => {
-      if (Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
-    }, 1000);
-  });
-  
-  // Install button handler
-  document.getElementById('installPwaBtn').addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      console.log('User accepted PWA installation');
-    } else {
-      console.log('User dismissed PWA installation');
-    }
-    
-    deferredPrompt = null;
-    document.getElementById('pwaInstallPrompt').style.display = 'none';
-  });
-  
-  // Dismiss button handler
-  document.getElementById('dismissPwaBtn').addEventListener('click', () => {
-    document.getElementById('pwaInstallPrompt').style.display = 'none';
-    // Hide for 7 days
-    localStorage.setItem('pwaPromptDismissed', Date.now().toString());
-  });
-  
-  // Check if prompt was recently dismissed
-  const lastDismissed = localStorage.getItem('pwaPromptDismissed');
-  if (lastDismissed) {
-    const daysSinceDismiss = (Date.now() - parseInt(lastDismissed)) / (1000 * 60 * 60 * 24);
-    if (daysSinceDismiss < 7) {
-      document.getElementById('pwaInstallPrompt').style.display = 'none';
-    }
-  }
-}
-
-// Initialize PWA prompt
-setupPwaInstallPrompt();
-
-// Check PWA installation status
-document.getElementById('checkPwaInstallBtn').addEventListener('click', () => {
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || 
-                      window.navigator.standalone === true;
-  
-  if (isStandalone) {
-    alert('✅ App is installed as PWA\n\nYou will receive better background notifications.');
-    setStatus(pwaStatus, "PWA: Installed ✓");
-    isPwaInstalled = true;
-  } else {
-    alert('📱 App is running in browser\n\nFor best experience with background notifications:\n1. Use Chrome/Edge on Android\n2. Tap menu (⋮) → "Install app"\n3. Allow notifications when prompted');
-  }
-});
 
  const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 
@@ -638,20 +462,20 @@ const dirCallStatus = document.getElementById("dirCallStatus");
 
 /* Push + sound + hangup */
 const pushStatus = document.getElementById("pushStatus");
-const pwaStatus = document.getElementById("pwaStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 const resetPushBtn = document.getElementById("resetPushBtn");
 const callNoteInput = document.getElementById("callNoteInput");
-const testNotificationBtn = document.getElementById("testNotificationBtn");
-
-/* PWA Background Sync */
-const startBackgroundSyncBtn = document.getElementById("startBackgroundSyncBtn");
-const pwaServiceStatus = document.getElementById("pwaServiceStatus");
 
 /* ===== NEW: video quality UI elements ===== */
 const videoQualitySelect = document.getElementById("videoQualitySelect");
 const videoQualityStatus = document.getElementById("videoQualityStatus");
+
+// Background service elements
+const startBgBtn = document.getElementById('startBgBtn');
+const stopBgBtn = document.getElementById('stopBgBtn');
+const bgStatus = document.getElementById('bgStatus');
+const downloadBgLink = document.getElementById('downloadBgLink');
 
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -761,86 +585,120 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ================== BACKGROUND SYNC API ================== */
-// Register Background Sync for periodic checking
-async function registerBackgroundSync() {
-  if (!('serviceWorker' in navigator) || !('SyncManager' in window)) {
-    logDiag('Background Sync API not supported');
-    pwaServiceStatus.textContent = 'Background Sync: Not supported';
-    return false;
-  }
-
+/* ================== BACKGROUND SERVICE ================== */
+// Test if background service is running
+async function checkBackgroundService() {
   try {
-    const registration = await navigator.serviceWorker.ready;
-    
-    // Register periodic sync (check every few hours)
-    if ('periodicSync' in registration) {
-      try {
-        await registration.periodicSync.register('check-calls', {
-          minInterval: 6 * 60 * 60 * 1000, // 6 hours minimum
-        });
-        logDiag('Periodic Background Sync registered');
-      } catch (periodicError) {
-        logDiag('Periodic sync failed, trying regular sync: ' + periodicError.message);
-      }
-    }
-    
-    // Register regular background sync
-    await registration.sync.register('check-calls');
-    
-    pwaServiceStatus.textContent = 'Background Sync: Registered ✓';
-    logDiag('Background Sync registered successfully');
-    
-    // Listen for sync events
-    navigator.serviceWorker.addEventListener('message', (event) => {
-      if (event.data && event.data.type === 'SYNC_COMPLETED') {
-        logDiag('Background sync completed');
-        if (event.data.hasNewCalls) {
-          logDiag('New calls found in background sync');
-        }
-      }
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
     });
-    
-    return true;
+    const data = await response.json();
+    return data;
   } catch (error) {
-    logDiag('Background Sync registration failed: ' + error.message);
-    pwaServiceStatus.textContent = 'Background Sync: Failed';
-    return false;
+    // Service is not running or not reachable
+    return { isRunning: false, uid: null };
   }
 }
 
-// Test notification function
-async function testLocalNotification() {
+// Start background service
+async function startBackgroundService() {
   if (!isAuthed || !myUid) {
     alert('Please sign in first');
     return;
   }
-
+  
   try {
-    const registration = await navigator.serviceWorker.ready;
+    bgStatus.textContent = 'Connecting to background service...';
     
-    await registration.showNotification('Test Notification', {
-      body: 'This is a test notification from WebRTC Communicator',
-      tag: `test-${Date.now()}`,
-      icon: '/easosunov/icon.png',
-      requireInteraction: true,
-      data: {
-        test: true,
-        timestamp: Date.now()
-      }
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
     });
     
-    logDiag('Test notification shown');
-    alert('Test notification sent! Check your notifications.');
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = '✅ Background service active';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
   } catch (error) {
-    logDiag('Test notification failed: ' + error.message);
-    alert('Failed to show test notification. Make sure notifications are allowed.');
+    bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    // Show helpful message
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
   }
 }
 
-// Setup background sync button
-startBackgroundSyncBtn.onclick = registerBackgroundSync;
-testNotificationBtn.onclick = testLocalNotification;
+// Stop background service
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Background service stopped';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+// Update service status
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        bgStatus.textContent = '✅ Background service active';
+        startBgBtn.disabled = true;
+        stopBgBtn.disabled = false;
+      } else {
+        bgStatus.textContent = 'Background service ready';
+        stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      bgStatus.textContent = 'Background app not detected';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// Event listeners
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+// Download link
+// Download link - remove onclick handler since href is already set
+// Or update to use your GitHub URL
+downloadBgLink.onclick = (e) => {
+  // Optional: Add analytics or confirmation
+  console.log('Downloading background app...');
+  // Let the default link behavior happen (browser will download)
+};
 
 /* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
 const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
@@ -1833,7 +1691,6 @@ if (currentIncomingCall?.id === callId) return;
           tag: `webrtc-call-${myUid}`,
           renotify: true,
           requireInteraction: true,
-          icon: '/easosunov/icon.png',
           data: { callId, roomId: call.roomId || "", fromName, note }
         });
       }
@@ -1876,7 +1733,7 @@ async function catchUpMissedCallNotification() {
             body,
             tag: `webrtc-missed-${myUid}`,
             renotify: true,
-            icon: '/easosunov/icon.png',
+            requireInteraction: true,
             data: { callId, roomId: call.roomId || "", fromName, note }
           });
         }
@@ -2454,7 +2311,8 @@ if(prev.uid && prev.uid !== myUid){
 
   try {
     const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
-    swUrl.searchParams.set("v", "2026-01-08-pwa-enhanced-v1");
+    swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
+
 
     const resp = await fetch(swUrl.toString(), { cache: "no-store" });
     const ct = resp.headers.get("content-type") || "";
@@ -2674,7 +2532,6 @@ onAuthStateChanged(auth, async (user)=>{
 
     testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
-    testNotificationBtn.disabled = false;
 
     await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
@@ -2703,10 +2560,9 @@ onAuthStateChanged(auth, async (user)=>{
       }).catch(()=>{});
     }
 
-    // Enable Background Sync button if supported
-    if ('serviceWorker' in navigator && 'SyncManager' in window) {
-      startBackgroundSyncBtn.disabled = false;
-    }
+    // Update background service status
+    updateServiceStatus();
+    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
@@ -2721,18 +2577,17 @@ onAuthStateChanged(auth, async (user)=>{
 
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
-    testNotificationBtn.disabled = true;
 
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
     setStatus(pushStatus, "Push: not enabled.");
-    setStatus(pwaStatus, "PWA: Not installed");
     setStatus(dirCallStatus, "Idle.");
     myNameStatus.textContent = "Not set.";
 
-    pwaServiceStatus.textContent = 'Background service: Not active';
-    startBackgroundSyncBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
 
     usersList.innerHTML = "";
     allUsersCache = [];
