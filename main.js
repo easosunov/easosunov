@@ -1922,7 +1922,9 @@ async function enablePush(){
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
   if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
-
+// Android-specific setup
+  if (isAndroid) {await setupPushForAndroid();
+                  
   try {
     const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
     swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
@@ -2411,27 +2413,5 @@ async function setupPushForAndroid() {
   }
 }
 
-// Update your existing enablePush function to handle Android
-// Replace or modify your existing enablePush function with:
-async function enablePush() {
-  logDiag("enablePush(): ENTER");
-  if(!requireAuthOrPrompt()) return;
-
-  const prev = getSavedPushBinding();
-  if(prev.uid && prev.uid !== myUid){
-    await revokePushForCurrentDevice();
-  }
-  
-  if (!("Notification" in window)) { 
-    setStatus(pushStatus, "Push: not supported in this browser."); 
-    return; 
-  }
-  
-  // Android-specific setup
-  if (isAndroid) {
-    await setupPushForAndroid();
-  }
-  
-  // Rest of your existing enablePush code...
-  // [Keep your existing enablePush code here, but add Android checks]
+enablePush code here, but add Android checks]
 }
