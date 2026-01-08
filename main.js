@@ -676,26 +676,36 @@ function autoEnablePushOnLogin(){
 
 // ==================== UI STATE MANAGEMENT ====================
 function refreshCopyInviteState(){
-  if (!copyLinkBtn || !roomIdInput) return;
+  if (!copyLinkBtn || !roomIdInput) {
+    logDiag("refreshCopyInviteState: elements not found");
+    return;
+  }
   
-  // Add a small delay to ensure DOM is updated
-  setTimeout(() => {
+  // Use requestAnimationFrame to ensure DOM is updated
+  requestAnimationFrame(() => {
     const hasRoomId = !!roomIdInput.value.trim();
     const canCopy = isAuthed && hasRoomId;
     
     copyLinkBtn.disabled = !canCopy;
     
-    // Also update copy link button text
+    // Debug logging
+    logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId="${roomIdInput.value}" (${hasRoomId}), disabled=${copyLinkBtn.disabled}`);
+    
+    // Also update copy link button text and style
     if (canCopy) {
       copyLinkBtn.title = "Copy invite link to clipboard";
+      copyLinkBtn.style.opacity = "1";
+      copyLinkBtn.style.cursor = "pointer";
     } else if (!isAuthed) {
       copyLinkBtn.title = "Sign in to copy invite";
+      copyLinkBtn.style.opacity = "0.6";
+      copyLinkBtn.style.cursor = "not-allowed";
     } else {
       copyLinkBtn.title = "Create or join a room first";
+      copyLinkBtn.style.opacity = "0.6";
+      copyLinkBtn.style.cursor = "not-allowed";
     }
-    
-    logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId=${hasRoomId}, disabled=${copyLinkBtn.disabled}`);
-  }, 100);
+  });
 }
 // ==================== COPY INVITE LINK ====================
 async function copyTextRobust(text){
@@ -1153,7 +1163,6 @@ async function startMedia(){
 }
 
 // ==================== ROOM MANAGEMENT ====================
-// ==================== SIMPLIFIED ROOM CREATION ====================
 async function createRoom(){
   if(!requireAuthOrPrompt()) {
     logDiag("createRoom: not authenticated");
@@ -1177,10 +1186,13 @@ async function createRoom(){
     
     logDiag(`Creating room: ${roomId}`);
     
-    // Update UI
+    // Update UI - CRITICAL: Update roomIdInput before refreshing state
     roomIdInput.value = roomId;
     location.hash = roomId;
     setStatus(callStatus, `Creating room: ${roomId}`);
+    
+    // Immediately refresh copy button state
+    refreshCopyInviteState();
     
     // Create collections
     const callerCandidates = collection(roomRef, "callerCandidates");
@@ -1257,6 +1269,12 @@ async function createRoom(){
     // Enable hangup button
     hangupBtn.disabled = false;
     
+    // FINAL refresh of copy button state - ensure it's enabled
+    setTimeout(() => {
+      refreshCopyInviteState();
+      logDiag(`Final copy button check - Room ID: "${roomIdInput.value}", Disabled: ${copyLinkBtn.disabled}`);
+    }, 100);
+    
     logDiag(`Room ${roomId} created successfully`);
     return { roomId, roomRef };
     
@@ -1267,7 +1285,6 @@ async function createRoom(){
     return null;
   }
 }
-
 // ==================== ROOM LISTENERS ====================
 function setupRoomListeners(roomRef) {
   // Listen for answers
@@ -1350,6 +1367,9 @@ async function joinRoom(){
     location.hash = roomId;
     setStatus(callStatus, `Joining room: ${roomId}`);
     
+    // Refresh copy button state immediately
+    refreshCopyInviteState();
+    
     // Create collections
     const callerCandidates = collection(roomRef, "callerCandidates");
     const calleeCandidates = collection(roomRef, "calleeCandidates");
@@ -1404,6 +1424,12 @@ async function joinRoom(){
     
     // Enable hangup button
     hangupBtn.disabled = false;
+    
+    // Final refresh of copy button state
+    setTimeout(() => {
+      refreshCopyInviteState();
+      logDiag(`Final copy button check after join - Room ID: "${roomIdInput.value}", Disabled: ${copyLinkBtn.disabled}`);
+    }, 100);
     
     logDiag(`Successfully joined room ${roomId}`);
     
