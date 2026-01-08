@@ -14,6 +14,56 @@
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
 <div id="errorBox"></div>
 
+<!-- ==================== Android ==================== -->
+<!-- Add this near the top of your body, after the errorBox -->
+<div id="pwaInstallBanner" style="display: none;">
+  <div style="
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 12px;
+    margin: 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  ">
+    <div>
+      <strong>📱 Install as App</strong>
+      <div style="font-size: 13px; opacity: 0.9;">
+        Get native notifications and work offline
+      </div>
+    </div>
+    <button id="installPwaBtnMain" style="
+      background: white;
+      color: #667eea;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      cursor: pointer;
+    ">
+      Install
+    </button>
+  </div>
+</div>
+
+<!-- Add to your Utilities card in the bottom panel -->
+<div class="bottomCard">
+  <b>PWA & Android</b>
+  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="checkPwaBtn">Check PWA Status</button>
+    <button id="installBtn" style="display:none;">Install as App</button>
+  </div>
+  <div class="status" id="pwaStatus">PWA: Not installed</div>
+  <div class="small">
+    <strong>Android users:</strong> Install for background notifications.<br>
+    Tap "Install as App" when prompted.
+  </div>
+</div>
+
+
+  
 <!-- ==================== INCOMING CALL MODAL ==================== -->
 <div id="incomingOverlay">
   <div id="incomingCard">
