@@ -12,7 +12,7 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-08-clean");
+console.log("APP VERSION:", "2026-01-08-fixed");
 
 // ==================== STATE VARIABLES ====================
 let isAuthed = false;
@@ -53,6 +53,105 @@ let myNameInput, saveNameBtn, refreshUsersBtn, myNameStatus, userSearchInput, us
 let pushStatus, testSoundBtn, hangupBtn, resetPushBtn, callNoteInput;
 let videoQualitySelect, videoQualityStatus;
 let startBgBtn, stopBgBtn, bgStatus;
+
+// ==================== MEDIA FUNCTIONS ====================
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+let selectedVideoQuality = "medium";
+
+function updateVideoQualityUi(){
+  if (videoQualitySelect) {
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if (videoQualityStatus) {
+    videoQualityStatus.textContent = `Video: ${label}.`;
+  }
+}
+
+// ==================== AUDIO FUNCTIONS ====================
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+async function unlockAudio() {
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state !== "running") await ctx.resume();
+  } catch (e) {
+    logDiag("Audio unlock error: " + e.message);
+  }
+}
+
+function startRingtone() {
+  stopRingtone();
+  
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.10;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    let on = true;
+    ringTimer = setInterval(() => {
+      if (!ringGain) return;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
+      on = !on;
+    }, 450);
+
+    logDiag("Ringtone started.");
+  } catch (e) {
+    logDiag("Ringtone failed: " + e.message);
+  }
+}
+
+function stopRingtone() {
+  if (ringTimer) {
+    clearInterval(ringTimer);
+    ringTimer = null;
+  }
+  
+  try { if (ringOsc) ringOsc.stop(); } catch {}
+  try { if (ringOsc) ringOsc.disconnect(); } catch {}
+  try { if (ringGain) ringGain.disconnect(); } catch {}
+  
+  ringOsc = null;
+  ringGain = null;
+}
+
+function startRingback() {
+  stopRingback();
+  logDiag("Ringback started");
+  
+  // Simple beep pattern for ringback
+  ringbackTimer = setInterval(() => {
+    startRingtone();
+    setTimeout(() => stopRingtone(), 500);
+  }, 2000);
+}
+
+function stopRingback() {
+  if (ringbackTimer) {
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+  stopRingtone();
+}
 
 // ==================== INITIALIZE DOM ELEMENTS ====================
 function initializeDomElements() {
@@ -141,12 +240,24 @@ function setupEventListeners() {
   }
   
   if (testSoundBtn) {
-  testSoundBtn.onclick = async () => {
-    await unlockAudio();
-    startRingtone();
-    setTimeout(() => stopRingtone(), 1800);
-  };
-}
+    testSoundBtn.onclick = async () => {
+      await unlockAudio();
+      startRingtone();
+      setTimeout(() => stopRingtone(), 1800);
+    };
+  }
+  
+  if (videoQualitySelect) {
+    videoQualitySelect.addEventListener("change", () => {
+      const v = String(videoQualitySelect.value || "medium");
+      selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+      updateVideoQualityUi();
+      
+      if (localStream) {
+        applyVideoQualityToCurrentStream(selectedVideoQuality);
+      }
+    });
+  }
   
   if (hangupBtn) hangupBtn.onclick = () => hangup().catch(showError);
   if (saveNameBtn) saveNameBtn.onclick = () => saveMyName().catch(showError);
@@ -159,17 +270,7 @@ function setupEventListeners() {
   if (userSearchInput) {
     userSearchInput.addEventListener("input", () => renderUsersList(userSearchInput.value));
   }
-  if (videoQualitySelect) {
-  videoQualitySelect.addEventListener("change", () => {
-    const v = String(videoQualitySelect.value || "medium");
-    selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
-    updateVideoQualityUi();
-    
-    if (localStream) {
-      applyVideoQualityToCurrentStream(selectedVideoQuality);
-    }
-  });
-}
+  
   // Initialize diagnostics buttons if they exist
   initializeDiagnostics();
 }
@@ -195,85 +296,7 @@ function hideErrorBox(){
     errorBox.textContent = "";
   }
 }
-// ==================== AUDIO FUNCTIONS ====================
-function ensureAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return audioCtx;
-}
 
-async function unlockAudio() {
-  try {
-    const ctx = ensureAudio();
-    if (ctx.state !== "running") await ctx.resume();
-  } catch (e) {
-    logDiag("Audio unlock error: " + e.message);
-  }
-}
-
-function startRingtone() {
-  stopRingtone();
-  
-  try {
-    const ctx = ensureAudio();
-    if (ctx.state !== "running") ctx.resume().catch(() => {});
-    
-    ringGain = ctx.createGain();
-    ringGain.gain.value = 0.10;
-    ringGain.connect(ctx.destination);
-
-    ringOsc = ctx.createOscillator();
-    ringOsc.type = "sine";
-    ringOsc.frequency.value = 880;
-    ringOsc.connect(ringGain);
-    ringOsc.start();
-
-    let on = true;
-    ringTimer = setInterval(() => {
-      if (!ringGain) return;
-      ringGain.gain.value = on ? 0.10 : 0.0001;
-      on = !on;
-    }, 450);
-
-    logDiag("Ringtone started.");
-  } catch (e) {
-    logDiag("Ringtone failed: " + e.message);
-  }
-}
-
-function stopRingtone() {
-  if (ringTimer) {
-    clearInterval(ringTimer);
-    ringTimer = null;
-  }
-  
-  try { if (ringOsc) ringOsc.stop(); } catch {}
-  try { if (ringOsc) ringOsc.disconnect(); } catch {}
-  try { if (ringGain) ringGain.disconnect(); } catch {}
-  
-  ringOsc = null;
-  ringGain = null;
-}
-
-function startRingback() {
-  stopRingback();
-  logDiag("Ringback started");
-  
-  // Simple beep pattern for ringback
-  ringbackTimer = setInterval(() => {
-    startRingtone();
-    setTimeout(() => stopRingtone(), 500);
-  }, 2000);
-}
-
-function stopRingback() {
-  if (ringbackTimer) {
-    clearInterval(ringbackTimer);
-    ringbackTimer = null;
-  }
-  stopRingtone();
-}
 // ==================== FIREBASE INITIALIZATION ====================
 const app = initializeApp({
   apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
@@ -437,7 +460,6 @@ onAuthStateChanged(auth, async (user)=>{
 });
 
 // ==================== BASIC FUNCTIONS ====================
-// Add these core functions that are needed for login to work
 function refreshCopyInviteState(){
   if (!copyLinkBtn || !roomIdInput) return;
   
@@ -474,64 +496,6 @@ function stopAll(){
   refreshCopyInviteState();
   
   logDiag("All stopped and cleaned up");
-}
-
-// ==================== INITIALIZATION ====================
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeDomElements);
-} else {
-  initializeDomElements();
-}
-
-// Initialize UI
-updateVideoQualityUi();
-// Unlock audio on first click
-window.addEventListener("click", unlockAudio, { once: true });
-// ==================== MINIMAL VERSION - ADD FUNCTIONS GRADUALLY ====================
-
-// Add this placeholder for updateVideoQualityUi
-function updateVideoQualityUi(){
-  if (videoQualitySelect) {
-    videoQualitySelect.value = "medium";
-  }
-  if (videoQualityStatus) {
-    videoQualityStatus.textContent = "Video: Medium (720p).";
-  }
-}
-
-// Add placeholder for other required functions
-// ==================== MEDIA FUNCTIONS ====================
-const VIDEO_PROFILES = {
-  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
-  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
-  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
-};
-
-let selectedVideoQuality = "medium";
-
-function updateVideoQualityUi(){
-  if (videoQualitySelect) {
-    videoQualitySelect.value = selectedVideoQuality;
-  }
-  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
-  if (videoQualityStatus) {
-    videoQualityStatus.textContent = `Video: ${label}.`;
-  }
-}
-
-// Add video quality change listener
-if (videoQualitySelect) {
-  videoQualitySelect.addEventListener("change", () => {
-    const v = String(videoQualitySelect.value || "medium");
-    selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
-    updateVideoQualityUi();
-    
-    // Apply quality to current stream if it's running
-    if (localStream) {
-      applyVideoQualityToCurrentStream(selectedVideoQuality);
-    }
-  });
 }
 
 async function applyVideoQualityToCurrentStream(quality) {
@@ -603,6 +567,7 @@ async function startMedia() {
   }
 }
 
+// ==================== PLACEHOLDER FUNCTIONS ====================
 async function createRoom(){
   if(!requireAuthOrPrompt()) return;
   alert("Create room functionality not yet implemented");
@@ -623,18 +588,6 @@ async function copyTextRobust(text){
   }
 }
 
-async function unlockAudio(){
-  // Placeholder
-}
-
-function startRingtone(){
-  // Placeholder
-}
-
-function stopRingtone(){
-  // Placeholder
-}
-
 function hangup() {
   stopRingtone();
   stopRingback();
@@ -644,7 +597,6 @@ function hangup() {
 }
 
 async function ensureMyUserProfile(user){
-  // Placeholder
   myDisplayName = user.email.split("@")[0];
   if (myNameInput) myNameInput.value = myDisplayName;
   if (myNameStatus) myNameStatus.textContent = `Name: ${myDisplayName}`;
@@ -665,8 +617,8 @@ function renderUsersList(filterText = ""){
   usersList.innerHTML = '<div class="small" style="color:#777">User list functionality not yet implemented</div>';
 }
 
+// ==================== DIAGNOSTICS ====================
 function initializeDiagnostics(){
-  // Initialize diagnostics if buttons exist
   if (diagBtn && diagBox && copyDiagBtn && clearDiagBtn) {
     let diagVisible = false;
     const diagLog = [];
@@ -700,7 +652,7 @@ function initializeDiagnostics(){
       }
     };
     
-    // Replace logDiag with enhanced version
+    // Enhance logDiag function
     const originalLogDiag = logDiag;
     logDiag = function(msg){
       originalLogDiag(msg);
@@ -714,6 +666,20 @@ function initializeDiagnostics(){
     };
   }
 }
+
+// ==================== INITIALIZATION ====================
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeDomElements);
+} else {
+  initializeDomElements();
+}
+
+// Initialize UI
+updateVideoQualityUi();
+
+// Unlock audio on first click
+window.addEventListener("click", unlockAudio, { once: true });
 
 console.log("WebRTC app initialization complete");
 console.log("Firebase app:", app.name);
