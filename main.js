@@ -1267,7 +1267,7 @@ async function catchUpMissedRingingCall() {
 
     roomIdInput.value = call.roomId || "";
     currentIncomingCall = { id: callId, data: call };
-    incomingText.textContent = `Call from ${call.fromName || "unknown"}…`;
+    incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
     incomingOverlay.style.display = "flex";
     startRingtone();
 
@@ -1278,7 +1278,7 @@ async function catchUpMissedRingingCall() {
         const note = String(call.note || "").trim();
         const tsLocal = new Date(createdMs).toLocaleString();
 
-        const body =  `Call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
+        const body =  `Call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
 
         await reg.showNotification("Incoming call", {
           body,
@@ -1314,9 +1314,7 @@ async function catchUpMissedCallNotification() {
       if ("Notification" in window && Notification.permission === "granted") {
         const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
         if (reg) {
-          const body =
-            `Missed call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
-
+          const body = `Missed call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
           await reg.showNotification("Missed call", {
             body,
             tag: `webrtc-missed-${myUid}`,
