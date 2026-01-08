@@ -16,14 +16,10 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
-// Add for iOS
+  ],
   "apple-mobile-web-app-capable": "yes",
   "apple-mobile-web-app-status-bar-style": "black-translucent",
-  
-  // iOS splash screens (optional but recommended)
   "ios": {
     "precomposed": true
   }
 }
-
