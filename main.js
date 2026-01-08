@@ -440,11 +440,6 @@ const bgStatus = document.getElementById('bgStatus');
 // ==================== UTILITY FUNCTIONS ====================
 const setStatus = (el, msg) => el.textContent = msg;
 
-function logDiag(msg){
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  console.log(line);
-}
-
 function showError(e){
   const code = e?.code ? `\ncode: ${e.code}` : "";
   const msg  = e?.message ? `\nmessage: ${e.message}` : "";
