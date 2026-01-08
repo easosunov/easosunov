@@ -817,36 +817,509 @@ console.log("WebRTC app initialization complete");
 console.log("Firebase app:", app.name);
 console.log("Ready for login...");
 
-// ==================== ADD MISSING FUNCTIONS (for compilation) ====================
-// These functions are referenced but not defined in the code you showed
-// I'll add simplified versions to prevent errors
+// ==================== RESTORED WEBRTC FUNCTIONS ====================
 
-function refreshCopyInviteState(){
-  const hasRoomId = !!roomIdInput.value.trim();
-  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
-}
+// ==================== WEBRTC CONFIGURATION ====================
+let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
-function startMedia(){ console.log("startMedia called"); }
-function createRoom(){ console.log("createRoom called"); }
-function joinRoom(){ console.log("joinRoom called"); }
-function stopAll(){ console.log("stopAll called"); }
-function hangup(){ console.log("hangup called"); }
-function saveMyName(){ console.log("saveMyName called"); }
-function loadAllAllowedUsers(){ console.log("loadAllAllowedUsers called"); }
-function renderUsersList(){ console.log("renderUsersList called"); }
-function ensureMyUserProfile(){ console.log("ensureMyUserProfile called"); }
-function unlockAudio(){ console.log("unlockAudio called"); }
-function startRingtone(){ console.log("startRingtone called"); }
-function stopRingtone(){ console.log("stopRingtone called"); }
-function closePeer(){ console.log("closePeer called"); }
-function showIncomingUI(){ console.log("showIncomingUI called"); }
-function stopIncomingUI(){ console.log("stopIncomingUI called"); }
-function updateVideoQualityUi(){ 
-  if(videoQualitySelect){
-    videoQualitySelect.value = "medium";
+async function loadIceServers() {
+  logDiag("Fetching ICE servers …");
+  try {
+    const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
+    if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
+    const data = await r.json();
+    rtcConfig = { iceServers: data.iceServers };
+    logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
+  } catch (e) {
+    logDiag("ICE server load failed, using default STUN: " + e.message);
   }
-  if(videoQualityStatus) videoQualityStatus.textContent = `Video: Medium (720p).`;
 }
 
-// Call updateVideoQualityUi to initialize
+// ==================== MEDIA STREAM MANAGEMENT ====================
+let localStream = null;
+let pc = null;
+
+// ==================== VIDEO QUALITY PROFILES ====================
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+const LS_VIDEO_QUALITY = "webrtc_video_quality";
+function getSavedVideoQuality(){
+  try{
+    const v = String(localStorage.getItem(LS_VIDEO_QUALITY) || "").trim();
+    return (v && VIDEO_PROFILES[v]) ? v : "medium";
+  }catch{
+    return "medium";
+  }
+}
+
+function saveVideoQuality(v){
+  try{ localStorage.setItem(LS_VIDEO_QUALITY, String(v||"")); }catch{}
+}
+
+let selectedVideoQuality = getSavedVideoQuality();
+
+function updateVideoQualityUi(){
+  if(videoQualitySelect){
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if(videoQualityStatus) videoQualityStatus.textContent = `Video: ${label}.`;
+}
+
+// Update video quality when changed
+videoQualitySelect?.addEventListener("change", async ()=>{
+  const v = String(videoQualitySelect.value || "medium");
+  selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+  saveVideoQuality(selectedVideoQuality);
+  updateVideoQualityUi();
+
+  if(localStream){
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+      logDiag("Video quality applied while running: " + selectedVideoQuality);
+    }catch(e){
+      logDiag("applyVideoQuality error: " + (e?.message || e));
+    }
+  }
+});
+
+async function applyVideoQualityToCurrentStream(quality){
+  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  const vTrack = localStream?.getVideoTracks?.()[0];
+  if(!vTrack) return;
+  
+  try {
+    await vTrack.applyConstraints(profile.constraints);
+    const s = vTrack.getSettings ? vTrack.getSettings() : {};
+    logDiag("Video track settings: " + JSON.stringify({
+      width: s.width, height: s.height, frameRate: s.frameRate
+    }));
+  } catch (e) {
+    logDiag("applyConstraints error: " + e.message);
+  }
+}
+
+// ==================== PEER CONNECTION MANAGEMENT ====================
+function closePeer(){
+  if(pc){
+    try{
+      pc.onicecandidate = null;
+      pc.ontrack = null;
+      pc.onconnectionstatechange = null;
+      pc.oniceconnectionstatechange = null;
+      pc.close();
+    }catch{}
+    pc = null;
+  }
+  if(remoteVideo) remoteVideo.srcObject = null;
+}
+
+async function ensurePeer() {
+  closePeer();
+
+  if (!rtcConfig || !rtcConfig.iceServers || rtcConfig.iceServers.length === 0) {
+    await loadIceServers();
+  }
+
+  pc = new RTCPeerConnection(rtcConfig);
+  logDiag("Created RTCPeerConnection");
+
+  const remoteStream = new MediaStream();
+  remoteVideo.srcObject = remoteStream;
+
+  pc.ontrack = (e) => {
+    if (e.streams && e.streams[0]) {
+      e.streams[0].getTracks().forEach(track => remoteStream.addTrack(track));
+    }
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(console.error);
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc) logDiag("Connection state: " + pc.connectionState);
+  };
+
+  if (localStream) {
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  }
+}
+
+// ==================== MEDIA INITIALIZATION ====================
+let startingPromise = null;
+
+async function startMedia(){
+  if(!requireAuthOrPrompt()) return;
+
+  if(localStream){
+    logDiag("Media already started");
+    return;
+  }
+
+  if(startingPromise) return startingPromise;
+
+  startingPromise = (async () => {
+    hideErrorBox();
+    setStatus(mediaStatus, "Requesting camera/mic…");
+
+    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: profile.constraints,
+        audio: true
+      });
+
+      localVideo.srcObject = localStream;
+      
+      // Wait for video to load
+      localVideo.onloadedmetadata = async () => {
+        try {
+          await localVideo.play();
+          setStatus(mediaStatus, "Camera/mic started.");
+          logDiag("Local video playing.");
+        } catch (e) {
+          logDiag("Video play error: " + e.message);
+        }
+      };
+
+      // Load ICE servers
+      await loadIceServers();
+
+      // Enable buttons
+      startBtn.disabled = true;
+      createBtn.disabled = false;
+      joinBtn.disabled = false;
+
+      logDiag("Media started successfully");
+
+    } catch (e) {
+      setStatus(mediaStatus, "Failed to start media: " + e.name);
+      logDiag("getUserMedia error: " + e.message);
+      throw e;
+    }
+  })();
+
+  try {
+    await startingPromise;
+  } finally {
+    startingPromise = null;
+  }
+}
+
+// ==================== ROOM MANAGEMENT ====================
+async function createRoom(){
+  if(!requireAuthOrPrompt()) return null;
+
+  try {
+    await startMedia();
+
+    // Create room reference
+    const roomRef = doc(collection(db, "rooms"));
+    const roomId = roomRef.id;
+    
+    roomIdInput.value = roomId;
+    location.hash = roomId;
+    
+    logDiag("Created room: " + roomId);
+    setStatus(callStatus, `Room created: ${roomId}`);
+
+    refreshCopyInviteState();
+
+    return { roomId, roomRef };
+  } catch (e) {
+    setStatus(callStatus, "Failed to create room: " + e.message);
+    logDiag("createRoom error: " + e.message);
+    throw e;
+  }
+}
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) {
+    setStatus(callStatus, "Please enter a room ID");
+    return;
+  }
+
+  try {
+    await startMedia();
+
+    const roomRef = doc(db, "rooms", roomId);
+    const snap = await getDoc(roomRef);
+    
+    if(!snap.exists()) {
+      throw new Error("Room not found");
+    }
+
+    location.hash = roomId;
+    setStatus(callStatus, "Joining room: " + roomId);
+    logDiag("Joining room: " + roomId);
+
+    // TODO: Add WebRTC signaling logic here
+    
+  } catch (e) {
+    setStatus(callStatus, "Failed to join: " + e.message);
+    logDiag("joinRoom error: " + e.message);
+    throw e;
+  }
+}
+
+// ==================== SYSTEM CLEANUP ====================
+function stopAll(){
+  closePeer();
+  
+  if(localStream){
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+  
+  if(localVideo) localVideo.srcObject = null;
+  if(remoteVideo) remoteVideo.srcObject = null;
+
+  startBtn.disabled = !isAuthed;
+  createBtn.disabled = true;
+  joinBtn.disabled = true;
+
+  setStatus(mediaStatus, "Not started.");
+  setStatus(callStatus, "No room yet.");
+
+  hangupBtn.disabled = true;
+  setStatus(dirCallStatus, "Idle.");
+
+  logDiag("All stopped");
+}
+
+// ==================== AUDIO MANAGEMENT ====================
+let audioCtx = null;
+let ringOsc = null;
+let ringGain = null;
+let ringTimer = null;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+
+async function unlockAudio(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") await ctx.resume();
+  }catch{}
+}
+
+// Unlock audio on first click
+window.addEventListener("click", unlockAudio, { once: true });
+
+function startRingtone(){
+  stopRingtone();
+  
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+    
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.10;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    let on = true;
+    ringTimer = setInterval(()=>{
+      if(!ringGain) return;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
+      on = !on;
+    }, 450);
+
+    logDiag("Ringtone started.");
+  }catch(e){
+    logDiag("Ringtone failed: " + e.message);
+  }
+}
+
+function stopRingtone(){
+  if(ringTimer){
+    clearInterval(ringTimer);
+    ringTimer = null;
+  }
+  
+  try{ if(ringOsc) ringOsc.stop(); }catch{}
+  try{ if(ringOsc) ringOsc.disconnect(); }catch{}
+  try{ if(ringGain) ringGain.disconnect(); }catch{}
+  
+  ringOsc = null;
+  ringGain = null;
+}
+
+// ==================== CALL MANAGEMENT ====================
+function hangup(){
+  stopRingtone();
+  stopAll();
+  setStatus(dirCallStatus, "Call ended.");
+  logDiag("Call hung up");
+}
+
+// ==================== USER MANAGEMENT ====================
+let myDisplayName = "";
+let allUsersCache = [];
+
+function defaultNameFromEmail(email){
+  const e = String(email || "").trim();
+  if(!e) return "";
+  return e.split("@")[0].slice(0, 24);
+}
+
+async function ensureMyUserProfile(user){
+  try {
+    const ref = doc(db, "users", user.uid);
+    const snap = await getDoc(ref);
+
+    const existing = snap.exists() ? (snap.data() || {}) : {};
+    const name = existing.displayName || defaultNameFromEmail(user.email) || "User";
+
+    await setDoc(ref, {
+      uid: user.uid,
+      displayName: name,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+
+    myDisplayName = name;
+    myNameInput.value = name;
+    myNameStatus.textContent = `Name: ${name}`;
+    
+    logDiag("User profile ensured: " + name);
+  } catch (e) {
+    logDiag("ensureMyUserProfile error: " + e.message);
+  }
+}
+
+async function saveMyName(){
+  if(!requireAuthOrPrompt()) return;
+
+  const name = String(myNameInput.value || "").trim();
+  if(!name) {
+    setStatus(myNameStatus, "Name cannot be empty");
+    return;
+  }
+
+  try {
+    await setDoc(doc(db, "users", myUid), {
+      displayName: name,
+      updatedAt: serverTimestamp()
+    }, { merge:true });
+
+    myDisplayName = name;
+    myNameStatus.textContent = `Saved: ${name}`;
+    logDiag("Name saved: " + name);
+  } catch (e) {
+    setStatus(myNameStatus, "Failed to save: " + e.message);
+    logDiag("saveMyName error: " + e.message);
+  }
+}
+
+async function loadAllAllowedUsers(){
+  if(!requireAuthOrPrompt()) return;
+
+  try {
+    const alSnap = await getDocs(
+      query(collection(db, "allowlistUids"), where("enabled", "==", true), limit(50))
+    );
+    
+    const uids = alSnap.docs.map(d => d.id).filter(Boolean);
+    const users = [];
+
+    // Load user profiles in chunks
+    for(let i = 0; i < uids.length; i += 10){
+      const chunk = uids.slice(i, i + 10);
+      const usSnap = await getDocs(query(
+        collection(db, "users"), 
+        where(documentId(), "in", chunk)
+      ));
+      
+      usSnap.forEach(doc => {
+        const data = doc.data() || {};
+        users.push({ uid: doc.id, displayName: data.displayName || "" });
+      });
+    }
+
+    allUsersCache = users;
+    renderUsersList();
+    logDiag("Loaded " + users.length + " users");
+  } catch (e) {
+    logDiag("loadAllAllowedUsers error: " + e.message);
+  }
+}
+
+function renderUsersList(filterText = ""){
+  if(!usersList) return;
+
+  const query = String(filterText || "").trim().toLowerCase();
+  const filtered = allUsersCache
+    .filter(u => u.uid !== myUid)
+    .filter(u => !query || String(u.displayName || "").toLowerCase().includes(query))
+    .sort((a, b) => String(a.displayName || "").localeCompare(String(b.displayName || "")));
+
+  usersList.innerHTML = "";
+
+  if(filtered.length === 0){
+    usersList.innerHTML = '<div class="small" style="color:#777">No users found</div>';
+    return;
+  }
+
+  filtered.forEach(user => {
+    const div = document.createElement("div");
+    div.style.cssText = `
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 8px;
+    `;
+
+    const left = document.createElement("div");
+    left.innerHTML = `<b>${user.displayName || "(no name)"}</b>`;
+
+    const btn = document.createElement("button");
+    btn.textContent = "Call";
+    btn.disabled = !isAuthed;
+    btn.onclick = () => startCallToUid(user.uid, user.displayName).catch(showError);
+
+    div.appendChild(left);
+    div.appendChild(btn);
+    usersList.appendChild(div);
+  });
+}
+
+async function startCallToUid(toUid, toName = ""){
+  if(!requireAuthOrPrompt()) return;
+  
+  logDiag("Starting call to: " + toUid);
+  setStatus(dirCallStatus, `Calling ${toName || "user"}...`);
+  
+  // This is a placeholder - you'll need to implement the actual call logic
+  alert(`Call functionality to ${toName || toUid} would start here`);
+}
+
+// ==================== INITIALIZE ====================
+// Initialize UI
 updateVideoQualityUi();
+
+// Setup user search
+if(userSearchInput){
+  userSearchInput.addEventListener("input", () => renderUsersList(userSearchInput.value));
+}
+
+console.log("WebRTC functions restored");
