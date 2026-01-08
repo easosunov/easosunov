@@ -1055,6 +1055,39 @@ async function ensurePeer() {
   }
 }
 
+
+// ==================== INCOMING CALL UI ====================
+function showIncomingUI(callId, data){
+  // Your incoming call UI logic
+  logDiag(`Incoming call: ${callId} from ${data.fromName}`);
+}
+
+function stopIncomingUI(){
+  // Your stop incoming UI logic
+}
+
+// ==================== RINGBACK FUNCTIONS ====================
+let ringbackTimer = null;
+
+function stopRingback(){
+  if(ringbackTimer){
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+}
+
+function startRingback(){
+  // Your ringback logic
+  logDiag("Ringback started");
+}
+
+// ==================== CALL LISTENERS ====================
+function listenIncomingCalls(){
+  // Your incoming call listener logic
+  logDiag("Listening for incoming calls");
+}
+
+
 // ==================== MEDIA INITIALIZATION ====================
 let startingPromise = null;
 
@@ -1118,114 +1151,136 @@ async function startMedia(){
 }
 
 // ==================== ROOM MANAGEMENT ====================
-// ==================== ROOM CREATION ====================
-async function createRoom(){
-  if(!requireAuthOrPrompt()) {
-    setStatus(callStatus, "Please sign in first");
-    return null;
-  }
+// ==================== ROOM CREATION (CALLER SIDE) ====================
+let createAttemptA = 0;
 
-  try {
-    // Ensure media is started first
-    await startMedia();
+async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
+  if(!requireAuthOrPrompt()) return null;
 
-    // Clear any existing peer connection
-    closePeer();
+  suppressAutoJoin = true;
+  autoJoinDone = true;
+  cancelPendingAutoJoin();
 
-    // Create room reference
-    const roomRef = doc(collection(db, "rooms"));
-    const roomId = roomRef.id;
-    
-    // Update UI
-    if (roomIdInput) {
-      roomIdInput.value = roomId;
-      roomIdInput.focus();
-    }
-    
-    // Update URL hash
-    location.hash = roomId;
-    
-    // Create initial room data
-    await setDoc(roomRef, {
-      createdAt: serverTimestamp(),
-      createdBy: myUid,
-      createdByName: myDisplayName || "Unknown",
-      status: "waiting",
-      session: 1,
-      offer: null,
-      answer: null,
-      updatedAt: Date.now()
-    });
-    
-    // Update status
-    setStatus(callStatus, `✅ Room created: ${roomId}`);
-    setStatus(dirCallStatus, "Waiting for someone to join...");
-    
-    // Refresh UI state
-    refreshCopyInviteState();
-    
-    // Enable hangup button
-    if (hangupBtn) {
-      hangupBtn.disabled = false;
-    }
-    
-    logDiag(`Room created: ${roomId} by ${myUid}`);
-    
-    // Initialize peer connection for this room
-    await ensurePeer();
-    // In createRoom function, after ensurePeer():
-pc.onicecandidate = (e) => {
-  console.log("🔥 CALLER ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
+  stopListeners();
+  clearBRetry();
+
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++createAttemptA;
+
+  const existing =
+    (options.fixedRoomId ? String(options.fixedRoomId).trim() : "") ||
+    (pinnedRoomId ? String(pinnedRoomId).trim() : "") ||
+    (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
+
+  const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
+
+  roomIdInput.value = roomRef.id;
+  if (options.updateHash) location.hash = roomRef.id;
+
+  refreshCopyInviteState();
+  logDiag("CreateRoom: roomId=" + roomRef.id);
+
+  // ⭐️⭐️⭐️ CRITICAL FIX: Define collections HERE ⭐️⭐️⭐️
+  const caller = collection(roomRef, "callerCandidates");
+  const callee = collection(roomRef, "calleeCandidates");
   
-  if (e.candidate) {
-    console.log("🔥 Candidate details:", {
-      type: e.candidate.type,
-      protocol: e.candidate.protocol,
-      candidate: e.candidate.candidate.substring(0, 100) + "..."
-    });
+  const snap = await getDoc(roomRef);
+  const prev = snap.exists() ? (snap.data().session || 0) : 0;
+  const session = Number(prev) + 1;
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await clearSub(caller);
+  await clearSub(callee);
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await ensurePeer();
+
+  // ⭐️⭐️⭐️ CAPTURE VARIABLES FOR CLOSURE ⭐️⭐️⭐️
+  const currentSession = session;
+  const currentCaller = caller;
+
+  pc.onicecandidate = (e)=>{
+    console.log("🔥 CALLER ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
     
-    // Try to write with error handling
-    addDoc(caller, { session, ...e.candidate.toJSON() })
+    if(e.candidate){
+      console.log("🔥 Candidate details:", {
+        type: e.candidate.type,
+        protocol: e.candidate.protocol,
+        candidate: e.candidate.candidate?.substring(0, 100) + "..."
+      });
+      
+      // Use captured variables
+      addDoc(currentCaller, { 
+        session: currentSession, 
+        ...e.candidate.toJSON() 
+      })
       .then(() => console.log("✅ Caller candidate written to Firestore"))
       .catch(err => {
         console.error("❌ Failed to write caller candidate:", err);
         console.error("Error code:", err.code);
         console.error("Error message:", err.message);
       });
-  } else {
-    console.log("🔥 Caller ICE gathering complete");
-  }
-};
-    // Create initial offer
-    try {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      // Save offer to Firestore
-      await updateDoc(roomRef, {
-        offer: { type: offer.type, sdp: offer.sdp },
-        updatedAt: Date.now()
-      });
-      
-      logDiag("Created and saved offer");
-      setStatus(callStatus, `Room active: ${roomId} - waiting for answer`);
-      
-    } catch (offerError) {
-      logDiag("Failed to create offer: " + offerError.message);
-      setStatus(callStatus, `Room created but offer failed: ${offerError.message}`);
+    } else {
+      console.log("🔥 Caller ICE gathering complete");
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now(),
+    createdBy: myUid,
+    createdByName: myDisplayName || "Unknown",
+    status: "waiting"
+  }, { merge:true });
+
+  setStatus(callStatus, `Room active (session ${session}).`);
+  logDiag(`Room written. session=${session}`);
+  logDiag("Created and saved offer");
+
+  unsubRoomA = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== createAttemptA) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+      lastSeenJoinRequestA = d.joinRequest;
+      setStatus(callStatus, "Join request received — restarting session…");
+      logDiag("JoinRequest seen => restarting offer/session.");
+      setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 150);
+      return;
     }
 
-    // Set up listeners for this room
-    setupRoomListeners(roomRef);
-    
-    return { roomId, roomRef };
-    
-  } catch (e) {
-    setStatus(callStatus, "❌ Failed to create room: " + e.message);
-    logDiag("createRoom error: " + e.message);
-    showError(e);
-    return null;
-  }
+    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        await pc.setRemoteDescription(d.answer);
+        setStatus(callStatus, `Connected (session ${session}).`);
+        logDiag("Applied remote answer.");
+      }catch(e){
+        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(callStatus, "Answer failed — restarting session…");
+        setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 200);
+      }
+    }
+  });
+
+  unsubCalleeA = onSnapshot(callee, (ss)=>{
+    ss.docChanges().forEach(ch=>{
+      if(ch.type !== "added" || !pc) return;
+      const c = ch.doc.data();
+      if(c.session !== session) return;
+      try{ pc.addIceCandidate(c); }catch{}
+    });
+  });
+
+  return { roomId: roomRef.id, roomRef };
 }
 
 // ==================== ROOM LISTENERS ====================
@@ -1266,102 +1321,144 @@ function cleanupRoom() {
   }
   closePeer();
 }
-// ==================== JOIN ROOM ====================
+// ==================== ROOM JOINING (CALLEE SIDE) ====================
+let joinAttemptB = 0;
+
 async function joinRoom(){
-  if(!requireAuthOrPrompt()) {
-    setStatus(callStatus, "Please sign in first");
-    return;
-  }
+  if(!requireAuthOrPrompt()) return;
 
-  const roomId = roomIdInput?.value.trim();
-  if(!roomId) {
-    setStatus(callStatus, "Please enter a room ID");
-    return;
-  }
+  suppressAutoJoin = false;
+  await startMedia({ skipAutoJoin:true });
 
-  try {
-    // Ensure media is started
-    await startMedia();
-    
-    // Clear any existing connection
-    closePeer();
-    
-    const roomRef = doc(db, "rooms", roomId);
-    const snap = await getDoc(roomRef);
-    
-    if(!snap.exists()) {
-      throw new Error(`Room "${roomId}" not found`);
-    }
-    
-    const roomData = snap.data();
-    
-    if (!roomData.offer) {
-      throw new Error("Room has no offer yet");
-    }
-    
-    // Update URL
-    location.hash = roomId;
-    
-    setStatus(callStatus, `Joining room: ${roomId}`);
-    logDiag(`Joining room: ${roomId}`);
-    
-    // Initialize peer connection
-    await ensurePeer();
-    // In joinRoom function:
-pc.onicecandidate = (e) => {
-  console.log("🔥 CALLEE ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
-  
-  if (e.candidate) {
-    console.log("🔥 Callee candidate details:", {
-      type: e.candidate.type,
-      protocol: e.candidate.protocol
-    });
-    
-    addDoc(callee, { session, ...e.candidate.toJSON() })
-      .then(() => console.log("✅ Callee candidate written to Firestore"))
-      .catch(err => {
-        console.error("❌ Failed to write callee candidate:", err);
-        console.error("Error code:", err.code);
+  const myAttempt = ++joinAttemptB;
+  stopListeners();
+  clearBRetry();
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+  location.hash = roomId;
+
+  logDiag("JoinRoom: roomId=" + roomId);
+
+  const roomRef = doc(db,"rooms", roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()) throw new Error("Room not found");
+
+  await requestFreshOffer(roomRef);
+  if(myAttempt !== joinAttemptB) return;
+
+  setStatus(callStatus, "Connecting… (requested fresh offer)");
+
+  unsubRoomB = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== joinAttemptB) return;
+    const d = s.data();
+    if(!d?.offer || !d.session) return;
+
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+    logDiag("New offer/session detected: " + session);
+
+    try{
+      await ensurePeer();
+
+      // ⭐️⭐️⭐️ CRITICAL FIX: Define collections HERE ⭐️⭐️⭐️
+      const caller = collection(roomRef, "callerCandidates");
+      const callee = collection(roomRef, "calleeCandidates");
+
+      await clearSub(callee);
+      if(myAttempt !== joinAttemptB) return;
+
+      // ⭐️⭐️⭐️ CAPTURE VARIABLES FOR CLOSURE ⭐️⭐️⭐️
+      const currentSession = session;
+      const currentCallee = callee;
+      
+      pc.onicecandidate = (e)=>{
+        console.log("🔥 CALLEE ICE CANDIDATE EVENT:", e.candidate ? "CANDIDATE" : "NULL (end)");
+        
+        if(e.candidate){
+          console.log("🔥 Candidate details:", {
+            type: e.candidate.type,
+            protocol: e.candidate.protocol
+          });
+          
+          // Use captured variables
+          addDoc(currentCallee, { 
+            session: currentSession, 
+            ...e.candidate.toJSON() 
+          })
+          .then(() => console.log("✅ Callee candidate written to Firestore"))
+          .catch(err => {
+            console.error("❌ Failed to write callee candidate:", err);
+            console.error("Error code:", err.code);
+          });
+        } else {
+          console.log("🔥 Callee ICE gathering complete");
+        }
+      };
+
+      await pc.setRemoteDescription(d.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+
+      await updateDoc(roomRef, { 
+        answer: ans, 
+        session, 
+        answeredAt: Date.now(),
+        answeredBy: myUid,
+        answeredByName: myDisplayName || "Unknown",
+        status: "connected"
       });
-  } else {
-    console.log("🔥 Callee ICE gathering complete");
-  }
-};
-    // Set remote offer
-    await pc.setRemoteDescription(roomData.offer);
-    
-    // Create answer
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    
-    // Send answer back
-    await updateDoc(roomRef, {
-      answer: { type: answer.type, sdp: answer.sdp },
-      answeredBy: myUid,
-      answeredByName: myDisplayName || "Unknown",
-      answeredAt: serverTimestamp(),
-      status: "connected",
-      updatedAt: Date.now()
-    });
-    
-    setStatus(callStatus, `✅ Joined room: ${roomId}`);
-    setStatus(dirCallStatus, "Connecting...");
-    
-    // Enable hangup button
-    if (hangupBtn) {
-      hangupBtn.disabled = false;
+      
+      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      logDiag("Answer written to room doc.");
+
+      unsubCallerB = onSnapshot(caller, (ss)=>{
+        if(myAttempt !== joinAttemptB) return;
+        ss.docChanges().forEach(ch=>{
+          if(ch.type !== "added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
+        });
+      });
+
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
+
+        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
+        logDiag("Watchdog: requesting fresh offer again.");
+        try{
+          lastAnsweredSessionB = null;
+          await requestFreshOffer(roomRef);
+        }catch(e){ showError(e); }
+      }, 10000);
+
+      pc.onconnectionstatechange = async ()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        if(pc.connectionState === "connected"){ clearBRetry(); }
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
+          setStatus(callStatus, "Connection lost — requesting new offer…");
+          logDiag("Connection lost => requesting fresh offer.");
+          try{
+            lastAnsweredSessionB = null;
+            await requestFreshOffer(roomRef);
+          }catch(e){ showError(e); }
+        }
+      };
+
+    }catch(e){
+      lastAnsweredSessionB = null;
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(callStatus, "Join failed — requesting new offer…");
+      try{ await requestFreshOffer(roomRef); }catch(err){ showError(err); }
     }
-    
-    // Setup listeners
-    setupRoomListeners(roomRef);
-    
-    logDiag(`Successfully joined room ${roomId}`);
-    
-  } catch (e) {
-    setStatus(callStatus, "❌ Failed to join: " + e.message);
-    logDiag("joinRoom error: " + e.message);
-    showError(e);
-  }
+  });
 }
 
 // ==================== SYSTEM CLEANUP ====================
