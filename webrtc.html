@@ -58,20 +58,10 @@
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don't hear yourself.</div>
-      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-        <button id="hangupBtn" disabled>Hang up</button>
-        <div>
-          <div class="small">Message to send with call (optional)</div>
-          <input
-            id="callNoteInput"
-            placeholder="e.g. Let us talk at 3 pm"
-            maxlength="140"
-          />
-          <div class="small" style="color:#777">
-            This text will appear in the notification for Person B.
-          </div>
-        </div>
-      </div>
+      
+      <!-- Call note input moved to Person B panel -->
+      <!-- Hang up button moved to Person B panel -->
+      
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
     </div>
 
@@ -80,7 +70,29 @@
       <b>Person B (Other)</b>
       <video id="remoteVideo" autoplay playsinline></video>
       <div class="small">If audio doesn't play, click the video once.</div>
+      
+      <!-- Hang up button moved here -->
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+        <button id="hangupBtn" disabled>Hang up</button>
+      </div>
+      
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+      
+      <!-- Call note input moved here (between callee name and Call button) -->
+      <div>
+        <div class="small">Message to send with call (optional)</div>
+        <input
+          id="callNoteInput"
+          placeholder="e.g. Let us talk at 3 pm"
+          maxlength="140"
+        />
+        <div class="small" style="color:#777">
+          This text will appear in the notification for Person B.
+        </div>
+      </div>
+      
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+      
       <div class="small">All allowed users</div>
       <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
     </div>
