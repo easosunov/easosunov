@@ -10,10 +10,87 @@ import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
   setPersistence, inMemoryPersistence
 } from './modules.js';
+// ==================== NOTIFICATION HANDLING ====================
+(function handleNotificationRedirect() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const callId = urlParams.get('callId');
+    const roomId = urlParams.get('roomId');
+    const fromName = urlParams.get('fromName');
+    const toName = urlParams.get('toName');
+    const note = urlParams.get('note');
+    
+    if (callId && roomId) {
+      localStorage.setItem('pendingNotificationCall', JSON.stringify({
+        callId: callId,
+        roomId: roomId,
+        fromName: fromName || 'Unknown',
+        toName: toName || '',
+        note: note || '',
+        timestamp: Date.now()
+      }));
+      
+      const cleanUrl = window.location.origin + window.location.pathname;
+      if (window.location.hash) {
+        window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
+      } else {
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+      
+      logDiag('Notification stored, waiting for auth...');
+    }
+  } catch (e) {
+    logDiag('Notification redirect handler error:', e);
+  }
+})();
 
+// Add this function and call it in auth state listener
+async function processPendingNotifications() {
+  try {
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        if (Date.now() - pendingData.timestamp < 60000) {
+          if (isAuthed && myUid) {
+            // Create a call data object from pending notification
+            const callData = {
+              callId: pendingData.callId,
+              roomId: pendingData.roomId,
+              fromName: pendingData.fromName || 'Unknown',
+              toName: pendingData.toName || '',
+              note: pendingData.note || '',
+              status: 'ringing'
+            };
+            
+            showIncomingCallUI(callData);
+          }
+        }
+        localStorage.removeItem('pendingNotificationCall');
+      } catch (e) {
+        localStorage.removeItem('pendingNotificationCall');
+      }
+    }
+  } catch (e) {
+    logDiag('processPendingNotifications error:', e);
+  }
+}
 // ==================== GLOBAL DECLARATIONS ====================
 console.log("APP VERSION:", "2026-01-08-stable");
-
+// ==================== URL HASH / AUTOJOIN ====================
+(function checkUrlHashForRoom() {
+  if (location.hash && location.hash.length > 1) {
+    const roomIdFromHash = location.hash.substring(1);
+    if (roomIdInput && roomIdFromHash) {
+      roomIdInput.value = roomIdFromHash;
+      logDiag(`Room ID from URL hash: ${roomIdFromHash}`);
+      setStatus(callStatus, `Room detected in URL: ${roomIdFromHash}`);
+      
+      // Auto-enable copy button if user is logged in
+      setTimeout(() => refreshCopyInviteState(), 100);
+    }
+  }
+})();
 // ==================== STATE VARIABLES ====================
 let isAuthed = false;
 let myUid = null;
@@ -28,10 +105,293 @@ let ringTimer = null;
 let ringbackTimer = null;
 let incomingCallsUnsubscribe = null;
 let roomCallsUnsubscribe = null;
+// ==================== DIAGNOSTICS SYSTEM ====================
+let diagVisible = false;
+const diagLog = [];
 
+// Replace the simple logDiag function with the enhanced version:
+function logDiag(msg){
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  diagLog.push(line);
+  console.log(line);
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
+  if (copyDiagBtn) copyDiagBtn.disabled = diagLog.length === 0;
+  if (clearDiagBtn) clearDiagBtn.disabled = diagLog.length === 0;
+}
+
+// Add these button handlers after other button handlers:
+if (diagBtn) {
+  diagBtn.onclick = () => {
+    diagVisible = !diagVisible;
+    if (diagBox) diagBox.style.display = diagVisible ? "block" : "none";
+    diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+    if (diagVisible && diagBox) {
+      diagBox.textContent = diagLog.join("\n");
+      diagBox.scrollTop = diagBox.scrollHeight;
+    }
+  };
+}
+
+if (clearDiagBtn) {
+  clearDiagBtn.onclick = () => {
+    diagLog.length = 0;
+    if (diagVisible && diagBox) diagBox.textContent = "";
+    if (copyDiagBtn) copyDiagBtn.disabled = true;
+    if (clearDiagBtn) clearDiagBtn.disabled = true;
+    logDiag("Diagnostics cleared.");
+  };
+}
+
+if (copyDiagBtn) {
+  copyDiagBtn.onclick = async () => {
+    const text = diagLog.join("\n");
+    if (!text) return;
+    try{
+      await navigator.clipboard.writeText(text);
+      logDiag("Copied diagnostics to clipboard.");
+    }catch{
+      window.prompt("Copy diagnostics:", text);
+    }
+  };
+}
 // ==================== CONFIGURATION ====================
 const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
+// ==================== PUSH NOTIFICATION MANAGEMENT ====================
+let messaging = null;
+let swReg = null;
+
+const LS_PUSH_UID = "webrtc_push_uid";
+const LS_PUSH_TID = "webrtc_push_tokenId";
+
+function getSavedPushBinding(){
+  try{
+    const uid = localStorage.getItem(LS_PUSH_UID);
+    const tid = localStorage.getItem(LS_PUSH_TID);
+    return { uid: uid || null, tokenId: tid || null };
+  }catch{
+    return { uid:null, tokenId:null };
+  }
+}
+
+function savePushBinding(uid, tokenId){
+  try{
+    localStorage.setItem(LS_PUSH_UID, String(uid || ""));
+    localStorage.setItem(LS_PUSH_TID, String(tokenId || ""));
+  }catch{}
+}
+
+function clearPushBinding(){
+  try{
+    localStorage.removeItem(LS_PUSH_UID);
+    localStorage.removeItem(LS_PUSH_TID);
+  }catch{}
+}
+
+async function revokePushForCurrentDevice(){
+  const { uid, tokenId } = getSavedPushBinding();
+  if(!uid || !tokenId) return;
+
+  logDiag(`Revoking push token for this device: uid=${uid} tokenId=${tokenId}`);
+
+  try{
+    await deleteDoc(doc(db, "users", uid, "fcmTokens", tokenId));
+    logDiag("Push token doc deleted from Firestore.");
+  }catch(e){
+    logDiag("Push token doc delete failed: " + (e?.message || e));
+  }
+
+  try{
+    if(!messaging) messaging = getMessaging(app);
+    await deleteToken(messaging);
+    logDiag("Browser FCM token deleted (deleteToken).");
+  }catch(e){
+    logDiag("deleteToken failed: " + (e?.message || e));
+  }
+
+  clearPushBinding();
+}
+
+// SIMPLIFIED enablePush
+async function enablePush(){
+  logDiag("enablePush(): SIMPLIFIED VERSION");
+  if(!requireAuthOrPrompt()) return;
+
+  try {
+    if (!("Notification" in window)) { 
+      if (pushStatus) setStatus(pushStatus, "Push: not supported in this browser."); 
+      return; 
+    }
+    
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted"){ 
+      if (pushStatus) setStatus(pushStatus, "Push: permission not granted."); 
+      return; 
+    }
+    
+    if (pushStatus) setStatus(pushStatus, "Push: ready (simplified).");
+    logDiag("Push notifications enabled (simplified)");
+    
+  } catch (e) {
+    if (pushStatus) setStatus(pushStatus, "Push: failed.");
+    logDiag("Push enable failed: " + (e?.message || e));
+  }
+}
+
+let autoPushClickArmed = false;
+
+function autoEnablePushOnLogin(){
+  if (!("Notification" in window)) { 
+    if (pushStatus) setStatus(pushStatus, "Push: not supported in this browser."); 
+    return; 
+  }
+
+  const perm = Notification.permission;
+
+  if (perm === "granted") {
+    logDiag("Auto-push: permission granted");
+    enablePush().catch((e) => logDiag("Auto-push enable failed: " + (e?.message || e)));
+    return;
+  }
+
+  if (perm === "denied") {
+    if (pushStatus) setStatus(pushStatus, "Push: blocked in browser settings.");
+    logDiag("Auto-push: permission denied");
+    return;
+  }
+
+  if (pushStatus) setStatus(pushStatus, "Push: click to enable.");
+  if (autoPushClickArmed) return;
+  autoPushClickArmed = true;
+
+  const handler = () => {
+    autoPushClickArmed = false;
+    logDiag("Auto-push: user click detected");
+    enablePush().catch((e) => { 
+      logDiag("Auto-push enable failed: " + (e?.message || e)); 
+      showError(e); 
+    });
+  };
+
+  window.addEventListener("click", handler, { once:true, capture:true });
+}
+
+// Add this button handler with other button handlers:
+if (resetPushBtn) {
+  resetPushBtn.onclick = async () => {
+    try{
+      if (pushStatus) setStatus(pushStatus, "Push: resetting…");
+      await revokePushForCurrentDevice();
+      await enablePush();
+      if (pushStatus) setStatus(pushStatus, "Push: enabled (reset).");
+    }catch(e){
+      showError(e);
+    }
+  };
+}
+// ==================== BACKGROUND SERVICE FUNCTIONS ====================
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { isRunning: false, uid: null };
+  }
+}
+
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    if (bgStatus) bgStatus.textContent = 'Connecting to background service...';
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      if (bgStatus) bgStatus.textContent = '✅ Background service active';
+      if (startBgBtn) startBgBtn.disabled = true;
+      if (stopBgBtn) stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    if (bgStatus) bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
+
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      if (bgStatus) bgStatus.textContent = 'Background service stopped';
+      if (startBgBtn) startBgBtn.disabled = false;
+      if (stopBgBtn) stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+async function updateServiceStatus() {
+  if (isAuthed) {
+    if (startBgBtn) startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        if (bgStatus) bgStatus.textContent = '✅ Background service active';
+        if (startBgBtn) startBgBtn.disabled = true;
+        if (stopBgBtn) stopBgBtn.disabled = false;
+      } else {
+        if (bgStatus) bgStatus.textContent = 'Background service ready';
+        if (stopBgBtn) stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      if (bgStatus) bgStatus.textContent = 'Background app not detected';
+      if (stopBgBtn) stopBgBtn.disabled = true;
+    }
+  } else {
+    if (startBgBtn) startBgBtn.disabled = true;
+    if (stopBgBtn) stopBgBtn.disabled = true;
+    if (bgStatus) bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// Add these button handlers with other button handlers:
+if (startBgBtn) startBgBtn.onclick = startBackgroundService;
+if (stopBgBtn) stopBgBtn.onclick = stopBackgroundService;
+
 
 // ==================== DOM ELEMENT REFERENCES ====================
 const errorBox = document.getElementById("errorBox");
@@ -1147,17 +1507,31 @@ onAuthStateChanged(auth, async (user)=>{
     updateVideoQualityUi();
 
     if(testSoundBtn) testSoundBtn.disabled = false;
+    if(resetPushBtn) resetPushBtn.disabled = false;
+    
+    // Enable auto push
+    autoEnablePushOnLogin();
+
     if(saveNameBtn) saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     if(refreshUsersBtn) refreshUsersBtn.disabled = false;
     if(hangupBtn) hangupBtn.disabled = true;
 
     refreshCopyInviteState();
 
+    // Process any pending notifications
+    try{ await processPendingNotifications(); } catch(e){ logDiag("processPendingNotifications failed: " + (e?.message || e)); }
+    
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
     
     // Start listening for incoming calls
     try{ listenForIncomingCalls(); } catch(e){ logDiag("listenForIncomingCalls failed: " + (e?.message || e)); }
+
+    // Update background service status
+    try{ updateServiceStatus(); } catch(e){ logDiag("updateServiceStatus failed: " + (e?.message || e)); }
+    
+    // Update service status periodically
+    setInterval(updateServiceStatus, 30000);
 
   } else {
     loginOverlay.style.display = "flex";
@@ -1166,19 +1540,26 @@ onAuthStateChanged(auth, async (user)=>{
     stopAll();
 
     if(videoQualitySelect) videoQualitySelect.disabled = true;
+
     if(testSoundBtn) testSoundBtn.disabled = true;
+    if(resetPushBtn) resetPushBtn.disabled = true;
+
     if(saveNameBtn) saveNameBtn.disabled = true;
     if(refreshUsersBtn) refreshUsersBtn.disabled = true;
 
+    if(pushStatus) setStatus(pushStatus, "Push: not enabled.");
     setStatus(dirCallStatus, "Idle.");
     if(myNameStatus) myNameStatus.textContent = "Not set.";
 
-    usersList.innerHTML = "";
+    if(bgStatus) bgStatus.textContent = 'Sign in required';
+    if(startBgBtn) startBgBtn.disabled = true;
+    if(stopBgBtn) stopBgBtn.disabled = true;
+
+    if(usersList) usersList.innerHTML = "";
     allUsersCache = [];
     myDisplayName = "";
   }
 });
-
 // ==================== INITIALIZATION ====================
 // Initialize UI
 updateVideoQualityUi();
@@ -1196,7 +1577,29 @@ window.addEventListener("beforeunload", () => {
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
 });
+// ==================== PWA DETECTION ====================
+let deferredPrompt = null;
 
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  logDiag('PWA install prompt available');
+});
+
+// You can add a button to trigger installation:
+function showInstallPrompt() {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((choiceResult) => {
+      if (choiceResult.outcome === 'accepted') {
+        logDiag('User accepted the install prompt');
+      } else {
+        logDiag('User dismissed the install prompt');
+      }
+      deferredPrompt = null;
+    });
+  }
+}
 console.log("WebRTC app initialization complete");
 console.log("Firebase app:", app.name);
 console.log("Ready for login...");
