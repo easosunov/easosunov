@@ -1,0 +1,118 @@
+/* ==================== GENERAL STYLES ==================== */
+body{font-family:system-ui;margin:16px} 
+h1{font-size:20px;margin:0 0 10px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
+.videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width: 720px){ .videos{grid-template-columns:1fr} }
+video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
+button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
+input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
+.status{font-size:13px;margin-top:8px}
+.small{font-size:12px;color:#555;margin-top:6px}
+ 
+/* ==================== ERROR BOX ==================== */
+#errorBox{
+  display:none;margin:12px 0;padding:10px;
+  border:1px solid #f3b5b5;background:#fff5f5;
+  color:#7a1b1b;border-radius:12px;white-space:pre-wrap
+}
+
+/* ==================== LOGIN OVERLAY ==================== */
+#loginOverlay{
+  position:fixed; inset:0; z-index:9999;
+  background:rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center;
+}
+#loginCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
+#logoutBtn{float:right}
+#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
+
+/* ==================== DIAGNOSTICS ==================== */
+#diagBox{
+  display:none;
+  margin-top:8px;
+  max-height:220px;
+  overflow:auto;
+  background:#111;
+  color:#0f0;
+  padding:8px;
+  border-radius:8px;
+  font-size:12px;
+  white-space:pre-wrap
+}
+.diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+
+/* ==================== INCOMING CALL MODAL ==================== */
+#incomingOverlay{
+  position:fixed; inset:0; z-index:9998;
+  background:rgba(0,0,0,.55);
+  display:none; align-items:center; justify-content:center;
+}
+#incomingCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+.incomingActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#answerBtn{background:#e8fff0;border-color:#bdeccc}
+#declineBtn{background:#fff0f0;border-color:#f1bcbc}
+
+/* ==================== VIDEO QUALITY SELECTOR ==================== */
+select{
+  padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%;
+  background:#fff;
+}
+
+/* ==================== BOTTOM PANEL LAYOUT ==================== */
+.bottomPanel{
+  margin-top:12px;
+  border:1px solid #ddd;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+.bottomGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:12px;
+}
+.bottomCard{
+  border:1px solid #eee;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+@media (max-width: 980px){
+  .bottomGrid{ grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px){
+  .bottomGrid{ grid-template-columns: 1fr; }
+}
+
+/* ==================== MOBILE RESPONSIVE ==================== */
+@media (max-width: 720px) {
+  body {
+    font-size: 18px;
+  }
+  h1 {
+    font-size: 24px;
+  }
+  h2 {
+    font-size: 20px;
+  }
+  p, .status, .small {
+    font-size: 16px;
+  }
+  .button {
+    font-size: 16px;
+  }
+}
