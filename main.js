@@ -1187,7 +1187,7 @@ function stopCallListeners(){
 
 function showIncomingUI(callId, data){
   currentIncomingCall = { id: callId, data };
-  incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
+  incomingText.textContent = `Call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
 
   if (!data?.deliveredAt) {
     updateDoc(doc(db,"calls", callId), {
@@ -1278,10 +1278,7 @@ async function catchUpMissedRingingCall() {
         const note = String(call.note || "").trim();
         const tsLocal = new Date(createdMs).toLocaleString();
 
-        const body =
-          `Call from ${fromName}` +
-          (note ? ` — ${note}` : "") +
-          ` — ${tsLocal}`;
+        const body =  `Call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
 
         await reg.showNotification("Incoming call", {
           body,
@@ -1318,9 +1315,7 @@ async function catchUpMissedCallNotification() {
         const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
         if (reg) {
           const body =
-            `Missed call from ${fromName}` +
-            (note ? ` — ${note}` : "") +
-            ` — ${tsLocal}`;
+            `Missed call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
 
           await reg.showNotification("Missed call", {
             body,
