@@ -1007,6 +1007,7 @@ function setupIncomingCallListener() {
   try {
     const roomsRef = collection(db, "rooms");
     
+    // FIXED: Remove the 'and' keyword, use proper Firestore query syntax
     roomCallsUnsubscribe = onSnapshot(
       query(roomsRef, 
         where("calledToUid", "==", myUid),
@@ -1048,6 +1049,7 @@ function setupIncomingCallListener() {
     console.error("Room call listener error details:", error);
   }
 }
+
 // ==================== SIMPLE PWA DETECTION ====================
 let deferredPrompt = null;
 
