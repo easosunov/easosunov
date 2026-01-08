@@ -2136,3 +2136,234 @@ window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
 });
+
+// ==================== PWA INSTALLATION HANDLING ====================
+let deferredPrompt = null;
+
+// Detect if we're on Android
+const isAndroid = /Android/.test(navigator.userAgent);
+
+// Add install prompt handling
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  logDiag('PWA install prompt available');
+  
+  // Show install button on Android
+  if (isAndroid) {
+    showInstallPrompt();
+  }
+});
+
+function showInstallPrompt() {
+  // Create install button if it doesn't exist
+  if (!document.getElementById('installPwaBtn')) {
+    const installBtn = document.createElement('button');
+    installBtn.id = 'installPwaBtn';
+    installBtn.textContent = '📱 Install App';
+    installBtn.style.cssText = `
+      position: fixed;
+      top: 70px;
+      right: 20px;
+      z-index: 10000;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    `;
+    installBtn.onclick = installPWA;
+    document.body.appendChild(installBtn);
+  }
+}
+
+async function installPWA() {
+  if (!deferredPrompt) {
+    alert('PWA installation not available in this browser.');
+    return;
+  }
+  
+  try {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    
+    if (outcome === 'accepted') {
+      logDiag('User accepted PWA install');
+      hideErrorBox();
+      setStatus(pushStatus, 'App installed! Notifications will work when closed.');
+      
+      // Remove install button
+      const installBtn = document.getElementById('installPwaBtn');
+      if (installBtn) installBtn.remove();
+    } else {
+      logDiag('User dismissed PWA install');
+    }
+    
+    deferredPrompt = null;
+  } catch (error) {
+    showError(error);
+  }
+}
+
+// Check if app is running as PWA
+function isRunningAsPWA() {
+  return window.matchMedia('(display-mode: standalone)').matches || 
+         window.navigator.standalone ||
+         document.referrer.includes('android-app://');
+}
+
+// Initialize PWA features
+function initPWA() {
+  if (isRunningAsPWA()) {
+    logDiag('Running as installed PWA');
+    
+    // Enable enhanced features for PWA
+    if ('wakeLock' in navigator) {
+      requestWakeLock();
+    }
+    
+    // Request notification permission on Android PWA
+    if (isAndroid && Notification.permission === 'default') {
+      setTimeout(() => {
+        Notification.requestPermission().then(perm => {
+          logDiag(`Notification permission on Android PWA: ${perm}`);
+        });
+      }, 2000);
+    }
+  }
+}
+
+// Request wake lock to keep screen on during calls (Android)
+async function requestWakeLock() {
+  try {
+    const wakeLock = await navigator.wakeLock.request('screen');
+    logDiag('Wake lock acquired');
+    
+    wakeLock.addEventListener('release', () => {
+      logDiag('Wake lock released');
+    });
+    
+    // Release on call end
+    window.addEventListener('call-ended', () => {
+      if (wakeLock) {
+        wakeLock.release();
+        logDiag('Wake lock released on call end');
+      }
+    });
+  } catch (err) {
+    logDiag(`Wake lock error: ${err.message}`);
+  }
+}
+
+// ==================== ENHANCED NOTIFICATION HANDLING ====================
+// Add this to your existing notification setup
+
+async function checkAndRequestNotificationPermission() {
+  if (!('Notification' in window)) {
+    setStatus(pushStatus, 'Notifications not supported');
+    return false;
+  }
+  
+  if (Notification.permission === 'granted') {
+    return true;
+  }
+  
+  if (Notification.permission === 'denied') {
+    if (isAndroid) {
+      setStatus(pushStatus, 'Enable notifications in Android Settings > Apps > [This App]');
+    } else {
+      setStatus(pushStatus, 'Notifications blocked. Allow in browser settings.');
+    }
+    return false;
+  }
+  
+  // Request permission
+  const permission = await Notification.requestPermission();
+  
+  if (permission === 'granted') {
+    logDiag('Notification permission granted');
+    return true;
+  }
+  
+  return false;
+}
+
+// Enhanced push setup for Android
+async function setupPushForAndroid() {
+  if (!isAndroid) return;
+  
+  logDiag('Setting up push for Android');
+  
+  // Check if service worker is ready
+  if (!('serviceWorker' in navigator)) {
+    setStatus(pushStatus, 'Service workers not supported');
+    return;
+  }
+  
+  try {
+    // Register service worker with Android-specific scope
+    const registration = await navigator.serviceWorker.register(
+      '/easosunov/firebase-messaging-sw.js',
+      { 
+        scope: '/easosunov/',
+        updateViaCache: 'none'
+      }
+    );
+    
+    await navigator.serviceWorker.ready;
+    logDiag('Service worker registered for Android');
+    
+    // Send UID to service worker
+    if (myUid && registration.active) {
+      registration.active.postMessage({
+        type: 'SET_UID',
+        uid: myUid,
+        timestamp: Date.now()
+      });
+      
+      // Listen for service worker messages
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        const data = event.data;
+        if (data.type === 'UID_ACK') {
+          logDiag('Service worker confirmed UID receipt');
+        }
+        
+        if (data.type === 'NAVIGATE_TO_CALL') {
+          // Handle navigation from notification
+          window.location.href = data.url;
+        }
+      });
+    }
+    
+  } catch (error) {
+    logDiag(`Android service worker registration failed: ${error.message}`);
+  }
+}
+
+// Update your existing enablePush function to handle Android
+// Replace or modify your existing enablePush function with:
+async function enablePush() {
+  logDiag("enablePush(): ENTER");
+  if(!requireAuthOrPrompt()) return;
+
+  const prev = getSavedPushBinding();
+  if(prev.uid && prev.uid !== myUid){
+    await revokePushForCurrentDevice();
+  }
+  
+  if (!("Notification" in window)) { 
+    setStatus(pushStatus, "Push: not supported in this browser."); 
+    return; 
+  }
+  
+  // Android-specific setup
+  if (isAndroid) {
+    await setupPushForAndroid();
+  }
+  
+  // Rest of your existing enablePush code...
+  // [Keep your existing enablePush code here, but add Android checks]
+}
