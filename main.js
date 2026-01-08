@@ -140,11 +140,13 @@ function setupEventListeners() {
     roomIdInput.addEventListener("input", () => refreshCopyInviteState());
   }
   
-  if (testSoundBtn) testSoundBtn.onclick = async () => {
+  if (testSoundBtn) {
+  testSoundBtn.onclick = async () => {
     await unlockAudio();
     startRingtone();
     setTimeout(() => stopRingtone(), 1800);
   };
+}
   
   if (hangupBtn) hangupBtn.onclick = () => hangup().catch(showError);
   if (saveNameBtn) saveNameBtn.onclick = () => saveMyName().catch(showError);
@@ -157,7 +159,17 @@ function setupEventListeners() {
   if (userSearchInput) {
     userSearchInput.addEventListener("input", () => renderUsersList(userSearchInput.value));
   }
-  
+  if (videoQualitySelect) {
+  videoQualitySelect.addEventListener("change", () => {
+    const v = String(videoQualitySelect.value || "medium");
+    selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+    updateVideoQualityUi();
+    
+    if (localStream) {
+      applyVideoQualityToCurrentStream(selectedVideoQuality);
+    }
+  });
+}
   // Initialize diagnostics buttons if they exist
   initializeDiagnostics();
 }
@@ -183,7 +195,85 @@ function hideErrorBox(){
     errorBox.textContent = "";
   }
 }
+// ==================== AUDIO FUNCTIONS ====================
+function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
 
+async function unlockAudio() {
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state !== "running") await ctx.resume();
+  } catch (e) {
+    logDiag("Audio unlock error: " + e.message);
+  }
+}
+
+function startRingtone() {
+  stopRingtone();
+  
+  try {
+    const ctx = ensureAudio();
+    if (ctx.state !== "running") ctx.resume().catch(() => {});
+    
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.10;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    let on = true;
+    ringTimer = setInterval(() => {
+      if (!ringGain) return;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
+      on = !on;
+    }, 450);
+
+    logDiag("Ringtone started.");
+  } catch (e) {
+    logDiag("Ringtone failed: " + e.message);
+  }
+}
+
+function stopRingtone() {
+  if (ringTimer) {
+    clearInterval(ringTimer);
+    ringTimer = null;
+  }
+  
+  try { if (ringOsc) ringOsc.stop(); } catch {}
+  try { if (ringOsc) ringOsc.disconnect(); } catch {}
+  try { if (ringGain) ringGain.disconnect(); } catch {}
+  
+  ringOsc = null;
+  ringGain = null;
+}
+
+function startRingback() {
+  stopRingback();
+  logDiag("Ringback started");
+  
+  // Simple beep pattern for ringback
+  ringbackTimer = setInterval(() => {
+    startRingtone();
+    setTimeout(() => stopRingtone(), 500);
+  }, 2000);
+}
+
+function stopRingback() {
+  if (ringbackTimer) {
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+  stopRingtone();
+}
 // ==================== FIREBASE INITIALIZATION ====================
 const app = initializeApp({
   apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
@@ -360,20 +450,23 @@ function refreshCopyInviteState(){
 }
 
 function stopAll(){
-  // Basic cleanup for now
-  if (localStream){
+  // Stop local media
+  if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
   }
   
+  // Clear video elements
   if (localVideo) localVideo.srcObject = null;
   if (remoteVideo) remoteVideo.srcObject = null;
   
+  // Update UI buttons
   if (startBtn) startBtn.disabled = !isAuthed;
   if (createBtn) createBtn.disabled = true;
   if (joinBtn) joinBtn.disabled = true;
   if (hangupBtn) hangupBtn.disabled = true;
   
+  // Update status
   setStatus(mediaStatus, "Not started.");
   setStatus(callStatus, "No room yet.");
   setStatus(dirCallStatus, "Idle.");
@@ -393,7 +486,8 @@ if (document.readyState === 'loading') {
 
 // Initialize UI
 updateVideoQualityUi();
-
+// Unlock audio on first click
+window.addEventListener("click", unlockAudio, { once: true });
 // ==================== MINIMAL VERSION - ADD FUNCTIONS GRADUALLY ====================
 
 // Add this placeholder for updateVideoQualityUi
@@ -407,9 +501,106 @@ function updateVideoQualityUi(){
 }
 
 // Add placeholder for other required functions
-async function startMedia(){
-  if(!requireAuthOrPrompt()) return;
-  alert("Media functionality not yet implemented");
+// ==================== MEDIA FUNCTIONS ====================
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+let selectedVideoQuality = "medium";
+
+function updateVideoQualityUi(){
+  if (videoQualitySelect) {
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if (videoQualityStatus) {
+    videoQualityStatus.textContent = `Video: ${label}.`;
+  }
+}
+
+// Add video quality change listener
+if (videoQualitySelect) {
+  videoQualitySelect.addEventListener("change", () => {
+    const v = String(videoQualitySelect.value || "medium");
+    selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+    updateVideoQualityUi();
+    
+    // Apply quality to current stream if it's running
+    if (localStream) {
+      applyVideoQualityToCurrentStream(selectedVideoQuality);
+    }
+  });
+}
+
+async function applyVideoQualityToCurrentStream(quality) {
+  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  const vTrack = localStream?.getVideoTracks?.()[0];
+  if (!vTrack) return;
+  
+  try {
+    await vTrack.applyConstraints(profile.constraints);
+    const s = vTrack.getSettings ? vTrack.getSettings() : {};
+    logDiag(`Video quality applied: ${quality} (${s.width}x${s.height} @ ${s.frameRate}fps)`);
+  } catch (e) {
+    logDiag("applyConstraints error: " + e.message);
+  }
+}
+
+async function startMedia() {
+  if (!requireAuthOrPrompt()) return;
+
+  if (localStream) {
+    logDiag("Media already started");
+    return;
+  }
+
+  hideErrorBox();
+  setStatus(mediaStatus, "Requesting camera/mic…");
+
+  const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: profile.constraints,
+      audio: true
+    });
+
+    if (localVideo) {
+      localVideo.srcObject = localStream;
+      
+      // Wait for video to load
+      localVideo.onloadedmetadata = async () => {
+        try {
+          await localVideo.play();
+          setStatus(mediaStatus, "Camera/mic started.");
+          logDiag("Local video playing.");
+        } catch (e) {
+          logDiag("Video play error: " + e.message);
+        }
+      };
+    }
+
+    // Enable buttons
+    if (startBtn) startBtn.disabled = true;
+    if (createBtn) createBtn.disabled = false;
+    if (joinBtn) joinBtn.disabled = false;
+
+    logDiag("Media started successfully");
+
+  } catch (e) {
+    setStatus(mediaStatus, "Failed to start media: " + e.name);
+    logDiag("getUserMedia error: " + e.message);
+    
+    // Reset state on error
+    localStream = null;
+    if (startBtn) startBtn.disabled = false;
+    if (createBtn) createBtn.disabled = true;
+    if (joinBtn) joinBtn.disabled = true;
+    
+    throw e;
+  }
 }
 
 async function createRoom(){
@@ -444,8 +635,12 @@ function stopRingtone(){
   // Placeholder
 }
 
-function hangup(){
+function hangup() {
+  stopRingtone();
+  stopRingback();
   stopAll();
+  setStatus(dirCallStatus, "Call ended.");
+  logDiag("Call hung up");
 }
 
 async function ensureMyUserProfile(user){
