@@ -105,58 +105,7 @@ let ringTimer = null;
 let ringbackTimer = null;
 let incomingCallsUnsubscribe = null;
 let roomCallsUnsubscribe = null;
-// ==================== DIAGNOSTICS SYSTEM ====================
-let diagVisible = false;
-const diagLog = [];
 
-// Replace the simple logDiag function with the enhanced version:
-function logDiag(msg){
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  diagLog.push(line);
-  console.log(line);
-  if (diagVisible) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
-  }
-  if (copyDiagBtn) copyDiagBtn.disabled = diagLog.length === 0;
-  if (clearDiagBtn) clearDiagBtn.disabled = diagLog.length === 0;
-}
-
-// Add these button handlers after other button handlers:
-if (diagBtn) {
-  diagBtn.onclick = () => {
-    diagVisible = !diagVisible;
-    if (diagBox) diagBox.style.display = diagVisible ? "block" : "none";
-    diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
-    if (diagVisible && diagBox) {
-      diagBox.textContent = diagLog.join("\n");
-      diagBox.scrollTop = diagBox.scrollHeight;
-    }
-  };
-}
-
-if (clearDiagBtn) {
-  clearDiagBtn.onclick = () => {
-    diagLog.length = 0;
-    if (diagVisible && diagBox) diagBox.textContent = "";
-    if (copyDiagBtn) copyDiagBtn.disabled = true;
-    if (clearDiagBtn) clearDiagBtn.disabled = true;
-    logDiag("Diagnostics cleared.");
-  };
-}
-
-if (copyDiagBtn) {
-  copyDiagBtn.onclick = async () => {
-    const text = diagLog.join("\n");
-    if (!text) return;
-    try{
-      await navigator.clipboard.writeText(text);
-      logDiag("Copied diagnostics to clipboard.");
-    }catch{
-      window.prompt("Copy diagnostics:", text);
-    }
-  };
-}
 // ==================== CONFIGURATION ====================
 const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
@@ -437,6 +386,58 @@ const startBgBtn = document.getElementById('startBgBtn');
 const stopBgBtn = document.getElementById('stopBgBtn');
 const bgStatus = document.getElementById('bgStatus');
 
+// ==================== DIAGNOSTICS SYSTEM ====================
+let diagVisible = false;
+const diagLog = [];
+
+// Replace the simple logDiag function with the enhanced version:
+function logDiag(msg){
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  diagLog.push(line);
+  console.log(line);
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
+  if (copyDiagBtn) copyDiagBtn.disabled = diagLog.length === 0;
+  if (clearDiagBtn) clearDiagBtn.disabled = diagLog.length === 0;
+}
+
+// Add these button handlers after other button handlers:
+if (diagBtn) {
+  diagBtn.onclick = () => {
+    diagVisible = !diagVisible;
+    if (diagBox) diagBox.style.display = diagVisible ? "block" : "none";
+    diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+    if (diagVisible && diagBox) {
+      diagBox.textContent = diagLog.join("\n");
+      diagBox.scrollTop = diagBox.scrollHeight;
+    }
+  };
+}
+
+if (clearDiagBtn) {
+  clearDiagBtn.onclick = () => {
+    diagLog.length = 0;
+    if (diagVisible && diagBox) diagBox.textContent = "";
+    if (copyDiagBtn) copyDiagBtn.disabled = true;
+    if (clearDiagBtn) clearDiagBtn.disabled = true;
+    logDiag("Diagnostics cleared.");
+  };
+}
+
+if (copyDiagBtn) {
+  copyDiagBtn.onclick = async () => {
+    const text = diagLog.join("\n");
+    if (!text) return;
+    try{
+      await navigator.clipboard.writeText(text);
+      logDiag("Copied diagnostics to clipboard.");
+    }catch{
+      window.prompt("Copy diagnostics:", text);
+    }
+  };
+}
 // ==================== UTILITY FUNCTIONS ====================
 const setStatus = (el, msg) => el.textContent = msg;
 
