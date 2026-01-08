@@ -391,6 +391,29 @@ select{
 <script type="module">
 console.log("APP VERSION:", "2026-01-08-pwa-enhanced-v1");
 
+// Add this at the top of your JavaScript, right after DOM ready
+document.addEventListener('DOMContentLoaded', function() {
+  // Create status element if it doesn't exist
+  if (!document.getElementById('status')) {
+    const statusEl = document.createElement('div');
+    statusEl.id = 'status';
+    statusEl.style.cssText = 'position:fixed;bottom:10px;left:10px;background:rgba(0,0,0,0.7);color:white;padding:5px;border-radius:3px;z-index:9999;font-size:12px;';
+    document.body.appendChild(statusEl);
+  }
+  
+  // Define setStatus function
+  window.setStatus = function(message) {
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+      statusEl.textContent = message;
+    }
+    console.log('[Status]', message);
+  };
+  
+  // Now call your initialization functions
+  initializeApp();
+});
+ 
 // Track if we showed a notification (for background app coordination)
 let webPageShowedNotification = false;
 
