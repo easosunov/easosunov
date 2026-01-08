@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="en">
 <head>
+<!-- ==================== METADATA & STYLES ==================== -->
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>WebRTC</title>
- <link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json">
 
 <style>
+/* ==================== GENERAL STYLES ==================== */
 body{font-family:system-ui;margin:16px} 
 h1{font-size:20px;margin:0 0 10px}
 .row{display:flex;gap:12px;flex-wrap:wrap}
@@ -20,13 +22,14 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 .status{font-size:13px;margin-top:8px}
 .small{font-size:12px;color:#555;margin-top:6px}
  
+/* ==================== ERROR BOX ==================== */
 #errorBox{
   display:none;margin:12px 0;padding:10px;
   border:1px solid #f3b5b5;background:#fff5f5;
   color:#7a1b1b;border-radius:12px;white-space:pre-wrap
 }
 
-/* LOGIN OVERLAY */
+/* ==================== LOGIN OVERLAY ==================== */
 #loginOverlay{
   position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.55);
@@ -42,7 +45,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
-/* DIAGNOSTICS */
+/* ==================== DIAGNOSTICS ==================== */
 #diagBox{
   display:none;
   margin-top:8px;
@@ -57,7 +60,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 }
 .diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 
-/* INCOMING CALL MODAL */
+/* ==================== INCOMING CALL MODAL ==================== */
 #incomingOverlay{
   position:fixed; inset:0; z-index:9998;
   background:rgba(0,0,0,.55);
@@ -73,12 +76,13 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 #answerBtn{background:#e8fff0;border-color:#bdeccc}
 #declineBtn{background:#fff0f0;border-color:#f1bcbc}
 
-/* ===== NEW: Video Quality UI ===== */
+/* ==================== VIDEO QUALITY SELECTOR ==================== */
 select{
   padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%;
   background:#fff;
 }
- /* ===== BOTTOM PANEL LAYOUT ===== */
+
+/* ==================== BOTTOM PANEL LAYOUT ==================== */
 .bottomPanel{
   margin-top:12px;
   border:1px solid #ddd;
@@ -86,58 +90,51 @@ select{
   padding:12px;
   background:#fff;
 }
-
 .bottomGrid{
   display:grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap:12px;
 }
-
 .bottomCard{
   border:1px solid #eee;
   border-radius:12px;
   padding:12px;
   background:#fff;
 }
-
 @media (max-width: 980px){
   .bottomGrid{ grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
-/* This media query will only apply styles for mobile screens (max-width: 720px) */
+
+/* ==================== MOBILE RESPONSIVE ==================== */
 @media (max-width: 720px) {
   body {
-    font-size: 18px; /* Larger font size for body text */
+    font-size: 18px;
   }
-
   h1 {
-    font-size: 24px; /* Increase header size */
+    font-size: 24px;
   }
-
   h2 {
-    font-size: 20px; /* Larger sub-header size */
+    font-size: 20px;
   }
-
   p, .status, .small {
-    font-size: 16px; /* Increase font size for paragraphs, status text, and small text */
+    font-size: 16px;
   }
-
   .button {
-    font-size: 16px; /* Increase font size for buttons */
+    font-size: 16px;
   }
 }
-
 </style>
 </head>
 
 <body>
+<!-- ==================== PAGE HEADER ==================== -->
 <h1>2-Person Video/Sound Communicator (WebRTC)</h1>
-
 <div id="errorBox"></div>
 
-<!-- INCOMING CALL -->
+<!-- ==================== INCOMING CALL MODAL ==================== -->
 <div id="incomingOverlay">
   <div id="incomingCard">
     <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
@@ -150,7 +147,7 @@ select{
   </div>
 </div>
 
-<!-- LOGIN -->
+<!-- ==================== LOGIN OVERLAY ==================== -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
@@ -171,174 +168,162 @@ select{
   </div>
 </div>
 
+<!-- ==================== MAIN APPLICATION ==================== -->
 <div id="app" class="locked">
 
-  <!-- VIDEOS + CONTROLS UNDER EACH VIDEO (NEW LAYOUT) -->
+  <!-- ==================== VIDEO PANEL ==================== -->
   <div class="videos">
-
-    <!-- LEFT: Person A video + your controls/status -->
+    <!-- LEFT PANEL: Person A (You) -->
     <div class="card">
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don't hear yourself.</div>
-<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-  <button id="hangupBtn" disabled>Hang up</button>
-
-  <div>
-    <div class="small">Message to send with call (optional)</div>
-    <input
-      id="callNoteInput"
-      placeholder="e.g. Let us talk at 3 pm"
-      maxlength="140"
-    />
-    <div class="small" style="color:#777">
-      This text will appear in the notification for Person B.
-    </div>
-  </div>
-</div>
-
-
-
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+        <button id="hangupBtn" disabled>Hang up</button>
+        <div>
+          <div class="small">Message to send with call (optional)</div>
+          <input
+            id="callNoteInput"
+            placeholder="e.g. Let us talk at 3 pm"
+            maxlength="140"
+          />
+          <div class="small" style="color:#777">
+            This text will appear in the notification for Person B.
+          </div>
+        </div>
+      </div>
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
     </div>
 
-    <!-- RIGHT: Person B video + directory list -->
+    <!-- RIGHT PANEL: Person B (Other) -->
     <div class="card">
       <b>Person B (Other)</b>
       <video id="remoteVideo" autoplay playsinline></video>
       <div class="small">If audio doesn't play, click the video once.</div>
-
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
-<div class="small">All allowed users</div>
-<div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
-   
-    </div>
-
-  </div>
-
-<!-- ===== BOTTOM PANEL (everything except A hangup+note and B users list) ===== -->
-<div class="bottomPanel">
-  <div class="bottomGrid">
-
-    <!-- Status / Push -->
-    <div class="bottomCard">
-      <b>Status</b>
-      <div class="status" id="myNameStatus">Not set.</div>
-      <div class="status" id="pushStatus">Push: not enabled.</div>
-      <div class="status" id="dirCallStatus">Idle.</div>
-    </div>
-
-    <!-- Video Quality -->
-    <div class="bottomCard">
-      <b>Video quality</b>
-      <div class="small">Choose before Start (you can change during a call).</div>
-      <select id="videoQualitySelect" disabled>
-        <option value="low">Low (360p)</option>
-        <option value="medium" selected>Medium (720p)</option>
-        <option value="high">High (1080p)</option>
-      </select>
-      <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
-    </div>
-
-    <!-- Profile -->
-    <div class="bottomCard">
-      <b>Your name</b>
-      <div class="small">Shown to other users.</div>
-      <input id="myNameInput" placeholder="e.g. Alex"/>
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="saveNameBtn" disabled>Save Name</button>
-      </div>
-    </div>
-
-    <!-- Call / Room -->
-    <div class="bottomCard">
-      <b>Call controls</b>
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="startBtn" disabled>Start</button>
-        <button id="createBtn" disabled>Create Room</button>
-        <button id="joinBtn" disabled>Join Room</button>
-      </div>
-      <div class="status" id="mediaStatus">Not started.</div>
-
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
-      <div class="small">Room ID</div>
-      <input id="roomId" placeholder="Room ID"/>
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="copyLinkBtn" disabled>Copy Invite</button>
-      </div>
-
-      <div class="status" id="callStatus">No room yet.</div>
-      <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
-    </div>
-
-        <!-- Utilities -->
-   <div class="bottomCard">
-  <b>Background Notifier</b>
-  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="startBgBtn" disabled>Start Background Service</button>
-    <button id="stopBgBtn" disabled>Stop Background Service</button>
-  </div>
-  <div class="status" id="bgStatus">Status: Not connected</div>
-  <div class="small">
-    Runs in system tray to show notifications when browser is closed.<br>
-    <strong>Download installer:</strong><br>
-    <a href="https://github.com/easosunov/easosunov/releases/download/v1.0.0/webrtc-notifier-installer.zip" 
-       id="downloadBgLink"
-       target="_blank"
-       download="webrtc-notifier-installer.zip"
-       style="color:#1976d2; text-decoration:underline">
-      webrtc-notifier-installer.zip
-    </a>
-    <div class="small" style="color:#666; margin-top:4px; font-size:11px">
-      After downloading:<br>
-      1. Extract the ZIP file<br>
-      2. Run <code style="background:#f5f5f5; padding:2px 6px">webrtc-notifier-installer.exe</code><br>
-      3. Look for 📞 icon in system tray
+      <div class="small">All allowed users</div>
+      <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
     </div>
   </div>
-</div>
-   
-    <div class="bottomCard">
-      <b>Utilities</b>
-<div style="margin-top:8px">
-    <div class="small">Search users</div>
-    <input id="userSearchInput" placeholder="Search users…" />
-  </div>
-     
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="testSoundBtn" disabled>Test Ring Sound</button>
-        <button id="resetPushBtn" disabled>Reset Push</button>
-        <button id="refreshUsersBtn" disabled>Refresh Users</button>
+
+  <!-- ==================== BOTTOM CONTROL PANEL ==================== -->
+  <div class="bottomPanel">
+    <div class="bottomGrid">
+
+      <!-- STATUS / PUSH CARD -->
+      <div class="bottomCard">
+        <b>Status</b>
+        <div class="status" id="myNameStatus">Not set.</div>
+        <div class="status" id="pushStatus">Push: not enabled.</div>
+        <div class="status" id="dirCallStatus">Idle.</div>
       </div>
 
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
-      <button id="diagBtn">Diagnostics</button>
-      <div class="diagActions">
-        <button id="copyDiagBtn" disabled>Copy log</button>
-        <button id="clearDiagBtn" disabled>Clear log</button>
+      <!-- VIDEO QUALITY CARD -->
+      <div class="bottomCard">
+        <b>Video quality</b>
+        <div class="small">Choose before Start (you can change during a call).</div>
+        <select id="videoQualitySelect" disabled>
+          <option value="low">Low (360p)</option>
+          <option value="medium" selected>Medium (720p)</option>
+          <option value="high">High (1080p)</option>
+        </select>
+        <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
       </div>
-      <pre id="diagBox"></pre>
-      <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
+
+      <!-- PROFILE CARD -->
+      <div class="bottomCard">
+        <b>Your name</b>
+        <div class="small">Shown to other users.</div>
+        <input id="myNameInput" placeholder="e.g. Alex"/>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+          <button id="saveNameBtn" disabled>Save Name</button>
+        </div>
+      </div>
+
+      <!-- CALL / ROOM CARD -->
+      <div class="bottomCard">
+        <b>Call controls</b>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+          <button id="startBtn" disabled>Start</button>
+          <button id="createBtn" disabled>Create Room</button>
+          <button id="joinBtn" disabled>Join Room</button>
+        </div>
+        <div class="status" id="mediaStatus">Not started.</div>
+        <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+        <div class="small">Room ID</div>
+        <input id="roomId" placeholder="Room ID"/>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+          <button id="copyLinkBtn" disabled>Copy Invite</button>
+        </div>
+        <div class="status" id="callStatus">No room yet.</div>
+        <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
+      </div>
+
+      <!-- BACKGROUND NOTIFIER CARD -->
+      <div class="bottomCard">
+        <b>Background Notifier</b>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+          <button id="startBgBtn" disabled>Start Background Service</button>
+          <button id="stopBgBtn" disabled>Stop Background Service</button>
+        </div>
+        <div class="status" id="bgStatus">Status: Not connected</div>
+        <div class="small">
+          Runs in system tray to show notifications when browser is closed.<br>
+          <strong>Download installer:</strong><br>
+          <a href="https://github.com/easosunov/easosunov/releases/download/v1.0.0/webrtc-notifier-installer.zip" 
+             id="downloadBgLink"
+             target="_blank"
+             download="webrtc-notifier-installer.zip"
+             style="color:#1976d2; text-decoration:underline">
+            webrtc-notifier-installer.zip
+          </a>
+          <div class="small" style="color:#666; margin-top:4px; font-size:11px">
+            After downloading:<br>
+            1. Extract the ZIP file<br>
+            2. Run <code style="background:#f5f5f5; padding:2px 6px">webrtc-notifier-installer.exe</code><br>
+            3. Look for 📞 icon in system tray
+          </div>
+        </div>
+      </div>
+      
+      <!-- UTILITIES CARD -->
+      <div class="bottomCard">
+        <b>Utilities</b>
+        <div style="margin-top:8px">
+          <div class="small">Search users</div>
+          <input id="userSearchInput" placeholder="Search users…" />
+        </div>
+        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+          <button id="testSoundBtn" disabled>Test Ring Sound</button>
+          <button id="resetPushBtn" disabled>Reset Push</button>
+          <button id="refreshUsersBtn" disabled>Refresh Users</button>
+        </div>
+        <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+        <button id="diagBtn">Diagnostics</button>
+        <div class="diagActions">
+          <button id="copyDiagBtn" disabled>Copy log</button>
+          <button id="clearDiagBtn" disabled>Clear log</button>
+        </div>
+        <pre id="diagBox"></pre>
+        <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
+      </div>
+
     </div>
-
   </div>
-</div>
 
 </div>
 
+<!-- ==================== JAVASCRIPT MODULE ==================== -->
 <script type="module">
+// ==================== GLOBAL DECLARATIONS ====================
 console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
- // Track if we showed a notification (for background app coordination)
+// ==================== NOTIFICATION HANDLING ====================
 let webPageShowedNotification = false;
 
-// Handle notification redirects
+// Handle notification redirects from background app
 (function handleNotificationRedirect() {
   try {
-    // Check URL parameters for notification click (from background app)
     const urlParams = new URLSearchParams(window.location.search);
     const callId = urlParams.get('callId');
     const roomId = urlParams.get('roomId');
@@ -346,7 +331,6 @@ let webPageShowedNotification = false;
     const toName = urlParams.get('toName');
     const note = urlParams.get('note');
     
-    // Store for later use when user signs in
     if (callId && roomId) {
       localStorage.setItem('pendingNotificationCall', JSON.stringify({
         callId: callId,
@@ -357,7 +341,6 @@ let webPageShowedNotification = false;
         timestamp: Date.now()
       }));
       
-      // Clear URL parameters for a clean URL
       const cleanUrl = window.location.origin + window.location.pathname;
       if (window.location.hash) {
         window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
@@ -372,10 +355,7 @@ let webPageShowedNotification = false;
   }
 })();
 
- // ===============================
-// SW BOOTSTRAP (runs even when NOT logged in)
-// This guarantees SW exists on both computers.
-// ===============================
+// ==================== SERVICE WORKER BOOTSTRAP ====================
 let swBootstrapReg = null;
 
 async function ensureServiceWorkerInstalled() {
@@ -384,13 +364,11 @@ async function ensureServiceWorkerInstalled() {
     return null;
   }
 
-  // If already controlling the page, SW exists
   if (navigator.serviceWorker.controller) {
     console.log("[SW] controller already active");
   }
 
   const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
-  // bump version when you change SW file
   swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
 
   try {
@@ -410,16 +388,16 @@ async function ensureServiceWorkerInstalled() {
 // RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
 
- const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
-
-/* ======== CONFIG ======== */
+// ==================== CONFIGURATION ====================
+const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
+
 function cleanVapidKey(k){
   return String(k || "").trim().replace(/[\r\n\s]/g, "");
 }
 const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
 
-/* ================== ELEMENTS ================== */
+// ==================== DOM ELEMENT REFERENCES ====================
 const errorBox = document.getElementById("errorBox");
 
 const loginOverlay = document.getElementById("loginOverlay");
@@ -445,13 +423,11 @@ const diagBox = document.getElementById("diagBox");
 const copyDiagBtn = document.getElementById("copyDiagBtn");
 const clearDiagBtn = document.getElementById("clearDiagBtn");
 
-/* Incoming modal */
 const incomingOverlay = document.getElementById("incomingOverlay");
 const incomingText = document.getElementById("incomingText");
 const answerBtn = document.getElementById("answerBtn");
 const declineBtn = document.getElementById("declineBtn");
 
-/* Directory UI (C-lite) */
 const myNameInput = document.getElementById("myNameInput");
 const saveNameBtn = document.getElementById("saveNameBtn");
 const refreshUsersBtn = document.getElementById("refreshUsersBtn");
@@ -460,133 +436,28 @@ const userSearchInput = document.getElementById("userSearchInput");
 const usersList = document.getElementById("usersList");
 const dirCallStatus = document.getElementById("dirCallStatus");
 
-/* Push + sound + hangup */
 const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
 const hangupBtn = document.getElementById("hangupBtn");
 const resetPushBtn = document.getElementById("resetPushBtn");
 const callNoteInput = document.getElementById("callNoteInput");
 
-/* ===== NEW: video quality UI elements ===== */
 const videoQualitySelect = document.getElementById("videoQualitySelect");
 const videoQualityStatus = document.getElementById("videoQualityStatus");
 
-// Background service elements
 const startBgBtn = document.getElementById('startBgBtn');
 const stopBgBtn = document.getElementById('stopBgBtn');
 const bgStatus = document.getElementById('bgStatus');
 const downloadBgLink = document.getElementById('downloadBgLink');
 
-/* ================== STATE VARIABLES ================== */
+// ==================== STATE VARIABLES ====================
 let isAuthed = false;
 let myUid = null;
 let pendingIncomingCallWhileLoggedOut = null;
 
 const setStatus = (el,msg)=> el.textContent = msg;
-async function notifyCall(callId){
-  try{
-    if(!callId) throw new Error("notifyCall: missing callId");
 
-    const url = new URL(NOTIFY_CALL_URL);
-    url.searchParams.set("callId", callId);
-
-    logDiag("notifyCall: calling " + url.toString());
-    const r = await fetch(url.toString(), { method: "GET" });
-
-    const text = await r.text().catch(()=> "");
-    logDiag(`notifyCall: status=${r.status} body=${text.slice(0, 200)}`);
-  }catch(e){
-    logDiag("notifyCall ERROR: " + (e?.message || e));
-  }
-}
-
-/* ================== DIAGNOSTICS ================== */
-let diagVisible = false;
-const diagLog = [];
-function logDiag(msg){
-  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  diagLog.push(line);
-  console.log(line);
-  if (diagVisible) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
-  }
-  copyDiagBtn.disabled = diagLog.length === 0;
-  clearDiagBtn.disabled = diagLog.length === 0;
-}
-diagBtn.onclick = () => {
-  diagVisible = !diagVisible;
-  diagBox.style.display = diagVisible ? "block" : "none";
-  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
-  if (diagVisible) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
-  }
-};
-clearDiagBtn.onclick = () => {
-  diagLog.length = 0;
-  if (diagVisible) diagBox.textContent = "";
-  copyDiagBtn.disabled = true;
-  clearDiagBtn.disabled = true;
-  logDiag("Diagnostics cleared.");
-};
-copyDiagBtn.onclick = async () => {
-  const text = diagLog.join("\n");
-  if (!text) return;
-  try{
-    await navigator.clipboard.writeText(text);
-    logDiag("Copied diagnostics to clipboard.");
-  }catch{
-    window.prompt("Copy diagnostics:", text);
-  }
-};
-
-/* ================== ERROR HANDLING ================== */
-function showError(e){
-  const code = e?.code ? `\ncode: ${e.code}` : "";
-  const msg  = e?.message ? `\nmessage: ${e.message}` : "";
-  errorBox.style.display = "block";
-  errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
-  logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
-}
-function hideErrorBox(){
-  errorBox.style.display = "none";
-  errorBox.textContent = "";
-}
-window.addEventListener("error", (e)=> showError(e.error || e.message || e));
-window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-
-/* ================== FIREBASE ================== */
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
-import {
-  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
-  onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp,
-  documentId, deleteDoc
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
-
-import { getMessaging, getToken, onMessage, deleteToken }
-  from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
-
-import {
-  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
-  setPersistence, inMemoryPersistence
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-
-const app = initializeApp({
-  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
-  authDomain:"easosunov-webrtc.firebaseapp.com",
-  projectId:"easosunov-webrtc",
-  storageBucket:"easosunov-webrtc.firebasestorage.app",
-  messagingSenderId:"100169991412",
-  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
-});
-const db = getFirestore(app);
-const auth = getAuth(app);
-
-/* ================== BACKGROUND SERVICE ================== */
-// Test if background service is running
+// ==================== BACKGROUND SERVICE FUNCTIONS ====================
 async function checkBackgroundService() {
   try {
     const response = await fetch('http://localhost:3000/status', { 
@@ -596,12 +467,10 @@ async function checkBackgroundService() {
     const data = await response.json();
     return data;
   } catch (error) {
-    // Service is not running or not reachable
     return { isRunning: false, uid: null };
   }
 }
 
-// Start background service
 async function startBackgroundService() {
   if (!isAuthed || !myUid) {
     alert('Please sign in first');
@@ -633,14 +502,12 @@ async function startBackgroundService() {
     bgStatus.textContent = '❌ Failed to connect';
     logDiag('Background service error: ' + error.message);
     
-    // Show helpful message
     if (error.message.includes('fetch') || error.message.includes('network')) {
       alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
     }
   }
 }
 
-// Stop background service
 async function stopBackgroundService() {
   try {
     const response = await fetch('http://localhost:3000/stop', {
@@ -661,7 +528,6 @@ async function stopBackgroundService() {
   }
 }
 
-// Update service status
 async function updateServiceStatus() {
   if (isAuthed) {
     startBgBtn.disabled = false;
@@ -687,20 +553,98 @@ async function updateServiceStatus() {
   }
 }
 
-// Event listeners
-startBgBtn.onclick = startBackgroundService;
-stopBgBtn.onclick = stopBackgroundService;
+// ==================== DIAGNOSTICS SYSTEM ====================
+let diagVisible = false;
+const diagLog = [];
 
-// Download link
-// Download link - remove onclick handler since href is already set
-// Or update to use your GitHub URL
-downloadBgLink.onclick = (e) => {
-  // Optional: Add analytics or confirmation
-  console.log('Downloading background app...');
-  // Let the default link behavior happen (browser will download)
+function logDiag(msg){
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  diagLog.push(line);
+  console.log(line);
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
+  copyDiagBtn.disabled = diagLog.length === 0;
+  clearDiagBtn.disabled = diagLog.length === 0;
+}
+
+diagBtn.onclick = () => {
+  diagVisible = !diagVisible;
+  diagBox.style.display = diagVisible ? "block" : "none";
+  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
 };
 
-/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
+clearDiagBtn.onclick = () => {
+  diagLog.length = 0;
+  if (diagVisible) diagBox.textContent = "";
+  copyDiagBtn.disabled = true;
+  clearDiagBtn.disabled = true;
+  logDiag("Diagnostics cleared.");
+};
+
+copyDiagBtn.onclick = async () => {
+  const text = diagLog.join("\n");
+  if (!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    logDiag("Copied diagnostics to clipboard.");
+  }catch{
+    window.prompt("Copy diagnostics:", text);
+  }
+};
+
+// ==================== ERROR HANDLING ====================
+function showError(e){
+  const code = e?.code ? `\ncode: ${e.code}` : "";
+  const msg  = e?.message ? `\nmessage: ${e.message}` : "";
+  errorBox.style.display = "block";
+  errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
+  logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
+}
+
+function hideErrorBox(){
+  errorBox.style.display = "none";
+  errorBox.textContent = "";
+}
+
+window.addEventListener("error", (e)=> showError(e.error || e.message || e));
+window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+
+// ==================== FIREBASE INITIALIZATION ====================
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import {
+  getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
+  onSnapshot, getDocs, writeBatch, query, where, limit, orderBy, serverTimestamp,
+  documentId, deleteDoc
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+import { getMessaging, getToken, onMessage, deleteToken }
+  from "https://www.gstatic.com/firebasejs/10.12.5/firebase-messaging.js";
+
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  setPersistence, inMemoryPersistence
+} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
+  authDomain:"easosunov-webrtc.firebaseapp.com",
+  projectId:"easosunov-webrtc",
+  storageBucket:"easosunov-webrtc.firebasestorage.app",
+  messagingSenderId:"100169991412",
+  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
+});
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+// ==================== SINGLE USER PER COMPUTER ENFORCEMENT ====================
 const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
 const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
 
@@ -732,17 +676,15 @@ function getDeviceOwner(){
 }
 
 async function forceSignOutBecauseDifferentUser(newUid){
-  // If this tab is signed in as someone else, sign out immediately.
   const currentUid = auth.currentUser?.uid || null;
   if (currentUid && newUid && currentUid !== newUid){
     logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
     try{
-      stopAll(); // stop listeners/media before auth changes
+      stopAll();
     }catch{}
     try{
       await signOut(auth);
     }catch(e){
-      // If signOut fails, still show why
       showError(e);
     }
   }
@@ -754,7 +696,6 @@ function broadcastNewOwner(uid){
   }
 }
 
-// Listen for owner changes via BroadcastChannel
 if(authBC){
   authBC.onmessage = (ev)=>{
     const msg = ev?.data || {};
@@ -767,14 +708,12 @@ if(authBC){
   };
 }
 
-// Also listen via localStorage (works even if BroadcastChannel is unavailable)
 window.addEventListener("storage", (ev)=>{
   if(ev.key === DEVICE_OWNER_KEY && ev.newValue){
     forceSignOutBecauseDifferentUser(String(ev.newValue));
   }
 });
 
-// On load: if someone else is marked as owner and this tab is signed in as different UID -> sign out
 (async function enforceSingleUserOnStartup(){
   const owner = getDeviceOwner();
   const currentUid = auth.currentUser?.uid || null;
@@ -783,10 +722,9 @@ window.addEventListener("storage", (ev)=>{
   }
 })();
 
-/* Force login every time (no stored session) */
 await setPersistence(auth, inMemoryPersistence);
 
-/* UID allowlist */
+// ==================== ALLOWLIST ENFORCEMENT ====================
 async function enforceAllowlist(user){
   const uid = user.uid;
   logDiag("Allowlist check uid=" + uid);
@@ -818,7 +756,7 @@ async function enforceAllowlist(user){
   }
 }
 
-/* ================== AUTH GATE ================== */
+// ==================== AUTHENTICATION FUNCTIONS ====================
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
   loginOverlay.style.display = "flex";
@@ -834,7 +772,6 @@ loginBtn.onclick = async () => {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
     loginStatus.textContent = "Signed in. Checking allowlist…";
 
-    // Claim device owner immediately (forces other tabs with different UID to sign out)
     const uid = auth.currentUser?.uid;
     if(uid){
       setDeviceOwner(uid);
@@ -850,23 +787,21 @@ loginBtn.onclick = async () => {
 
 logoutBtn.onclick = async () => {
   try{
-    stopAll();                 // stop listeners/media/UI
-    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
+    stopAll();
+    await revokePushForCurrentDevice();
     await signOut(auth);
   }catch(e){
     showError(e);
   }
 };
 
-/* ================== PROCESS PENDING NOTIFICATIONS ================== */
-// Process pending notifications after authentication
+// ==================== PENDING NOTIFICATION PROCESSING ====================
 async function processPendingNotifications() {
   try {
     const pending = localStorage.getItem('pendingNotificationCall');
     if (pending) {
       try {
         const pendingData = JSON.parse(pending);
-        // If notification is less than 60 seconds old
         if (Date.now() - pendingData.timestamp < 60000) {
           if (isAuthed && myUid) {
             showIncomingUI(pendingData.callId, {
@@ -877,7 +812,6 @@ async function processPendingNotifications() {
             });
           }
         }
-        // Clear after processing
         localStorage.removeItem('pendingNotificationCall');
       } catch (e) {
         localStorage.removeItem('pendingNotificationCall');
@@ -888,7 +822,7 @@ async function processPendingNotifications() {
   }
 }
 
-/* ================== URL OPEN (from push click) ================== */
+// ==================== URL PARAMETER HANDLING ====================
 (function handlePushOpen(){
   try{
     const qs = new URLSearchParams(location.search);
@@ -914,7 +848,7 @@ async function processPendingNotifications() {
   }
 })();
 
-/* ================== URL HASH / AUTOJOIN MODE ================== */
+// ==================== URL HASH / AUTOJOIN ====================
 const openedFromInvite = (location.hash.length > 1);
 let suppressAutoJoin = false;
 
@@ -924,7 +858,7 @@ if (openedFromInvite) {
   logDiag("Room ID from URL hash: " + roomIdInput.value);
 }
 
-/* ================== WEBRTC ================== */
+// ==================== WEBRTC CONFIGURATION ====================
 let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
 async function loadIceServers() {
@@ -939,21 +873,17 @@ async function loadIceServers() {
   logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
 }
 
+// ==================== MEDIA STREAM MANAGEMENT ====================
 let localStream = null;
 let pc = null;
 
-/* ===== NEW: Video quality profiles =====
-   Low:    640x360 @ 15fps
-   Medium: 1280x720 @ 30fps
-   High:   1920x1080 @ 30fps
-*/
+// ==================== VIDEO QUALITY PROFILES ====================
 const VIDEO_PROFILES = {
   low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
   medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
   high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
 };
 
-// Persist selection
 const LS_VIDEO_QUALITY = "webrtc_video_quality";
 function getSavedVideoQuality(){
   try{
@@ -979,14 +909,12 @@ function updateVideoQualityUi(){
 
 updateVideoQualityUi();
 
-// Change handler
 videoQualitySelect?.addEventListener("change", async ()=>{
   const v = String(videoQualitySelect.value || "medium");
   selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
   saveVideoQuality(selectedVideoQuality);
   updateVideoQualityUi();
 
-  // If camera already started, apply immediately
   if(localStream){
     try{
       await applyVideoQualityToCurrentStream(selectedVideoQuality);
@@ -1010,7 +938,7 @@ async function applyVideoQualityToCurrentStream(quality){
   }));
 }
 
-/* for call sessions, pin the room id so restarts never jump rooms */
+// ==================== WEBRTC PEER CONNECTION MANAGEMENT ====================
 let pinnedRoomId = null;
 
 function closePeer(){
@@ -1052,7 +980,7 @@ async function ensurePeer() {
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 }
 
-/* ================== FIRESTORE HELPERS ================== */
+// ==================== FIRESTORE HELPER FUNCTIONS ====================
 async function clearSub(col){
   const s = await getDocs(col);
   if(s.empty) return;
@@ -1062,13 +990,13 @@ async function clearSub(col){
   logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
 }
 
-/* ================== UI HELPERS ================== */
+// ==================== UI STATE MANAGEMENT ====================
 function refreshCopyInviteState(){
   const hasRoomId = !!roomIdInput.value.trim();
   copyLinkBtn.disabled = !(isAuthed && hasRoomId);
 }
 
-/* ================== MEDIA + AUTOJOIN ================== */
+// ==================== MEDIA INITIALIZATION & AUTOJOIN ====================
 let startingPromise = null;
 let autoJoinDone = false;
 let autoJoinScheduled = false;
@@ -1089,7 +1017,6 @@ async function startMedia(opts={skipAutoJoin:false}){
     setStatus(mediaStatus,"Requesting camera/mic…");
     logDiag("Requesting getUserMedia…");
 
-    // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
     const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
 
     localStream = await navigator.mediaDevices.getUserMedia({
@@ -1099,7 +1026,6 @@ async function startMedia(opts={skipAutoJoin:false}){
 
     localVideo.srcObject = localStream;
 
-    // Also try to apply constraints again (some cameras ignore initial ideals)
     try{
       await applyVideoQualityToCurrentStream(selectedVideoQuality);
     }catch(e){
@@ -1169,7 +1095,7 @@ async function autoJoinIfNeeded(){
   }
 }
 
-/* ================== LISTENERS ================== */
+// ==================== FIRESTORE LISTENER MANAGEMENT ====================
 let unsubRoomA=null, unsubCalleeA=null;
 let unsubRoomB=null, unsubCallerB=null;
 
@@ -1180,13 +1106,13 @@ function stopListeners(){
   if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
 }
 
-/* ================== STOP ================== */
+// ==================== SYSTEM CLEANUP FUNCTIONS ====================
 function stopAll(){
   stopListeners();
   closePeer();
   stopCallListeners();
   stopIncomingUI();
- stopRingback();
+  stopRingback();
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
@@ -1213,7 +1139,7 @@ function stopAll(){
   pinnedRoomId = null;
 }
 
-/* ================== REJOIN SUPPORT ================== */
+// ==================== REJOIN SUPPORT ====================
 let lastSeenJoinRequestA = 0;
 let lastAnsweredSessionB = null;
 let bRetryTimer = null;
@@ -1228,7 +1154,7 @@ async function requestFreshOffer(roomRef){
   logDiag("Requested fresh offer (joinRequest).");
 }
 
-/* ================== ROOM A ================== */
+// ==================== ROOM CREATION (CALLER SIDE) ====================
 let createAttemptA = 0;
 
 async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
@@ -1330,7 +1256,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
   return { roomId: roomRef.id, roomRef };
 }
 
-/* ================== ROOM B ================== */
+// ==================== ROOM JOINING (CALLEE SIDE) ====================
 let joinAttemptB = 0;
 
 async function joinRoom(){
@@ -1439,7 +1365,7 @@ async function joinRoom(){
   });
 }
 
-/* ================== COPY INVITE ================== */
+// ==================== INVITE LINK MANAGEMENT ====================
 async function copyTextRobust(text){
   if(navigator.clipboard && window.isSecureContext){
     try{ await navigator.clipboard.writeText(text); return true; }catch{}
@@ -1457,7 +1383,7 @@ copyLinkBtn.onclick = async ()=>{
   logDiag("Copy invite clicked.");
 };
 
-/* ================== RINGTONE ================== */
+// ==================== AUDIO MANAGEMENT ====================
 let audioCtx = null;
 let ringOsc = null;
 let ringGain = null;
@@ -1512,7 +1438,8 @@ function stopRingtone(){
   ringOsc = null;
   ringGain = null;
 }
-/* ================== CALLER RINGBACK (quiet beeps) ================== */
+
+// ==================== RINGBACK TONE MANAGEMENT ====================
 let ringbackTimer = null;
 
 function stopRingback(){
@@ -1530,9 +1457,9 @@ function playRingbackBeepOnce(){
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
 
-    gain.gain.value = 0.04;     // quiet volume
+    gain.gain.value = 0.04;
     osc.type = "sine";
-    osc.frequency.value = 440;  // phone-ish
+    osc.frequency.value = 440;
 
     osc.connect(gain);
     gain.connect(ctx.destination);
@@ -1551,10 +1478,8 @@ function playRingbackBeepOnce(){
 function startRingback(){
   stopRingback();
 
-  // Ensure audio is unlocked (browser policy)
   try{ unlockAudio(); }catch{}
 
-  // Pattern: beep, 250ms later beep, then ~2s pause, repeat
   const cycleMs = 2500;
 
   playRingbackBeepOnce();
@@ -1566,9 +1491,9 @@ function startRingback(){
   }, cycleMs);
 }
 
-/* ================== CALLS (UID-based) ================== */
-let currentIncomingCall = null; // { id, data }
-let activeCallId = null;        // NEW: callId for BOTH sides (caller OR callee)
+// ==================== CALL MANAGEMENT (UID-BASED) ====================
+let currentIncomingCall = null;
+let activeCallId = null;
 let lastDismissedIncomingCallId = null;
 
 let unsubIncoming = null;
@@ -1585,16 +1510,14 @@ function showIncomingUI(callId, data){
   currentIncomingCall = { id: callId, data };
   incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
 
-  // Let caller know callee browser received/displayed invite
   if (!data?.deliveredAt) {
     updateDoc(doc(db,"calls", callId), {
       deliveredAt: serverTimestamp(),
       deliveredVia: "firestore",
-      deliveredAtMs: Date.now()  // Add milliseconds timestamp for precise timing
+      deliveredAtMs: Date.now()
     }).catch(()=>{});
   }
 
-  // MARK THAT WEB PAGE HANDLED NOTIFICATION
   webPageShowedNotification = true;
   console.log('Web page showing incoming call UI, marking as delivered');
 
@@ -1637,12 +1560,10 @@ async function listenIncomingCalls(){
   });
 }
 
-// Catch-up: if Chrome was closed and push was missed, show the newest ringing call after login
 async function catchUpMissedRingingCall() {
   try {
     if (!myUid) return;
 
-    // 1) Query newest ringing call addressed to me
     const qy = query(
       collection(db, "calls"),
       where("toUid", "==", myUid),
@@ -1657,23 +1578,20 @@ async function catchUpMissedRingingCall() {
     const d = snap.docs[0];
     const callId = d.id;
     const call = d.data() || {};
-if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
-if (currentIncomingCall?.id === callId) return;
+    if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+    if (currentIncomingCall?.id === callId) return;
 
-    // 2) Derive created time (ms) safely
     const createdMs =
       (call.createdAt && typeof call.createdAt.toMillis === "function")
         ? call.createdAt.toMillis()
         : Date.now();
 
-    // 3) Show in-page incoming UI (works even if notifications are blocked)
     roomIdInput.value = call.roomId || "";
     currentIncomingCall = { id: callId, data: call };
     incomingText.textContent = `Call from ${call.fromName || "unknown"}…`;
     incomingOverlay.style.display = "flex";
     startRingtone();
 
-    // 4) Optional: also show a system notification (if permission granted)
     if ("Notification" in window && Notification.permission === "granted") {
       const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
       if (reg) {
@@ -1702,22 +1620,18 @@ if (currentIncomingCall?.id === callId) return;
   }
 }
 
-// Catch-up: if Chrome was closed and the call became MISSED, show newest missed call after login
 async function catchUpMissedCallNotification() {
   try {
     if (!myUid) return;
 
-    // 0) Don't repeat the same missed call notification forever
     const LS_LAST_MISSED = "webrtc_last_missed_call_id";
     const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
 
-    // Helper to show system notification
     async function showMissed(callId, call, whenMs) {
       const fromName = call.fromName || "Unknown";
       const note = String(call.note || "").trim();
       const tsLocal = new Date(whenMs).toLocaleString();
 
-      // Always update in-page status so you can debug even if notifications are blocked
       setStatus(dirCallStatus, `Missed call from ${fromName}.`);
       logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
 
@@ -1742,7 +1656,6 @@ async function catchUpMissedCallNotification() {
       localStorage.setItem(LS_LAST_MISSED, callId);
     }
 
-    // 1) First, try newest explicit MISSED call
     {
       const q1 = query(
         collection(db, "calls"),
@@ -1773,14 +1686,13 @@ async function catchUpMissedCallNotification() {
       }
     }
 
-    // 2) If not found, treat "ended" as missed IF it was never accepted/declined
     {
       const q2 = query(
         collection(db, "calls"),
         where("toUid", "==", myUid),
         where("status", "==", "ended"),
         orderBy("endedAt", "desc"),
-        limit(5) // check a few, because newest ended might be a real answered call
+        limit(5)
       );
 
       const s2 = await getDocs(q2);
@@ -1790,7 +1702,6 @@ async function catchUpMissedCallNotification() {
         const callId = docSnap.id;
         const call = docSnap.data() || {};
 
-        // Skip if it was actually answered or declined
         const hadAccept = !!call.acceptedAt;
         const hadDecline = !!call.declinedAt;
         if (hadAccept || hadDecline) continue;
@@ -1830,17 +1741,15 @@ function listenActiveCall(callId){
     const d = s.data();
     if(!d) return;
 
-    // If the other side ends the call, clean everything up locally
     if(d.status === "ended"){
       stopRingback();
       setStatus(dirCallStatus, "Ended.");
       logDiag("Call ended (remote).");
       cleanupCallUI();
-      stopAll(); // full local cleanup
+      stopAll();
       return;
     }
 
-    // Optional: keep your existing status feedback
     if(d.status === "accepted"){
       stopRingback();
       setStatus(dirCallStatus, "Answered. Connecting…");
@@ -1853,13 +1762,13 @@ function listenActiveCall(callId){
       cleanupCallUI();
       return;
     }
-if(d.status === "missed"){
-  stopRingback();
-  setStatus(dirCallStatus, "Missed.");
-  logDiag("Call missed.");
-  cleanupCallUI();
-  return;
-}
+    if(d.status === "missed"){
+      stopRingback();
+      setStatus(dirCallStatus, "Missed.");
+      logDiag("Call missed.");
+      cleanupCallUI();
+      return;
+    }
 
     if (d.deliveredAt) {
       setStatus(dirCallStatus, "Delivered (callee page open).");
@@ -1876,47 +1785,39 @@ if(d.status === "missed"){
 }
 
 async function hangup(){
- stopRingback();
-  // NEW: works for BOTH caller and callee
+  stopRingback();
   if (activeCallId) {
     try{
       const callRef = doc(db, "calls", activeCallId);
-const snap = await getDoc(callRef);
+      const snap = await getDoc(callRef);
 
-if (snap.exists()) {
-  const call = snap.data() || {};
-
-  // If caller hangs up BEFORE callee answered/declined → MISSED
-  if (call.status === "ringing") {
-    await updateDoc(callRef, {
-      status: "missed",
-      missedAt: serverTimestamp(),
-      endedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  } else {
-    // Normal hangup after answer
-    await updateDoc(callRef, {
-      status: "ended",
-      endedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-}
-
+      if (snap.exists()) {
+        const call = snap.data() || {};
+        if (call.status === "ringing") {
+          await updateDoc(callRef, {
+            status: "missed",
+            missedAt: serverTimestamp(),
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await updateDoc(callRef, {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
     }catch(e){
-      // If rules block it, you'll see it in the error box (we fix rules below)
       showError(e);
     }
   }
 
-  // FULL local cleanup
   stopAll();
   cleanupCallUI();
   setStatus(dirCallStatus, "Ended.");
 }
 
-/* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
   try{
     const call = currentIncomingCall;
@@ -1935,11 +1836,9 @@ answerBtn.onclick = async ()=>{
       updatedAt: serverTimestamp()
     });
 
-    // Clear notification flag
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
 
-    // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
     hangupBtn.disabled = false;
     listenActiveCall(id);
@@ -1970,7 +1869,6 @@ declineBtn.onclick = async ()=>{
       updatedAt: serverTimestamp()
     });
 
-    // Clear notification flag
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
 
@@ -1981,9 +1879,9 @@ declineBtn.onclick = async ()=>{
   }
 };
 
-/* ================== USER DIRECTORY (C-lite) ================== */
+// ==================== USER DIRECTORY MANAGEMENT ====================
 let myDisplayName = "";
-let allUsersCache = []; // [{uid, displayName}]
+let allUsersCache = [];
 
 function defaultNameFromEmail(email){
   const e = String(email || "").trim();
@@ -2107,90 +2005,74 @@ async function startCallToUid(toUid, toName=""){
 
   const note = String(callNoteInput?.value || "").trim().slice(0, 140);
 
-const callRef = await addDoc(collection(db,"calls"), {
-  fromUid: myUid,
-  toUid,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
-  toName: toName || "",
-  roomId: created.roomId,
-  note,
-  status: "ringing",
-  createdAt: serverTimestamp(),
-  updatedAt: serverTimestamp(),
-
-  // NEW: lifecycle markers
-  acceptedAt: null,
-  declinedAt: null,
-  endedAt: null
-});
-
-
+  const callRef = await addDoc(collection(db,"calls"), {
+    fromUid: myUid,
+    toUid,
+    fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+    toName: toName || "",
+    roomId: created.roomId,
+    note,
+    status: "ringing",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    acceptedAt: null,
+    declinedAt: null,
+    endedAt: null
+  });
 
   activeCallId = callRef.id;
-  // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
-try {
-  const messagePayload = {
-  toUid,          // Callee's UID
-  callId: callRef.id,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
-  note: note,
-  timestamp: new Date().toLocaleString(), // Adding timestamp
-  sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
-};
-
-await sendIncomingCallNotification(messagePayload);
-
-
-  // Trigger the push notification for incoming call
-  await sendIncomingCallNotification(messagePayload);
-} catch (e) {
-  console.error("Error sending incoming call push notification:", e);
-}
+  try {
+    const messagePayload = {
+      toUid,
+      callId: callRef.id,
+      fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+      note: note,
+      timestamp: new Date().toLocaleString(),
+      sentAtMs: Date.now(),
+    };
+    await sendIncomingCallNotification(messagePayload);
+  } catch (e) {
+    console.error("Error sending incoming call push notification:", e);
+  }
 
   hangupBtn.disabled = false;
-
-  // Watch the call doc for accepted/declined/ended/delivery/push status
   listenActiveCall(activeCallId);
-
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
- startRingback();
- logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
- sendIncomingCallNotification({
-  callId: callRef.id,    // the unique call identifier
-  fromName: myDisplayName, // the caller's name
-  toUid: toUid,           // the recipient's UID
-  note: note,             // the optional note/message
-  roomId: created.roomId, // the unique room ID
-});
+  startRingback();
+  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+  sendIncomingCallNotification({
+    callId: callRef.id,
+    fromName: myDisplayName,
+    toUid: toUid,
+    note: note,
+    roomId: created.roomId,
+  });
 
- // NEW: Function to send incoming call push notification
-async function sendIncomingCallNotification(message) {
-  try {
-    const response = await fetch("/easosunov/sendIncomingPush", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(message),
-    });
+  async function sendIncomingCallNotification(message) {
+    try {
+      const response = await fetch("/easosunov/sendIncomingPush", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(message),
+      });
 
-    if (!response.ok) {
-      throw new Error("Failed to send incoming call push notification");
+      if (!response.ok) {
+        throw new Error("Failed to send incoming call push notification");
+      }
+
+      const data = await response.json();
+      console.log("Incoming call push notification sent:", data);
+    } catch (error) {
+      console.error("Error sending incoming call notification:", error);
     }
-
-    const data = await response.json();
-    console.log("Incoming call push notification sent:", data);
-  } catch (error) {
-    console.error("Error sending incoming call notification:", error);
   }
 }
 
-}
-
-/* ================== PUSH (optional) ================== */
+// ==================== PUSH NOTIFICATION MANAGEMENT ====================
 let messaging = null;
 let swReg = null;
-/* ===== NEW: rotate FCM token when user changes on same browser ===== */
 let lastPushUid = null;
 
 async function rotateFcmTokenIfUserChanged(){
@@ -2199,7 +2081,6 @@ async function rotateFcmTokenIfUserChanged(){
     if(!("serviceWorker" in navigator)) return;
     if(Notification.permission !== "granted") return;
 
-    // If browser already had push for another user, invalidate token
     if(lastPushUid && myUid && lastPushUid !== myUid){
       logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
 
@@ -2207,7 +2088,6 @@ async function rotateFcmTokenIfUserChanged(){
         messaging = getMessaging(app);
       }
 
-      // IMPORTANT: this invalidates the token at FCM level
       await deleteToken(messaging);
       logDiag("Push: deleteToken() success");
     }
@@ -2217,7 +2097,7 @@ async function rotateFcmTokenIfUserChanged(){
     logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
   }
 }
-  // Remember which token belongs to THIS browser + which UID it was saved under
+
 const LS_PUSH_UID = "webrtc_push_uid";
 const LS_PUSH_TID = "webrtc_push_tokenId";
 
@@ -2245,23 +2125,19 @@ function clearPushBinding(){
   }catch{}
 }
 
-// Remove this browser's token doc from the PREVIOUS user's profile (and invalidate token)
 async function revokePushForCurrentDevice(){
   const { uid, tokenId } = getSavedPushBinding();
   if(!uid || !tokenId) return;
 
   logDiag(`Revoking push token for this device: uid=${uid} tokenId=${tokenId}`);
 
-  // Delete token doc from Firestore (stops server from targeting this browser)
   try{
     await deleteDoc(doc(db, "users", uid, "fcmTokens", tokenId));
     logDiag("Push token doc deleted from Firestore.");
   }catch(e){
     logDiag("Push token doc delete failed: " + (e?.message || e));
-    // don't throw; continue
   }
 
-  // Invalidate token in browser
   try{
     if(!messaging) messaging = getMessaging(app);
     await deleteToken(messaging);
@@ -2298,12 +2174,10 @@ async function enablePush(){
   logDiag("enablePush(): ENTER");
   if(!requireAuthOrPrompt()) return;
 
-// If this browser previously stored a token under a different UID, remove it first
-const prev = getSavedPushBinding();
-if(prev.uid && prev.uid !== myUid){
-  await revokePushForCurrentDevice();
-}
-
+  const prev = getSavedPushBinding();
+  if(prev.uid && prev.uid !== myUid){
+    await revokePushForCurrentDevice();
+  }
   
   if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
   if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
@@ -2313,7 +2187,6 @@ if(prev.uid && prev.uid !== myUid){
     const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
     swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
 
-
     const resp = await fetch(swUrl.toString(), { cache: "no-store" });
     const ct = resp.headers.get("content-type") || "";
     const txt = await resp.text();
@@ -2322,12 +2195,8 @@ if(prev.uid && prev.uid !== myUid){
     logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
     if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
-    // Reuse bootstrap SW registration (do NOT register again)
-swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
-if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
-
-await navigator.serviceWorker.ready;
-try { await swReg.update(); } catch {}
+    swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
+    if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
 
     await navigator.serviceWorker.ready;
     try { await swReg.update(); } catch {}
@@ -2356,57 +2225,53 @@ try { await swReg.update(); } catch {}
       ua: navigator.userAgent,
       enabled: true
     }, { merge:true });
-// Remember that THIS browser token now belongs to THIS uid
-savePushBinding(myUid, tokenId);
+    
+    savePushBinding(myUid, tokenId);
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored (users/{uid}/fcmTokens).");
 
-   onMessage(messaging, async (payload)=>{
-  try{
-    logDiag("FCM foreground message: " + JSON.stringify(payload));
-    const data = payload?.data || {};
+    onMessage(messaging, async (payload)=>{
+      try{
+        logDiag("FCM foreground message: " + JSON.stringify(payload));
+        const data = payload?.data || {};
 
-    // Must be signed in to react
-    if(!isAuthed || !myUid) {
-      logDiag("Ignoring FCM: not authed");
-      return;
-    }
+        if(!isAuthed || !myUid) {
+          logDiag("Ignoring FCM: not authed");
+          return;
+        }
 
-    // If this is a call, verify it is REALLY for me by reading the call doc
-    if (data.callId) {
-      const callRef = doc(db, "calls", data.callId);
-      const callSnap = await getDoc(callRef);
-      if(!callSnap.exists()){
-        logDiag("Ignoring FCM: call doc missing");
-        return;
+        if (data.callId) {
+          const callRef = doc(db, "calls", data.callId);
+          const callSnap = await getDoc(callRef);
+          if(!callSnap.exists()){
+            logDiag("Ignoring FCM: call doc missing");
+            return;
+          }
+          const call = callSnap.data() || {};
+
+          if(call.toUid !== myUid){
+            logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
+            return;
+          }
+
+          if (call.roomId) roomIdInput.value = call.roomId;
+          currentIncomingCall = { id: data.callId, data: call };
+
+          incomingText.textContent =
+            payload?.notification?.body ||
+            (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
+
+          incomingOverlay.style.display = "flex";
+          startRingtone();
+          return;
+        }
+
+        logDiag("Ignoring FCM: not a callId payload");
+      }catch(e){
+        logDiag("onMessage handler error: " + (e?.message || e));
       }
-      const call = callSnap.data() || {};
-
-      if(call.toUid !== myUid){
-        logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
-        return;
-      }
-
-      // OK - it is for me
-      if (call.roomId) roomIdInput.value = call.roomId;
-      currentIncomingCall = { id: data.callId, data: call };
-
-      incomingText.textContent =
-        payload?.notification?.body ||
-        (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
-
-      incomingOverlay.style.display = "flex";
-      startRingtone();
-      return;
-    }
-
-    // Non-call pushes: ignore (or handle if you want)
-    logDiag("Ignoring FCM: not a callId payload");
-  }catch(e){
-    logDiag("onMessage handler error: " + (e?.message || e));
-  }
-});
+    });
 
   } catch (e) {
     setStatus(pushStatus, "Push: failed (see diagnostics).");
@@ -2449,7 +2314,7 @@ function autoEnablePushOnLogin(){
   window.addEventListener("click", handler, { once:true, capture:true });
 }
 
-/* ================== BUTTON WIRING ================== */
+// ==================== BUTTON EVENT HANDLERS ====================
 startBtn.onclick = async ()=>{
   try{
     hideErrorBox();
@@ -2476,8 +2341,8 @@ testSoundBtn.onclick = async ()=>{
 resetPushBtn.onclick = async ()=>{
   try{
     setStatus(pushStatus, "Push: resetting…");
-    await revokePushForCurrentDevice();   // deletes token doc + deleteToken()
-    await enablePush();                   // registers SW + gets fresh token + stores it
+    await revokePushForCurrentDevice();
+    await enablePush();
     setStatus(pushStatus, "Push: enabled (reset).");
   }catch(e){
     showError(e);
@@ -2486,7 +2351,6 @@ resetPushBtn.onclick = async ()=>{
  
 hangupBtn.onclick = ()=> hangup().catch(showError);
 
-/* C-lite directory buttons */
 saveNameBtn.onclick = ()=> saveMyName().catch(showError);
 refreshUsersBtn.onclick = ()=> loadAllAllowedUsers().catch(showError);
 myNameInput.addEventListener("input", ()=>{
@@ -2494,7 +2358,15 @@ myNameInput.addEventListener("input", ()=>{
 });
 userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
-/* ================== AUTH STATE ================== */
+// ==================== BACKGROUND SERVICE EVENT HANDLERS ====================
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+downloadBgLink.onclick = (e) => {
+  console.log('Downloading background app...');
+};
+
+// ==================== AUTH STATE LISTENER ====================
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
   myUid = user?.uid || null;
@@ -2504,17 +2376,13 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await enforceAllowlist(user); }
     catch(e){
       showError(e);
-
-      // restore locked UI so login doesn't look frozen
       loginOverlay.style.display = "flex";
       appRoot.classList.add("locked");
       logoutBtn.style.display = "none";
       startBtn.disabled = true;
-
       return;
     }
 
-    // Single-user lock: reaffirm ownership after allowlist passes
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
 
@@ -2526,7 +2394,6 @@ onAuthStateChanged(auth, async (user)=>{
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    // ===== NEW: enable quality selector once authed =====
     videoQualitySelect.disabled = false;
     updateVideoQualityUi();
 
@@ -2549,7 +2416,6 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
 
-    // Process any pending notifications after auth
     await processPendingNotifications();
 
     if (pendingIncomingCallWhileLoggedOut?.id) {
@@ -2560,9 +2426,8 @@ onAuthStateChanged(auth, async (user)=>{
       }).catch(()=>{});
     }
 
-    // Update background service status
     updateServiceStatus();
-    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
+    setInterval(updateServiceStatus, 30000);
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
@@ -2572,7 +2437,6 @@ onAuthStateChanged(auth, async (user)=>{
     logoutBtn.style.display = "none";
     stopAll();
 
-    // ===== NEW: lock quality selector when signed out =====
     if(videoQualitySelect) videoQualitySelect.disabled = true;
 
     testSoundBtn.disabled = true;
@@ -2595,6 +2459,7 @@ onAuthStateChanged(auth, async (user)=>{
   }
 });
 
+// ==================== WINDOW EVENT LISTENERS ====================
 window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
