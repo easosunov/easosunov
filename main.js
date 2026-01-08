@@ -72,8 +72,9 @@ async function processPendingNotifications() {
       }
     }
   } catch (e) {
-    logDiag('processPendingNotifications error:', e);
+    console.log('processPendingNotifications error:', e);  // Changed from logDiag to console.log
   }
+}
 }
 // ==================== GLOBAL DECLARATIONS ====================
 console.log("APP VERSION:", "2026-01-08-stable");
