@@ -915,20 +915,24 @@ function playRingbackBeepOnce(){
   }catch{}
 }
 
-function startRingback(){
+function startRingback() {
   stopRingback();
 
-  try{ unlockAudio(); }catch{}
-
-  const cycleMs = 2500;
-
-  playRingbackBeepOnce();
-  setTimeout(()=> playRingbackBeepOnce(), 250);
-
-  ringbackTimer = setInterval(()=>{
+  try {
+    unlockAudio();
+    
+    // Play more frequent ringback tones
     playRingbackBeepOnce();
-    setTimeout(()=> playRingbackBeepOnce(), 250);
-  }, cycleMs);
+    
+    ringbackTimer = setInterval(() => {
+      playRingbackBeepOnce();
+      setTimeout(() => playRingbackBeepOnce(), 250);
+      setTimeout(() => playRingbackBeepOnce(), 500);
+    }, 2000); // Repeat every 2 seconds
+    
+  } catch (e) {
+    console.warn("Could not start ringback:", e);
+  }
 }
 
 function stopRingback(){
@@ -1417,7 +1421,10 @@ async function startCallToUid(toUid, toName=""){
   if(!requireAuthOrPrompt()) return;
   if(!toUid) throw new Error("Missing toUid.");
   if(toUid === myUid) throw new Error("You can't call yourself.");
-
+  
+// Play ringback tone immediately
+  startRingback();
+  
   // Set call type for status tracking
   currentCallType = 'outgoing';
   
