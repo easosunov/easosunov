@@ -516,7 +516,10 @@ let isAuthed = false;
 let myUid = null;
 let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
-
+// Set initial state to hide login overlay until auth check completes
+loginOverlay.style.display = "none";
+appRoot.classList.add("locked");
+ 
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
   try{
@@ -3186,7 +3189,7 @@ onAuthStateChanged(auth, async (user)=>{
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
     stopAll();
-
+   
     // ===== NEW: lock quality selector when signed out =====
     if(videoQualitySelect) videoQualitySelect.disabled = true;
 
