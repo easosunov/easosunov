@@ -60,23 +60,27 @@ async function ensureServiceWorkerInstalled() {
     return null;
   }
 
-  if (navigator.serviceWorker.controller) {
-    console.log("[SW] controller already active");
-  }
-
-  const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
-  swUrl.searchParams.set("v", "2026-01-08-bootstrap");
-
   try {
-    swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
+    const swUrl = "/easosunov/firebase-messaging-sw.js";
+    const registration = await navigator.serviceWorker.register(swUrl, {
       scope: "/easosunov/",
-      updateViaCache: "none",
+      updateViaCache: "none"
     });
+    
     await navigator.serviceWorker.ready;
-    console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
-    return swBootstrapReg;
+    console.log("[SW] Registered:", registration.scope);
+    
+    // Send UID to service worker
+    if (myUid && registration.active) {
+      registration.active.postMessage({
+        type: 'SET_UID',
+        uid: myUid
+      });
+    }
+    
+    return registration;
   } catch (e) {
-    console.error("[SW] bootstrap register failed:", e);
+    console.error("[SW] Register failed:", e);
     return null;
   }
 }
