@@ -1,8 +1,14 @@
-/* firebase-messaging-sw.js - Minimal version for Android background */
+/* firebase-messaging-sw.js (ENHANCED: Direct Firestore Listener)
+   - Works when Chrome is running even if page is closed
+   - Listens to Firestore directly for incoming calls
+   - Shows notifications even when browser is closed
+   - Uses per-user tag to avoid duplicate notifications
+*/
+
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
+importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
 
-// Initialize Firebase (MINIMAL - no Firestore)
 firebase.initializeApp({
   apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
   authDomain: "easosunov-webrtc.firebaseapp.com",
@@ -13,22 +19,18 @@ firebase.initializeApp({
 });
 
 const messaging = firebase.messaging();
+const firestore = firebase.firestore();
 
-// Simple state
+// --- In-memory state ---
+const recentlyShown = new Map(); // callId -> ms
+const DEDUPE_MS = 4000;
 let currentUid = null;
+let unsubscribeCallListener = null;
 
-// --- Service Worker Lifecycle ---
-self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker');
-  self.skipWaiting(); // Activate immediately
-});
+// Message channel to communicate with web page
+const messageChannel = new BroadcastChannel('sw_firestore_channel');
 
-self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker');
-  event.waitUntil(self.clients.claim()); // Take control immediately
-});
-
-// --- Handle messages from web page ---
+// Listen for messages from web page (when user logs in/out)
 self.addEventListener('message', (event) => {
   const data = event.data || {};
   
@@ -36,181 +38,240 @@ self.addEventListener('message', (event) => {
     currentUid = data.uid;
     console.log('[SW] UID set:', currentUid);
     
-    // Store in storage for persistence
-    self.registration.sync?.register('store-uid').catch(() => {});
+    // Start listening for calls for this user
+    startFirestoreListener(data.uid);
+  }
+  
+  if (data.type === 'CLEAR_UID') {
+    currentUid = null;
+    console.log('[SW] UID cleared');
     
-    // Acknowledge
-    event.ports?.[0]?.postMessage({ 
-      type: 'UID_ACK', 
-      uid: currentUid,
-      timestamp: Date.now() 
-    });
-  }
-  
-  if (data.type === 'TEST_NOTIFICATION') {
-    // Simple test notification
-    self.registration.showNotification('Test', {
-      body: 'Service worker is working',
-      icon: '/easosunov/icons/RTC192.png',
-      tag: 'test-' + Date.now()
-    }).then(() => {
-      event.ports?.[0]?.postMessage({ type: 'TEST_SUCCESS' });
-    });
-  }
-});
-
-// --- Handle FCM background messages ---
-messaging.onBackgroundMessage(async (payload) => {
-  console.log('[SW] Received FCM background message');
-  
-  const data = payload?.data || {};
-  
-  if (data.callId) {
-    await showCallNotification(data);
-  }
-});
-
-// --- Handle push events ---
-self.addEventListener("push", (event) => {
-  console.log('[SW] Push event received');
-  
-  let payload;
-  try {
-    payload = event.data?.json();
-  } catch (e) {
-    try {
-      payload = JSON.parse(event.data?.text() || '{}');
-    } catch (e2) {
-      console.error('[SW] Failed to parse push data');
-      payload = {};
+    // Stop listening
+    if (unsubscribeCallListener) {
+      unsubscribeCallListener();
+      unsubscribeCallListener = null;
     }
   }
-  
-  const data = payload?.data || {};
-  
-  event.waitUntil(
-    (async () => {
-      if (data.callId) {
-        await showCallNotification(data);
-      }
-    })()
-  );
 });
 
-// --- Show call notification ---
-async function showCallNotification(data) {
+// Start listening to Firestore for incoming calls
+function startFirestoreListener(uid) {
+  // Stop any existing listener
+  if (unsubscribeCallListener) {
+    unsubscribeCallListener();
+  }
+  
+  if (!uid) return;
+  
+  console.log('[SW] Starting Firestore listener for UID:', uid);
+  
   try {
-    const callId = String(data.callId || 'unknown');
-    const fromName = String(data.fromName || "Unknown");
-    const note = String(data.note || "").trim();
-    const roomId = String(data.roomId || "");
+    // Listen for incoming calls addressed to this UID
+    const callsQuery = firestore
+      .collection('calls')
+      .where('toUid', '==', uid)
+      .where('status', '==', 'ringing');
     
-    const title = "📞 Incoming Call";
-    let body = `From: ${fromName}`;
-    if (note) body += ` - ${note}`;
-    
-    // Build launch URL
-    const launchUrl = `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}&fromName=${encodeURIComponent(fromName)}&note=${encodeURIComponent(note)}`;
-    
-    // Simple notification options
-    const notificationOptions = {
-      body,
-      icon: '/easosunov/icons/RTC192.png',
-      badge: '/easosunov/icons/RTC96.png',
-      tag: `call-${callId}`,
-      renotify: true,
-      requireInteraction: true,
-      silent: false,
-      timestamp: Date.now(),
-      data: {
-        callId,
-        roomId,
-        fromName,
-        note,
-        launchUrl
+    unsubscribeCallListener = callsQuery.onSnapshot(
+      (snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const callData = change.doc.data();
+            const callId = change.doc.id;
+            
+            console.log('[SW] Firestore new call detected:', callId);
+            
+            // Check if web page is already showing this call
+            checkIfPageHandled(callId, callData).then((pageHandled) => {
+              if (!pageHandled) {
+                // Web page isn't handling it, show notification
+                showCallNotification({
+                  callId: callId,
+                  toUid: uid,
+                  roomId: callData.roomId,
+                  fromName: callData.fromName || 'Unknown',
+                  toName: callData.toName || '',
+                  note: callData.note || '',
+                  sentAtMs: Date.now()
+                });
+                
+                // Mark as delivered in Firestore
+                markAsDelivered(callId);
+              }
+            });
+          }
+        });
       },
-      actions: [
-        {
-          action: 'answer',
-          title: 'Answer',
-          icon: '/easosunov/icons/answer.png'
-        },
-        {
-          action: 'decline',
-          title: 'Decline',
-          icon: '/easosunov/icons/decline.png'
-        }
-      ],
-      vibrate: [500, 250, 500, 250, 1000]
-    };
+      (error) => {
+        console.error('[SW] Firestore listener error:', error);
+      }
+    );
     
-    // Show notification
-    await self.registration.showNotification(title, notificationOptions);
-    console.log('[SW] Notification shown:', callId);
-    
+    console.log('[SW] Firestore listener started');
   } catch (error) {
-    console.error('[SW] Error showing notification:', error);
+    console.error('[SW] Error starting Firestore listener:', error);
   }
 }
 
-// --- Handle notification clicks ---
-self.addEventListener("notificationclick", (event) => {
-  console.log('[SW] Notification clicked');
-  
-  event.notification.close();
-  
-  const data = event.notification?.data || {};
-  const action = event.action;
-  
-  // Build URL
-  let url = `/easosunov/webrtc.html`;
-  const params = {
-    callId: data.callId,
-    roomId: data.roomId,
-    fromName: data.fromName,
-    note: data.note
-  };
-  
-  if (action === 'answer') {
-    params.action = 'answer';
-    params.autoJoin = 'true';
-  } else if (action === 'decline') {
-    params.action = 'decline';
+// Check if the web page is already handling this call
+async function checkIfPageHandled(callId, callData) {
+  try {
+    // Send message to web page to check
+    messageChannel.postMessage({
+      type: 'CHECK_CALL',
+      callId: callId,
+      data: callData
+    });
+    
+    // Wait a bit to see if web page responds
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Check if call has been marked as delivered
+    const callDoc = await firestore.collection('calls').doc(callId).get();
+    if (callDoc.exists) {
+      const call = callDoc.data();
+      return !!call.deliveredAt;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('[SW] Error checking if page handled:', error);
+    return false;
   }
-  
-  // Construct URL
-  const urlObj = new URL(url, self.location.origin);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value) urlObj.searchParams.set(key, value);
+}
+
+// Mark call as delivered in Firestore
+function markAsDelivered(callId) {
+  firestore.collection('calls').doc(callId).update({
+    deliveredAt: firebase.firestore.FieldValue.serverTimestamp(),
+    deliveredVia: 'service_worker',
+    deliveredAtMs: Date.now()
+  }).catch(error => {
+    console.error('[SW] Error marking as delivered:', error);
   });
-  
-  const finalUrl = urlObj.toString();
-  
-  // Open or focus window
-  event.waitUntil(
-    (async () => {
-      const clients = await self.clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true
-      });
-      
-      // Find existing window
-      for (const client of clients) {
-        if (client.url.includes('/easosunov/')) {
-          await client.focus();
-          client.postMessage({
-            type: 'NAVIGATE_TO_CALL',
-            url: finalUrl,
-            timestamp: Date.now()
-          });
-          return;
-        }
-      }
-      
-      // Open new window
-      await self.clients.openWindow(finalUrl);
-    })()
-  );
+}
+
+function shouldDedupe(callId) {
+  const now = Date.now();
+  // purge old entries
+  for (const [k, t] of recentlyShown.entries()) {
+    if (now - t > DEDUPE_MS) recentlyShown.delete(k);
+  }
+  if (!callId) return false;
+  if (recentlyShown.has(callId)) return true;
+  recentlyShown.set(callId, now);
+  return false;
+}
+
+async function showCallNotification(data) {
+  data = data || {};
+
+  const callId = String(data.callId || "");
+  if (!callId) return;
+
+  if (shouldDedupe(callId)) return;
+
+  const toUid    = String(data.toUid || "");
+  const roomId   = String(data.roomId || "");
+  const fromName = String(data.fromName || "Unknown");
+  const toName   = String(data.toName || "");
+  const note     = String(data.note || "").trim();
+
+  // LOCAL time on Person B computer
+  const tsMs = Number(data.sentAtMs || Date.now());
+  const tsLocal = Number.isFinite(tsMs) ? new Date(tsMs).toLocaleString() : "";
+
+  // Notification title and body
+  const title = "📞 Incoming Call";
+  const body =
+    `Call from ${fromName}` +
+    (note ? ` — ${note}` : "") +
+    (tsLocal ? ` — ${tsLocal}` : "");
+
+  // Per-user tag so we don't stack endlessly
+  const tag = toUid ? `webrtc-call-${toUid}` : "webrtc-call";
+
+  // IMPORTANT: force a new popup every time by closing previous with same tag
+  try {
+    const existing = await self.registration.getNotifications({ tag });
+    for (const n of existing) n.close();
+  } catch {}
+
+  await self.registration.showNotification(title, {
+    body,
+    tag,
+    renotify: true,              // re-alert if the OS treats it as a replacement
+    requireInteraction: true,    // keep it visible until user acts
+    timestamp: Number.isFinite(tsMs) ? tsMs : undefined,
+    icon: '/easosunov/icon.png', // Make sure you have this icon
+
+    data: { 
+      callId, 
+      toUid, 
+      roomId, 
+      fromName, 
+      toName, 
+      note, 
+      sentAtMs: String(tsMs),
+      source: 'service_worker_firestore'
+    },
+  });
+}
+
+/**
+ * Path A: Firebase background handler (FCM push)
+ */
+messaging.onBackgroundMessage(async (payload) => {
+  try {
+    const data = payload?.data || payload?.message?.data || {};
+    await showCallNotification(data);
+  } catch (error) {
+    console.error('[SW] Error in onBackgroundMessage:', error);
+  }
 });
 
-console.log('[SW] Simple Service Worker loaded');
+/**
+ * Path B: Raw push event
+ */
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    if (!event.data) return;
+
+    let payload = null;
+    try { payload = event.data.json(); } catch {}
+
+    if (!payload) {
+      try {
+        const txt = await event.data.text();
+        payload = txt ? JSON.parse(txt) : null;
+      } catch {}
+    }
+    if (!payload) return;
+
+    const data = payload?.data || payload?.message?.data || {};
+    await showCallNotification(data);
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+
+  const d = event.notification.data || {};
+  const url = new URL("/easosunov/webrtc.html", self.location.origin);
+
+  if (d.callId) url.searchParams.set("callId", d.callId);
+  if (d.roomId) url.searchParams.set("roomId", d.roomId);
+  if (d.fromName) url.searchParams.set("fromName", d.fromName);
+  if (d.toName) url.searchParams.set("toName", d.toName);
+  if (d.note) url.searchParams.set("note", d.note);
+
+  event.waitUntil(self.clients.openWindow(url.toString()));
+});
+
+// Clean up on service worker shutdown
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activated');
+  event.waitUntil(self.clients.claim());
+});
+
+console.log('[SW] Enhanced Service Worker loaded with Firestore listener');
