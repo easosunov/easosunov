@@ -3124,8 +3124,21 @@ onAuthStateChanged(auth, async (user)=>{
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
 
-    loginOverlay.style.display = "none";
-    appRoot.classList.remove("locked");
+    // DO NOT hide login overlay automatically - only hide it after explicit login
+    // Keep login overlay visible if user wasn't just authenticated via the login form
+    if (emailInput.value.trim() && passInput.value) {
+      // User just logged in via form - hide login overlay
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
+    } else {
+      // User was auto-authenticated (e.g., from previous session)
+      // Keep login overlay visible to force re-authentication
+      loginOverlay.style.display = "flex";
+      appRoot.classList.add("locked");
+      loginStatus.textContent = "Session expired. Please sign in again.";
+      return;
+    }
+    
     logoutBtn.style.display = "inline-block";
     loginStatus.textContent = "Signed in.";
 
