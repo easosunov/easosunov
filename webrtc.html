@@ -1,5 +1,4 @@
-<!doctype html>
-<html lang="en">
+=ml lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -803,260 +802,281 @@ if(authBC){
 }
 
 /* ================== SINGLE PAGE INSTANCE LOCK ================== */
-// IMMEDIATE DUPLICATE CHECK - Add this at the VERY START of the script
-(function checkForExistingInstance() {
-  try {
-    const existingLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    if (existingLock) {
-      const [lockTabId, lockTime] = existingLock.split('|');
-      const lockAge = Date.now() - parseInt(lockTime, 10);
-      
-      // If lock is less than 5 seconds old, another tab is likely active
-      if (lockAge < 5000) {
-        console.warn(`Another tab (${lockTabId}) has the lock, age: ${lockAge}ms`);
-        
-        // Show immediate warning and try to close
-        setTimeout(() => {
-          alert("Another instance of this WebRTC app is already open in this browser.\n\nPlease use the existing tab or close it first before opening a new one.");
-          if (window.history.length > 1) {
-            window.history.back();
-          } else {
-            window.close();
-          }
-        }, 100);
-        
-        // Prevent further initialization
-        throw new Error("Duplicate instance prevented");
-      }
-    }
-  } catch (e) {
-    // Silently fail if localStorage isn't available
-  }
-})();
- 
-
- 
+/* ================== SINGLE PAGE INSTANCE LOCK ================== */
 const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
-const PAGE_INSTANCE_CHANNEL = "webrtc_page_instance_channel";
-
-// Create BroadcastChannel for page instance coordination
-const pageBC = ("BroadcastChannel" in window) ? 
-  new BroadcastChannel(PAGE_INSTANCE_CHANNEL) : null;
+const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
+const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
 
 // Generate unique tab ID
 const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+let hasLock = false;
+let lockCheckInterval = null;
+let isDisabled = false;
 
-function acquirePageLock() {
+// Function to IMMEDIATELY disable the app
+function disableAppImmediately() {
+  if (isDisabled) return;
+  isDisabled = true;
+  
+  logDiag("IMMEDIATE DISABLE: Another instance detected");
+  
+  // Stop all media and connections
+  stopAll();
+  
+  // Disable UI
+  if (appRoot) {
+    appRoot.classList.add('locked');
+    appRoot.style.pointerEvents = 'none';
+    appRoot.style.opacity = '0.5';
+  }
+  
+  // Create blocking overlay
+  const blocker = document.createElement('div');
+  blocker.id = 'instanceBlocker';
+  blocker.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    text-align: center;
+    padding: 20px;
+    font-family: system-ui;
+    cursor: not-allowed;
+  `;
+  
+  blocker.innerHTML = `
+    <div style="max-width: 500px; background: #222; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+      <h2 style="color: #ff6b6b; margin-top: 0;">⚠️ WebRTC App Already Running</h2>
+      <p style="font-size: 16px; line-height: 1.5;">
+        This WebRTC app is already open in another browser tab.<br>
+        <strong>Only one instance is allowed at a time.</strong>
+      </p>
+      <p style="font-size: 14px; color: #aaa; margin: 15px 0;">
+        Please close this tab and use the existing instance,<br>
+        or close the other tab first.
+      </p>
+      <div style="display: flex; gap: 10px; justify-content: center; margin-top: 20px;">
+        <button id="closeTabBtn" style="padding: 12px 24px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">
+          Close This Tab
+        </button>
+        <button id="reloadBtn" style="padding: 12px 24px; background: #4a5568; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px;">
+          Reload to Check
+        </button>
+      </div>
+      <p style="font-size: 12px; color: #777; margin-top: 15px;">
+        Tab ID: ${tabId.substring(0, 8)}...
+      </p>
+    </div>
+  `;
+  
+  document.body.appendChild(blocker);
+  
+  // Add button handlers
+  document.getElementById('closeTabBtn')?.addEventListener('click', () => {
+    try {
+      window.close();
+    } catch (e) {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    window.location.reload();
+  });
+}
+
+// Function to check and acquire lock - STRICTER VERSION
+function checkAndAcquireLock() {
   try {
-    const current = localStorage.getItem(PAGE_INSTANCE_KEY);
     const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    const lockAge = now - lockTime;
     
-    // If lock is held by another tab and is fresh (less than 3 seconds old)
-    if (current && current !== tabId) {
-      const [lockTabId, lockTime] = current.split('|');
-      const lockAge = now - parseInt(lockTime, 10);
-      
-      if (lockAge < 3000) { // 3 seconds grace period
-        logDiag(`Page lock held by tab ${lockTabId} (age: ${lockAge}ms)`);
+    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
+    if (storedLock && storedLock !== tabId && lockAge < 10000) {
+      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
+      return false;
+    }
+    
+    // Clear any stale lock (older than 10 seconds)
+    if (lockAge >= 10000) {
+      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+    }
+    
+    // Acquire the lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    hasLock = true;
+    
+    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock acquisition error: " + e.message);
+    return false; // Be strict if localStorage fails
+  }
+}
+
+// Function to renew our lock and check for conflicts
+function renewAndCheckLock() {
+  if (!hasLock || isDisabled) return false;
+  
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    
+    // If we don't own the lock anymore, DISABLE IMMEDIATELY
+    if (storedLock !== tabId) {
+      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
+      disableAppImmediately();
+      return false;
+    }
+    
+    // If lock is stale (older than 30 seconds), someone else might have taken it
+    const lockAge = now - lockTime;
+    if (lockAge > 30000) {
+      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
+      // Try to reacquire
+      if (!checkAndAcquireLock()) {
+        disableAppImmediately();
         return false;
       }
     }
     
-    // Acquire or renew lock
-    localStorage.setItem(PAGE_INSTANCE_KEY, `${tabId}|${now}`);
-    logDiag(`Page lock acquired by tab ${tabId}`);
+    // Renew our lock
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
     return true;
+    
   } catch (e) {
-    logDiag("Page lock error: " + e.message);
-    return true; // Allow if localStorage fails
+    logDiag("Lock renewal error: " + e.message);
+    return false;
   }
 }
 
-function renewPageLock() {
-  try {
-    localStorage.setItem(PAGE_INSTANCE_KEY, `${tabId}|${Date.now()}`);
-  } catch (e) {
-    // Ignore errors
-  }
-}
-
-function releasePageLock() {
-  try {
-    const current = localStorage.getItem(PAGE_INSTANCE_KEY);
-    if (current && current.startsWith(tabId)) {
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      logDiag(`Page lock released by tab ${tabId}`);
-    }
-  } catch (e) {
-    // Ignore errors
-  }
-}
-
-// Listen for other tabs trying to acquire lock
-if (pageBC) {
-  pageBC.onmessage = (event) => {
-    const msg = event.data;
-    if (msg.type === 'lock_request') {
-      // Send back our lock status
-      pageBC.postMessage({
-        type: 'lock_response',
-        tabId: tabId,
-        hasLock: localStorage.getItem(PAGE_INSTANCE_KEY)?.startsWith(tabId) || false
-      });
-    } else if (msg.type === 'lock_response' && msg.tabId !== tabId && msg.hasLock) {
-      // Another tab has the lock
-      logDiag(`Another tab (${msg.tabId}) has page lock - this tab should close`);
-      // Show message to user
-      if (!document.hidden) {
-        alert("Another instance of this app is already open in this browser. Please use the existing tab.");
-        window.close(); // Try to close this tab
+// Function to release our lock
+function releaseLock() {
+  if (hasLock) {
+    try {
+      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+      if (currentLock === tabId) {
+        localStorage.removeItem(PAGE_INSTANCE_KEY);
+        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+        logDiag(`Lock released by tab ${tabId}`);
       }
+    } catch (e) {
+      // Ignore errors
     }
-  };
-}
-
-// Periodically renew lock while page is active
-let lockRenewalInterval = null;
-
-function startLockRenewal() {
-  if (lockRenewalInterval) clearInterval(lockRenewalInterval);
-  lockRenewalInterval = setInterval(() => {
-    renewPageLock();
-  }, 1000); // Renew every second
-}
-
-function stopLockRenewal() {
-  if (lockRenewalInterval) {
-    clearInterval(lockRenewalInterval);
-    lockRenewalInterval = null;
+    hasLock = false;
   }
 }
 
-// Check and acquire lock on page load
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    if (!acquirePageLock()) {
-      // Another tab has the lock
-      if (pageBC) {
-        // Ask other tabs if they have the lock
-        pageBC.postMessage({ type: 'lock_request' });
-      }
-      
-      // Show warning and prevent further interaction
-      alert("Another instance of this app is already open in this browser. Please use the existing tab.");
-      
-      // Disable the app
-      if (appRoot) appRoot.classList.add('locked');
-      if (loginOverlay) loginOverlay.style.display = 'none';
-      
-      // Try to close this tab after a delay
-      setTimeout(() => {
-        window.close();
-      }, 2000);
-    } else {
-      // We have the lock, start renewal
-      startLockRenewal();
-    }
-  }, 500); // Small delay to ensure other tabs have initialized
-});
-
- // Clean up on page unload
-window.addEventListener('beforeunload', () => {
-  stopLockRenewal();
-  releasePageLock();
+// Initialize lock on page load - DO THIS EARLY
+(function initializeLock() {
+  // Try to acquire lock immediately
+  if (!checkAndAcquireLock()) {
+    logDiag("Failed to acquire lock on initialization");
+    setTimeout(disableAppImmediately, 100);
+    return;
+  }
   
-  // Notify other tabs that we're releasing the lock
-  if (pageBC) {
-    pageBC.postMessage({ 
-      type: 'lock_released', 
-      tabId: tabId 
-    });
-  }
-});
-
-// Handle visibility change - release lock when page is hidden
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    // Page is hidden, but keep lock for a bit
-    logDiag('Page hidden, keeping lock temporarily');
-  } else {
-    // Page is visible again, ensure we still have lock
-    if (!localStorage.getItem(PAGE_INSTANCE_KEY)?.startsWith(tabId)) {
-      logDiag('Page became visible but lost lock - another tab may be active');
-      if (acquirePageLock()) {
-        startLockRenewal();
+  // Start aggressive lock checking
+  lockCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      if (!renewAndCheckLock()) {
+        clearInterval(lockCheckInterval);
       }
     }
-  }
-});
-
-// Also handle page freeze (when browser suspends tab)
-document.addEventListener('freeze', () => {
-  logDiag('Page frozen, releasing lock');
-  stopLockRenewal();
-  releasePageLock();
-});
-
-document.addEventListener('resume', () => {
-  logDiag('Page resumed, attempting to reacquire lock');
-  if (acquirePageLock()) {
-    startLockRenewal();
-  }
-});
-
- 
- 
-// Also listen via localStorage (works even if BroadcastChannel is unavailable)
-window.addEventListener("storage", (ev)=>{
-  if(ev.key === DEVICE_OWNER_KEY && ev.newValue){
-    forceSignOutBecauseDifferentUser(String(ev.newValue));
-  }
-});
-
-// On load: if someone else is marked as owner and this tab is signed in as different UID -> sign out
-(async function enforceSingleUserOnStartup(){
-  const owner = getDeviceOwner();
-  const currentUid = auth.currentUser?.uid || null;
-  if(owner && currentUid && owner !== currentUid){
-    await forceSignOutBecauseDifferentUser(owner);
-  }
+  }, 1000); // Check every second when visible
+  
+  // Also check when page becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Page hidden - reduce checking frequency
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+        lockCheckInterval = setInterval(() => {
+          if (!renewAndCheckLock()) {
+            clearInterval(lockCheckInterval);
+          }
+        }, 3000); // Check every 3 seconds when hidden
+      }
+    } else {
+      // Page visible - check immediately and frequently
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+      }
+      if (!renewAndCheckLock()) {
+        return;
+      }
+      lockCheckInterval = setInterval(() => {
+        if (!renewAndCheckLock()) {
+          clearInterval(lockCheckInterval);
+        }
+      }, 1000);
+    }
+  });
+  
+  // Listen for storage events (other tabs changing localStorage)
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
+      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
+      setTimeout(() => {
+        if (!renewAndCheckLock()) {
+          disableAppImmediately();
+        }
+      }, 100);
+    }
+  });
+  
+  // Beforeunload cleanup
+  window.addEventListener('beforeunload', () => {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+    }
+    releaseLock();
+  });
+  
+  // Double-check after a short delay
+  setTimeout(() => {
+    if (!renewAndCheckLock()) {
+      disableAppImmediately();
+    }
+  }, 2000);
 })();
 
-/* Force login every time (no stored session) */
-await setPersistence(auth, inMemoryPersistence);
-
-/* UID allowlist */
-async function enforceAllowlist(user){
-  const uid = user.uid;
-  logDiag("Allowlist check uid=" + uid);
-
-  try{
-    const ref = doc(db, "allowlistUids", uid);
-    const snap = await getDoc(ref);
-
-    if(!snap.exists()){
-      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist missing for UID: " + uid);
+// Also add a pre-check before any significant action
+const originalStartMedia = window.startMedia;
+if (originalStartMedia) {
+  window.startMedia = function(...args) {
+    if (!hasLock || isDisabled) {
+      logDiag("Blocked startMedia - no lock or disabled");
+      disableAppImmediately();
+      return Promise.reject(new Error("Another instance is running"));
     }
-
-    const enabled = snap.data()?.enabled === true;
-    if(!enabled){
-      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist disabled for UID: " + uid);
-    }
-
-    return true;
-  }catch(e){
-    if(String(e?.code || "").includes("permission-denied")){
-      loginStatus.textContent =
-        "Allowlist check blocked by Firestore rules (permission-denied).";
-    }
-    throw e;
-  }
+    return originalStartMedia.apply(this, args);
+  };
 }
-
 /* ================== AUTH GATE ================== */
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
