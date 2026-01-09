@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Ringtone Player</title>
+  <style>
+    body { margin: 0; padding: 0; }
+    audio { display: none; }
+  </style>
+</head>
+<body>
+  <audio id="ringtone" loop>
+    <source src="ringtone.mp3" type="audio/mpeg">
+  </audio>
+  
+  <script>
+    const audio = document.getElementById('ringtone');
+    const urlParams = new URLSearchParams(window.location.search);
+    const action = urlParams.get('action');
+    const duration = parseInt(urlParams.get('duration')) || 60000;
+    
+    if (action === 'play') {
+      audio.play().catch(e => {
+        console.log('Auto-play prevented:', e);
+        // Create a button for user interaction
+        const btn = document.createElement('button');
+        btn.textContent = 'Play Ringtone';
+        btn.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          padding: 20px 40px;
+          font-size: 24px;
+          background: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 10px;
+        `;
+        btn.onclick = () => {
+          audio.play();
+          btn.remove();
+        };
+        document.body.appendChild(btn);
+      });
+      
+      // Stop after duration
+      setTimeout(() => {
+        audio.pause();
+        audio.currentTime = 0;
+        window.close();
+      }, duration);
+    }
+    
+    // Handle messages from service worker
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data.type === 'STOP_RINGTONE') {
+        audio.pause();
+        audio.currentTime = 0;
+        window.close();
+      }
+    });
+  </script>
+</body>
+</html>
