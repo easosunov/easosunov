@@ -519,6 +519,15 @@ let pendingIncomingCallWhileLoggedOut = null;
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
+
+
+// Check if we should redirect to the primary tab
+const primaryTabUrl = localStorage.getItem('webrtc_primary_tab_url');
+if (primaryTabUrl && primaryTabUrl !== window.location.href && hasLock) {
+  // We're a duplicate tab - redirect to the primary tab
+  window.location.href = primaryTabUrl;
+}
+
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -838,6 +847,32 @@ if(authBC){
     }
   };
 }
+
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front and store the URL
+      if (msg.url) {
+        localStorage.setItem('webrtc_primary_tab_url', msg.url);
+      }
+      
+      // Try to focus this window
+      window.focus();
+      
+      // Also try to use the Window.focus() API if available
+      if (window.focus) {
+        window.focus();
+      }
+      
+      console.log("Original WebRTC tab focused - duplicate tab redirected");
+    }
+  };
+}
+
+ 
 // Listen for focus requests from duplicate tabs
 if (hasBroadcastChannel) {
   const focusChannel = new BroadcastChannel("webrtc_focus_request");
@@ -886,34 +921,38 @@ function disableAppImmediately() {
     loginOverlay.style.display = 'none';
   }
   
-  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
-  // by closing this tab/window and focusing the original one
-  
-  // Try to close this tab/window
+    // Store the URL of the first tab and redirect duplicate tabs to it
   try {
-    // Try to find and focus the original tab by broadcasting a message
+    // Get the URL of the current page (the WebRTC page)
+    const webrtcUrl = window.location.href;
+    
+    // Store it so duplicate tabs can redirect to the same URL
+    localStorage.setItem('webrtc_primary_tab_url', webrtcUrl);
+    
+    // Try to focus the original tab first
     if (hasBroadcastChannel) {
       const focusChannel = new BroadcastChannel("webrtc_focus_request");
-      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
+      focusChannel.postMessage({ 
+        type: "FOCUS_REQUEST", 
+        fromTab: tabId,
+        url: webrtcUrl 
+      });
+      
+      // Give time for the original tab to respond, then redirect to it
       setTimeout(() => {
-        focusChannel.close();
-      }, 1000);
+        // Redirect to the primary tab's URL
+        window.location.href = webrtcUrl;
+      }, 300);
+    } else {
+      // No BroadcastChannel support, just redirect immediately
+      window.location.href = webrtcUrl;
     }
     
-    // Close this tab after a short delay
-    setTimeout(() => {
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.close();
-      }
-    }, 100);
-    
   } catch (e) {
-    // If we can't close, show a minimal message and redirect to about:blank
-    console.log("Another instance is already running");
-    window.location.href = "about:blank";
+    // Fallback: just refresh to the same WebRTC page
+    window.location.reload();
   }
+  
   
   // Add button hover effects
   const buttons = blocker.querySelectorAll('button');
