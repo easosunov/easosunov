@@ -522,8 +522,10 @@ appRoot.classList.add("locked");
 
 
 // Check if we should redirect to the primary tab
-const primaryTabUrl = localStorage.getItem('webrtc_primary_tab_url');
-if (primaryTabUrl && primaryTabUrl !== window.location.href && hasLock) {
+// Only do this check once when the page loads
+let hasCheckedRedirect = false;
+if (!hasCheckedRedirect && primaryTabUrl && primaryTabUrl !== window.location.href && hasLock) {
+  hasCheckedRedirect = true;
   // We're a duplicate tab - redirect to the primary tab
   window.location.href = primaryTabUrl;
 }
@@ -906,9 +908,10 @@ function disableAppImmediately() {
   
   logDiag("IMMEDIATE DISABLE: Another instance detected");
   
-  // Stop all media and connections
-  stopAll();
-  
+  // Clear the redirect flag to prevent loops
+  localStorage.removeItem('webrtc_primary_tab_url');
+
+ 
   // Disable UI
   if (appRoot) {
     appRoot.classList.add('locked');
@@ -921,38 +924,25 @@ function disableAppImmediately() {
     loginOverlay.style.display = 'none';
   }
   
-    // Store the URL of the first tab and redirect duplicate tabs to it
+  // Instead of redirecting, just close the duplicate tab
   try {
-    // Get the URL of the current page (the WebRTC page)
-    const webrtcUrl = window.location.href;
-    
-    // Store it so duplicate tabs can redirect to the same URL
-    localStorage.setItem('webrtc_primary_tab_url', webrtcUrl);
-    
-    // Try to focus the original tab first
     if (hasBroadcastChannel) {
       const focusChannel = new BroadcastChannel("webrtc_focus_request");
       focusChannel.postMessage({ 
         type: "FOCUS_REQUEST", 
-        fromTab: tabId,
-        url: webrtcUrl 
+        fromTab: tabId
       });
-      
-      // Give time for the original tab to respond, then redirect to it
-      setTimeout(() => {
-        // Redirect to the primary tab's URL
-        window.location.href = webrtcUrl;
-      }, 300);
-    } else {
-      // No BroadcastChannel support, just redirect immediately
-      window.location.href = webrtcUrl;
     }
     
+    // Close this tab/window
+    setTimeout(() => {
+      window.close();
+    }, 100);
+    
   } catch (e) {
-    // Fallback: just refresh to the same WebRTC page
-    window.location.reload();
+    // If we can't close, redirect to about:blank
+    window.location.href = "about:blank";
   }
-  
   
   // Add button hover effects
   const buttons = blocker.querySelectorAll('button');
