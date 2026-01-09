@@ -12,7 +12,82 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-08-fixed-complete");
+console.log("APP VERSION:", "2026-01-08-push-fixed");
+
+// ==================== NOTIFICATION HANDLING ====================
+let webPageShowedNotification = false;
+
+// Handle notification redirects from background app
+(function handleNotificationRedirect() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const callId = urlParams.get('callId');
+    const roomId = urlParams.get('roomId');
+    const fromName = urlParams.get('fromName');
+    const toName = urlParams.get('toName');
+    const note = urlParams.get('note');
+    
+    if (callId && roomId) {
+      localStorage.setItem('pendingNotificationCall', JSON.stringify({
+        callId: callId,
+        roomId: roomId,
+        fromName: fromName || 'Unknown',
+        toName: toName || '',
+        note: note || '',
+        timestamp: Date.now()
+      }));
+      
+      const cleanUrl = window.location.origin + window.location.pathname;
+      if (window.location.hash) {
+        window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
+      } else {
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+      
+      console.log('Notification stored, waiting for auth...');
+    }
+  } catch (e) {
+    console.warn('Notification redirect handler error:', e);
+  }
+})();
+
+// ==================== SERVICE WORKER BOOTSTRAP ====================
+let swBootstrapReg = null;
+
+async function ensureServiceWorkerInstalled() {
+  if (!("serviceWorker" in navigator)) {
+    console.log("[SW] not supported");
+    return null;
+  }
+
+  if (navigator.serviceWorker.controller) {
+    console.log("[SW] controller already active");
+  }
+
+  const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+  swUrl.searchParams.set("v", "2026-01-08-bootstrap");
+
+  try {
+    swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
+      scope: "/easosunov/",
+      updateViaCache: "none",
+    });
+    await navigator.serviceWorker.ready;
+    console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
+    return swBootstrapReg;
+  } catch (e) {
+    console.error("[SW] bootstrap register failed:", e);
+    return null;
+  }
+}
+
+// ==================== CONFIGURATION ====================
+const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
+
+function cleanVapidKey(k){
+  return String(k || "").trim().replace(/[\r\n\s]/g, "");
+}
+const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
 
 // ==================== STATE VARIABLES ====================
 let isAuthed = false;
@@ -39,6 +114,11 @@ let unsubRoomB = null, unsubCallerB = null;
 let unsubIncoming = null;
 let unsubCallDoc = null;
 
+// Push notification states
+let messaging = null;
+let swReg = null;
+let lastPushUid = null;
+
 // ==================== ENHANCED LOGGING SYSTEM ====================
 const diagLog = [];
 let diagVisible = false;
@@ -60,7 +140,6 @@ function logDiag(msg){
 }
 
 // ==================== DOM ELEMENT REFERENCES ====================
-// We'll use window object to make elements globally accessible
 function initializeDomElements() {
   window.errorBox = document.getElementById("errorBox");
   window.loginOverlay = document.getElementById("loginOverlay");
@@ -170,6 +249,384 @@ const auth = getAuth(app);
     logDiag(`Auth initialization error: ${error.message}`);
   }
 })();
+
+// ==================== PENDING NOTIFICATION PROCESSING ====================
+async function processPendingNotifications() {
+  try {
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        if (Date.now() - pendingData.timestamp < 60000) {
+          if (isAuthed && myUid) {
+            showIncomingUI(pendingData.callId, {
+              roomId: pendingData.roomId,
+              fromName: pendingData.fromName || 'Unknown',
+              toName: pendingData.toName || '',
+              note: pendingData.note || ''
+            });
+          }
+        }
+        localStorage.removeItem('pendingNotificationCall');
+      } catch (e) {
+        localStorage.removeItem('pendingNotificationCall');
+      }
+    }
+  } catch (e) {
+    console.warn('processPendingNotifications error:', e);
+  }
+}
+
+// ==================== PUSH NOTIFICATION MANAGEMENT ====================
+const LS_PUSH_UID = "webrtc_push_uid";
+const LS_PUSH_TID = "webrtc_push_tokenId";
+
+function getSavedPushBinding(){
+  try{
+    const uid = localStorage.getItem(LS_PUSH_UID);
+    const tid = localStorage.getItem(LS_PUSH_TID);
+    return { uid: uid || null, tokenId: tid || null };
+  }catch{
+    return { uid:null, tokenId:null };
+  }
+}
+
+function savePushBinding(uid, tokenId){
+  try{
+    localStorage.setItem(LS_PUSH_UID, String(uid || ""));
+    localStorage.setItem(LS_PUSH_TID, String(tokenId || ""));
+  }catch{}
+}
+
+function clearPushBinding(){
+  try{
+    localStorage.removeItem(LS_PUSH_UID);
+    localStorage.removeItem(LS_PUSH_TID);
+  }catch{}
+}
+
+async function revokePushForCurrentDevice(){
+  const { uid, tokenId } = getSavedPushBinding();
+  if(!uid || !tokenId) return;
+
+  logDiag(`Revoking push token for this device: uid=${uid} tokenId=${tokenId}`);
+
+  try{
+    await deleteDoc(doc(db, "users", uid, "fcmTokens", tokenId));
+    logDiag("Push token doc deleted from Firestore.");
+  }catch(e){
+    logDiag("Push token doc delete failed: " + (e?.message || e));
+  }
+
+  try{
+    if(!messaging) messaging = getMessaging(app);
+    await deleteToken(messaging);
+    logDiag("Browser FCM token deleted (deleteToken).");
+  }catch(e){
+    logDiag("deleteToken failed: " + (e?.message || e));
+  }
+
+  clearPushBinding();
+}
+
+async function rotateFcmTokenIfUserChanged(){
+  try{
+    if(!("Notification" in window)) return;
+    if(!("serviceWorker" in navigator)) return;
+    if(Notification.permission !== "granted") return;
+
+    if(lastPushUid && myUid && lastPushUid !== myUid){
+      logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
+
+      if(!messaging){
+        messaging = getMessaging(app);
+      }
+
+      await deleteToken(messaging);
+      logDiag("Push: deleteToken() success");
+    }
+
+    lastPushUid = myUid || null;
+  }catch(e){
+    logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
+  }
+}
+
+function base64UrlToUint8Array(base64Url) {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+function validateVapid(vapid) {
+  const s = String(vapid || "").trim();
+  if (!/^[A-Za-z0-9\-_]+$/.test(s)) return { ok:false, why:"contains invalid characters" };
+  try {
+    const bytes = base64UrlToUint8Array(s);
+    if (bytes.length !== 65) return { ok:false, why:`decoded length ${bytes.length}, expected 65` };
+    return { ok:true, why:`ok (65 bytes)` };
+  } catch (e) {
+    return { ok:false, why:`decode failed: ${e?.message || e}` };
+  }
+}
+
+async function enablePush(){
+  logDiag("enablePush(): ENTER");
+  if(!requireAuthOrPrompt()) return;
+
+  const prev = getSavedPushBinding();
+  if(prev.uid && prev.uid !== myUid){
+    await revokePushForCurrentDevice();
+  }
+  
+  if (!("Notification" in window)) { 
+    setStatus(window.pushStatus, "Push: not supported in this browser."); 
+    return; 
+  }
+  
+  if (!("serviceWorker" in navigator)) { 
+    setStatus(window.pushStatus, "Push: service worker not supported."); 
+    return; 
+  }
+  
+  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { 
+    setStatus(window.pushStatus, "Push: VAPID key not configured."); 
+    return; 
+  }
+
+  try {
+    // Ensure service worker is registered
+    await ensureServiceWorkerInstalled();
+    
+    swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
+    if (!swReg) throw new Error("Service worker not installed");
+
+    messaging = getMessaging(app);
+
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted"){ 
+      setStatus(window.pushStatus, "Push: permission not granted."); 
+      return; 
+    }
+
+    const check = validateVapid(VAPID);
+    logDiag("VAPID check: " + check.ok + " - " + check.why);
+    if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID,
+      serviceWorkerRegistration: swReg
+    });
+
+    if(!token){ 
+      setStatus(window.pushStatus, "Push: no token returned."); 
+      return; 
+    }
+
+    const tokenId = token.slice(0, 32);
+
+    await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), {
+      token,
+      createdAt: Date.now(),
+      ua: navigator.userAgent,
+      enabled: true,
+      platform: navigator.platform
+    }, { merge:true });
+    
+    savePushBinding(myUid, tokenId);
+
+    setStatus(window.pushStatus, "✅ Push: enabled.");
+    logDiag("FCM token stored (users/{uid}/fcmTokens).");
+
+    // Listen for foreground messages
+    onMessage(messaging, async (payload)=>{
+      try{
+        logDiag("FCM foreground message received: " + JSON.stringify(payload));
+        const data = payload?.data || {};
+
+        if(!isAuthed || !myUid) {
+          logDiag("Ignoring FCM: not authed");
+          return;
+        }
+
+        if (data.callId) {
+          const callRef = doc(db, "calls", data.callId);
+          const callSnap = await getDoc(callRef);
+          if(!callSnap.exists()){
+            logDiag("Ignoring FCM: call doc missing");
+            return;
+          }
+          const call = callSnap.data() || {};
+
+          if(call.toUid !== myUid){
+            logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
+            return;
+          }
+
+          if (call.roomId) window.roomIdInput.value = call.roomId;
+          currentIncomingCall = { id: data.callId, data: call };
+
+          window.incomingText.textContent =
+            payload?.notification?.body ||
+            (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
+
+          window.incomingOverlay.style.display = "flex";
+          startRingtone();
+          return;
+        }
+
+        logDiag("Ignoring FCM: not a callId payload");
+      }catch(e){
+        logDiag("onMessage handler error: " + (e?.message || e));
+      }
+    });
+
+  } catch (e) {
+    setStatus(window.pushStatus, "❌ Push: failed (see diagnostics).");
+    try { logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    logDiag("Push enable failed: " + (e?.message || e));
+    showError(e);
+  }
+}
+
+let autoPushClickArmed = false;
+
+function autoEnablePushOnLogin(){
+  if (!("Notification" in window)) { 
+    setStatus(window.pushStatus, "Push: not supported in this browser."); 
+    return; 
+  }
+  
+  if (!("serviceWorker" in navigator)) { 
+    setStatus(window.pushStatus, "Push: service worker not supported."); 
+    return; 
+  }
+
+  const perm = Notification.permission;
+
+  if (perm === "granted") {
+    logDiag("Auto-push: permission granted -> enabling push now");
+    enablePush().catch((e)=> logDiag("Auto-push enable failed: " + (e?.message || e)));
+    return;
+  }
+
+  if (perm === "denied") {
+    setStatus(window.pushStatus, "Push: blocked in browser settings (Notifications = Block).");
+    logDiag("Auto-push: permission denied");
+    return;
+  }
+
+  setStatus(window.pushStatus, "Push: click anywhere once to enable notifications.");
+  if (autoPushClickArmed) return;
+  autoPushClickArmed = true;
+
+  const handler = () => {
+    autoPushClickArmed = false;
+    logDiag("Auto-push: user click detected -> enabling push");
+    enablePush().catch((e)=>{ logDiag("Auto-push enable failed: " + (e?.message || e)); showError(e); });
+  };
+
+  window.addEventListener("click", handler, { once:true, capture:true });
+}
+
+// ==================== BACKGROUND SERVICE FUNCTIONS ====================
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { isRunning: false, uid: null };
+  }
+}
+
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    window.bgStatus.textContent = 'Connecting to background service...';
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      window.bgStatus.textContent = '✅ Background service active';
+      window.startBgBtn.disabled = true;
+      window.stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    window.bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
+
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      window.bgStatus.textContent = 'Background service stopped';
+      window.startBgBtn.disabled = false;
+      window.stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+async function updateServiceStatus() {
+  if (isAuthed) {
+    window.startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        window.bgStatus.textContent = '✅ Background service active';
+        window.startBgBtn.disabled = true;
+        window.stopBgBtn.disabled = false;
+      } else {
+        window.bgStatus.textContent = 'Background service ready';
+        window.stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      window.bgStatus.textContent = 'Background app not detected';
+      window.stopBgBtn.disabled = true;
+    }
+  } else {
+    window.startBgBtn.disabled = true;
+    window.stopBgBtn.disabled = true;
+    window.bgStatus.textContent = 'Sign in required';
+  }
+}
 
 // ==================== MEDIA FUNCTIONS ====================
 const VIDEO_PROFILES = {
@@ -406,23 +863,53 @@ function stopRingtone() {
   ringGain = null;
 }
 
-function startRingback() {
-  stopRingback();
-  logDiag("Ringback started");
-  
-  // Simple beep pattern for ringback
-  ringbackTimer = setInterval(() => {
-    startRingtone();
-    setTimeout(() => stopRingtone(), 500);
-  }, 2000);
+function playRingbackBeepOnce(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = 0.04;
+    osc.type = "sine";
+    osc.frequency.value = 440;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    osc.onended = ()=>{
+      try{ osc.disconnect(); }catch{}
+      try{ gain.disconnect(); }catch{}
+    };
+  }catch{}
 }
 
-function stopRingback() {
-  if (ringbackTimer) {
+function startRingback(){
+  stopRingback();
+
+  try{ unlockAudio(); }catch{}
+
+  const cycleMs = 2500;
+
+  playRingbackBeepOnce();
+  setTimeout(()=> playRingbackBeepOnce(), 250);
+
+  ringbackTimer = setInterval(()=>{
+    playRingbackBeepOnce();
+    setTimeout(()=> playRingbackBeepOnce(), 250);
+  }, cycleMs);
+}
+
+function stopRingback(){
+  if(ringbackTimer){
     clearInterval(ringbackTimer);
     ringbackTimer = null;
   }
-  stopRingtone();
 }
 
 // ==================== FIRESTORE HELPER FUNCTIONS ====================
@@ -447,214 +934,6 @@ function stopCallListeners(){
   if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
   currentIncomingCall = null;
   activeCallId = null;
-}
-
-// ==================== ROOM CREATION (CALLER SIDE) ====================
-async function createRoom(){
-  if(!requireAuthOrPrompt()) {
-    logDiag("Cannot create room: not authenticated");
-    return null;
-  }
-
-  stopListeners();
-  await startMedia();
-
-  const roomRef = doc(collection(db, "rooms"));
-  if (window.roomIdInput) window.roomIdInput.value = roomRef.id;
-  
-  // Update URL hash
-  location.hash = roomRef.id;
-  refreshCopyInviteState();
-  logDiag("CreateRoom: roomId=" + roomRef.id);
-
-  const caller = collection(roomRef,"callerCandidates");
-  const callee = collection(roomRef,"calleeCandidates");
-  
-  await clearSub(caller);
-  await clearSub(callee);
-
-  await ensurePeer();
-
-  const session = 1;
-
-  pc.onicecandidate = (e)=>{
-    if(e.candidate){
-      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{
-        logDiag("Failed to add ICE candidate to Firestore");
-      });
-    }
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  
-  logDiag("Created local offer, setting up Firestore");
-
-  await setDoc(roomRef, {
-    session,
-    offer: { type: offer.type, sdp: offer.sdp },
-    answer: null,
-    updatedAt: Date.now(),
-    createdBy: myUid,
-    createdByName: myDisplayName || "Unknown"
-  }, { merge:true });
-
-  setStatus(window.callStatus, `✅ Room created (session ${session}). Waiting for peer...`);
-  logDiag(`Room written to Firestore. session=${session}`);
-
-  // Listen for answer
-  unsubRoomA = onSnapshot(roomRef, async (snapshot)=>{
-    const data = snapshot.data();
-    if(!data) return;
-
-    logDiag("Room snapshot update: " + JSON.stringify(data).substring(0, 200));
-
-    if(data.answer && data.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
-      try{
-        logDiag("Received answer from peer, setting remote description");
-        await pc.setRemoteDescription(data.answer);
-        setStatus(window.callStatus, `✅ Connected (session ${session}).`);
-        logDiag("Successfully applied remote answer.");
-      }catch(e){
-        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
-        setStatus(window.callStatus, "Answer failed — restarting session…");
-        showError(e);
-      }
-    }
-  }, (error) => {
-    logDiag("Room listener error: " + error.message);
-  });
-
-  // Listen for callee ICE candidates
-  unsubCalleeA = onSnapshot(callee, (snapshot)=>{
-    snapshot.docChanges().forEach(change=>{
-      if(change.type !== "added" || !pc) return;
-      const candidate = change.doc.data();
-      if(candidate.session !== session) return;
-      try{ 
-        pc.addIceCandidate(candidate);
-        logDiag("Added callee ICE candidate");
-      }catch(e){
-        logDiag("Failed to add callee ICE candidate: " + e.message);
-      }
-    });
-  }, (error) => {
-    logDiag("Callee candidate listener error: " + error.message);
-  });
-
-  return { roomId: roomRef.id, roomRef };
-}
-
-// ==================== ROOM JOINING (CALLEE SIDE) ====================
-async function joinRoom(){
-  if(!requireAuthOrPrompt()) {
-    logDiag("Cannot join room: not authenticated");
-    return;
-  }
-
-  const roomId = window.roomIdInput ? window.roomIdInput.value.trim() : "";
-  if(!roomId) {
-    setStatus(window.callStatus, "Please enter a Room ID");
-    throw new Error("Room ID is empty.");
-  }
-  
-  logDiag("Attempting to join room: " + roomId);
-
-  await startMedia();
-  
-  // Update URL hash
-  location.hash = roomId;
-
-  const roomRef = doc(db,"rooms", roomId);
-  const snap = await getDoc(roomRef);
-  if(!snap.exists()) {
-    setStatus(window.callStatus, "Room not found");
-    throw new Error("Room not found");
-  }
-
-  stopListeners();
-
-  setStatus(window.callStatus, "Connecting to room…");
-  logDiag("Found room, setting up listeners");
-
-  let lastProcessedSession = 0;
-
-  unsubRoomB = onSnapshot(roomRef, async (snapshot)=>{
-    const data = snapshot.data();
-    if(!data?.offer || !data.session) {
-      logDiag("No offer found in room data");
-      return;
-    }
-
-    const session = data.session;
-    if(session <= lastProcessedSession) {
-      logDiag(`Ignoring old session ${session}, already processed ${lastProcessedSession}`);
-      return;
-    }
-    
-    lastProcessedSession = session;
-    logDiag("New offer/session detected: " + session);
-
-    try{
-      await ensurePeer();
-
-      const caller = collection(roomRef,"callerCandidates");
-      const callee = collection(roomRef,"calleeCandidates");
-
-      await clearSub(callee);
-
-      pc.onicecandidate = (e)=>{
-        if(e.candidate){
-          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{
-            logDiag("Failed to add ICE candidate");
-          });
-        }
-      };
-
-      logDiag("Setting remote description from offer");
-      await pc.setRemoteDescription(data.offer);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      
-      logDiag("Created answer, writing to Firestore");
-
-      await updateDoc(roomRef, { 
-        answer: answer, 
-        session, 
-        answeredAt: Date.now(),
-        answeredBy: myUid,
-        answeredByName: myDisplayName || "Unknown"
-      });
-      
-      setStatus(window.callStatus, `✅ Joined room. Waiting for connection... (session ${session})`);
-      logDiag("Answer written to room doc.");
-
-      // Listen for caller ICE candidates
-      unsubCallerB = onSnapshot(caller, (candidateSnapshot)=>{
-        candidateSnapshot.docChanges().forEach(change=>{
-          if(change.type !== "added" || !pc) return;
-          const candidate = change.doc.data();
-          if(candidate.session !== session) return;
-          try{ 
-            pc.addIceCandidate(candidate);
-            logDiag("Added caller ICE candidate");
-          }catch(e){
-            logDiag("Failed to add caller ICE candidate: " + e.message);
-          }
-        });
-      }, (error) => {
-        logDiag("Caller candidate listener error: " + error.message);
-      });
-
-    }catch(e){
-      logDiag("Join flow error: " + (e?.message || e));
-      setStatus(window.callStatus, "Join failed: " + e.message);
-      showError(e);
-    }
-  }, (error) => {
-    logDiag("Room join listener error: " + error.message);
-    setStatus(window.callStatus, "Connection error");
-  });
 }
 
 // ==================== CALL MANAGEMENT ====================
@@ -724,6 +1003,104 @@ async function listenIncomingCalls(){
   }, (err)=>{
     logDiag("Incoming call listener error: " + (err?.message || err));
   });
+}
+
+async function catchUpMissedRingingCall() {
+  try {
+    if (!myUid) return;
+
+    const qy = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "ringing"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+
+    const d = snap.docs[0];
+    const callId = d.id;
+    const call = d.data() || {};
+    
+    if (currentIncomingCall?.id === callId) return;
+
+    if (call.roomId) window.roomIdInput.value = call.roomId;
+    currentIncomingCall = { id: callId, data: call };
+    window.incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
+    window.incomingOverlay.style.display = "flex";
+    startRingtone();
+
+    logDiag("Catch-up: showed ringing call " + callId);
+  } catch (e) {
+    logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
+  }
+}
+
+async function catchUpMissedCallNotification() {
+  try {
+    if (!myUid) return;
+
+    const LS_LAST_MISSED = "webrtc_last_missed_call_id";
+    const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
+
+    async function showMissed(callId, call, whenMs) {
+      const fromName = call.fromName || "Unknown";
+      const note = String(call.note || "").trim();
+      const tsLocal = new Date(whenMs).toLocaleString();
+
+      setStatus(window.dirCallStatus, `Missed call from ${fromName}.`);
+      logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
+
+      if ("Notification" in window && Notification.permission === "granted") {
+        const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+        if (reg) {
+          const body = `Missed call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
+          await reg.showNotification("Missed call", {
+            body,
+            tag: `webrtc-missed-${myUid}`,
+            renotify: true,
+            requireInteraction: false,
+            data: { callId, roomId: call.roomId || "", fromName, note }
+          });
+        }
+      }
+
+      localStorage.setItem(LS_LAST_MISSED, callId);
+    }
+
+    // Check for missed calls
+    const q1 = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "missed"),
+      orderBy("missedAt", "desc"),
+      limit(1)
+    );
+
+    const s1 = await getDocs(q1);
+    if (!s1.empty) {
+      const d = s1.docs[0];
+      const callId = d.id;
+      const call = d.data() || {};
+
+      if (callId && callId !== lastId &&
+          currentIncomingCall?.id !== callId) {
+
+        const missedMs =
+          (call.missedAt && typeof call.missedAt.toMillis === "function")
+            ? call.missedAt.toMillis()
+            : Date.now();
+
+        await showMissed(callId, call, missedMs);
+        return;
+      }
+    }
+
+  } catch (e) {
+    logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
+  }
 }
 
 function listenActiveCall(callId){
@@ -904,7 +1281,11 @@ async function loadAllAllowedUsers(){
       const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
       usSnap.forEach(docu => {
         const data = docu.data() || {};
-        users.push({ uid: docu.id, displayName: data.displayName || data.email || "(no name)" });
+        users.push({ 
+          uid: docu.id, 
+          displayName: data.displayName || data.email || "(no name)",
+          email: data.email || ""
+        });
       });
     }
 
@@ -965,6 +1346,28 @@ function renderUsersList(filterText=""){
   });
 }
 
+async function sendIncomingCallNotification(message) {
+  try {
+    // Send to your server endpoint
+    const response = await fetch("/easosunov/sendIncomingPush", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to send incoming call push notification");
+    }
+
+    const data = await response.json();
+    logDiag("Incoming call push notification sent: " + JSON.stringify(data));
+  } catch (error) {
+    logDiag("Error sending incoming call notification: " + error.message);
+  }
+}
+
 async function startCallToUid(toUid, toName=""){
   logDiag("Starting call to UID: " + toUid);
 
@@ -990,11 +1393,42 @@ async function startCallToUid(toUid, toName=""){
     updatedAt: serverTimestamp(),
     acceptedAt: null,
     declinedAt: null,
-    endedAt: null
+    endedAt: null,
+    // Add push notification tracking
+    push: {
+      sentAt: null,
+      stage: "pending"
+    }
   });
 
   activeCallId = callRef.id;
   
+  // Send push notification
+  try {
+    await sendIncomingCallNotification({
+      toUid: toUid,
+      callId: callRef.id,
+      fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value),
+      note: note,
+      roomId: created.roomId,
+      timestamp: new Date().toLocaleString(),
+      sentAtMs: Date.now(),
+    });
+    
+    // Update call document with push status
+    await updateDoc(doc(db, "calls", callRef.id), {
+      "push.sentAt": serverTimestamp(),
+      "push.stage": "sent"
+    });
+    
+  } catch (e) {
+    logDiag("Failed to send push notification: " + e.message);
+    await updateDoc(doc(db, "calls", callRef.id), {
+      "push.stage": "error",
+      "push.error": e.message
+    });
+  }
+
   if (window.hangupBtn) window.hangupBtn.disabled = false;
   listenActiveCall(activeCallId);
   setStatus(window.dirCallStatus, `📞 Calling ${toName || "user"}…`);
@@ -1075,6 +1509,213 @@ function refreshCopyInviteState(){
   logDiag(`Copy invite state: auth=${isAuthed}, roomId=${hasRoomId}, disabled=${window.copyLinkBtn.disabled}`);
 }
 
+// ==================== ROOM CREATION AND JOINING ====================
+async function createRoom(){
+  if(!requireAuthOrPrompt()) {
+    logDiag("Cannot create room: not authenticated");
+    return null;
+  }
+
+  stopListeners();
+  await startMedia();
+
+  const roomRef = doc(collection(db, "rooms"));
+  if (window.roomIdInput) window.roomIdInput.value = roomRef.id;
+  
+  // Update URL hash
+  location.hash = roomRef.id;
+  refreshCopyInviteState();
+  logDiag("CreateRoom: roomId=" + roomRef.id);
+
+  const caller = collection(roomRef,"callerCandidates");
+  const callee = collection(roomRef,"calleeCandidates");
+  
+  await clearSub(caller);
+  await clearSub(callee);
+
+  await ensurePeer();
+
+  const session = 1;
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate){
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{
+        logDiag("Failed to add ICE candidate to Firestore");
+      });
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  
+  logDiag("Created local offer, setting up Firestore");
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now(),
+    createdBy: myUid,
+    createdByName: myDisplayName || "Unknown"
+  }, { merge:true });
+
+  setStatus(window.callStatus, `✅ Room created (session ${session}). Waiting for peer...`);
+  logDiag(`Room written to Firestore. session=${session}`);
+
+  // Listen for answer
+  unsubRoomA = onSnapshot(roomRef, async (snapshot)=>{
+    const data = snapshot.data();
+    if(!data) return;
+
+    logDiag("Room snapshot update: " + JSON.stringify(data).substring(0, 200));
+
+    if(data.answer && data.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        logDiag("Received answer from peer, setting remote description");
+        await pc.setRemoteDescription(data.answer);
+        setStatus(window.callStatus, `✅ Connected (session ${session}).`);
+        logDiag("Successfully applied remote answer.");
+      }catch(e){
+        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(window.callStatus, "Answer failed — restarting session…");
+        showError(e);
+      }
+    }
+  }, (error) => {
+    logDiag("Room listener error: " + error.message);
+  });
+
+  // Listen for callee ICE candidates
+  unsubCalleeA = onSnapshot(callee, (snapshot)=>{
+    snapshot.docChanges().forEach(change=>{
+      if(change.type !== "added" || !pc) return;
+      const candidate = change.doc.data();
+      if(candidate.session !== session) return;
+      try{ 
+        pc.addIceCandidate(candidate);
+        logDiag("Added callee ICE candidate");
+      }catch(e){
+        logDiag("Failed to add callee ICE candidate: " + e.message);
+      }
+    });
+  }, (error) => {
+    logDiag("Callee candidate listener error: " + error.message);
+  });
+
+  return { roomId: roomRef.id, roomRef };
+}
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) {
+    logDiag("Cannot join room: not authenticated");
+    return;
+  }
+
+  const roomId = window.roomIdInput ? window.roomIdInput.value.trim() : "";
+  if(!roomId) {
+    setStatus(window.callStatus, "Please enter a Room ID");
+    throw new Error("Room ID is empty.");
+  }
+  
+  logDiag("Attempting to join room: " + roomId);
+
+  await startMedia();
+  
+  // Update URL hash
+  location.hash = roomId;
+
+  const roomRef = doc(db,"rooms", roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()) {
+    setStatus(window.callStatus, "Room not found");
+    throw new Error("Room not found");
+  }
+
+  stopListeners();
+
+  setStatus(window.callStatus, "Connecting to room…");
+  logDiag("Found room, setting up listeners");
+
+  let lastProcessedSession = 0;
+
+  unsubRoomB = onSnapshot(roomRef, async (snapshot)=>{
+    const data = snapshot.data();
+    if(!data?.offer || !data.session) {
+      logDiag("No offer found in room data");
+      return;
+    }
+
+    const session = data.session;
+    if(session <= lastProcessedSession) {
+      logDiag(`Ignoring old session ${session}, already processed ${lastProcessedSession}`);
+      return;
+    }
+    
+    lastProcessedSession = session;
+    logDiag("New offer/session detected: " + session);
+
+    try{
+      await ensurePeer();
+
+      const caller = collection(roomRef,"callerCandidates");
+      const callee = collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
+
+      pc.onicecandidate = (e)=>{
+        if(e.candidate){
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{
+            logDiag("Failed to add ICE candidate");
+          });
+        }
+      };
+
+      logDiag("Setting remote description from offer");
+      await pc.setRemoteDescription(data.offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      logDiag("Created answer, writing to Firestore");
+
+      await updateDoc(roomRef, { 
+        answer: answer, 
+        session, 
+        answeredAt: Date.now(),
+        answeredBy: myUid,
+        answeredByName: myDisplayName || "Unknown"
+      });
+      
+      setStatus(window.callStatus, `✅ Joined room. Waiting for connection... (session ${session})`);
+      logDiag("Answer written to room doc.");
+
+      // Listen for caller ICE candidates
+      unsubCallerB = onSnapshot(caller, (candidateSnapshot)=>{
+        candidateSnapshot.docChanges().forEach(change=>{
+          if(change.type !== "added" || !pc) return;
+          const candidate = change.doc.data();
+          if(candidate.session !== session) return;
+          try{ 
+            pc.addIceCandidate(candidate);
+            logDiag("Added caller ICE candidate");
+          }catch(e){
+            logDiag("Failed to add caller ICE candidate: " + e.message);
+          }
+        });
+      }, (error) => {
+        logDiag("Caller candidate listener error: " + error.message);
+      });
+
+    }catch(e){
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(window.callStatus, "Join failed: " + e.message);
+      showError(e);
+    }
+  }, (error) => {
+    logDiag("Room join listener error: " + error.message);
+    setStatus(window.callStatus, "Connection error");
+  });
+}
+
 // ==================== ALLOWLIST ENFORCEMENT ====================
 async function enforceAllowlist(user){
   const uid = user.uid;
@@ -1152,6 +1793,7 @@ function setupEventListeners() {
       try{
         logDiag("Logging out...");
         stopAll();
+        await revokePushForCurrentDevice();
         await signOut(auth);
       }catch(e){
         showError(e);
@@ -1254,7 +1896,9 @@ function setupEventListeners() {
         await updateDoc(doc(db,"calls", id), {
           status: "accepted",
           acceptedAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
+          updatedAt: serverTimestamp(),
+          deliveredAt: serverTimestamp(),
+          deliveredVia: "web_page"
         });
 
         activeCallId = id;
@@ -1297,6 +1941,29 @@ function setupEventListeners() {
         showError(e);
       }
     };
+  }
+  
+  // Push notification buttons
+  if (window.resetPushBtn) {
+    window.resetPushBtn.onclick = async ()=>{
+      try{
+        setStatus(window.pushStatus, "Push: resetting…");
+        await revokePushForCurrentDevice();
+        await enablePush();
+        setStatus(window.pushStatus, "Push: enabled (reset).");
+      }catch(e){
+        showError(e);
+      }
+    };
+  }
+  
+  // Background service buttons
+  if (window.startBgBtn) {
+    window.startBgBtn.onclick = startBackgroundService;
+  }
+  
+  if (window.stopBgBtn) {
+    window.stopBgBtn.onclick = stopBackgroundService;
   }
 }
 
@@ -1370,8 +2037,16 @@ onAuthStateChanged(auth, async (user)=>{
     if (window.saveNameBtn) window.saveNameBtn.disabled = !String(window.myNameInput?.value||"").trim();
     if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = false;
     if (window.hangupBtn) window.hangupBtn.disabled = true;
+    if (window.resetPushBtn) window.resetPushBtn.disabled = false;
 
     refreshCopyInviteState();
+
+    // Process push notifications
+    await rotateFcmTokenIfUserChanged();
+    autoEnablePushOnLogin();
+    
+    // Process any pending notifications from URL
+    await processPendingNotifications();
 
     try{ 
       await ensureMyUserProfile(user); 
@@ -1390,6 +2065,18 @@ onAuthStateChanged(auth, async (user)=>{
     } catch(e){ 
       logDiag("Incoming listener failed: " + (e?.message || e)); 
     }
+    
+    try {
+      await catchUpMissedRingingCall();
+      await catchUpMissedCallNotification();
+    } catch (e) {
+      logDiag("Catch-up failed: " + e.message);
+    }
+
+    // Update background service status
+    updateServiceStatus();
+    // Check status every 30 seconds
+    setInterval(updateServiceStatus, 30000);
 
   } else {
     if (window.loginOverlay) window.loginOverlay.style.display = "flex";
@@ -1401,9 +2088,15 @@ onAuthStateChanged(auth, async (user)=>{
     if (window.testSoundBtn) window.testSoundBtn.disabled = true;
     if (window.saveNameBtn) window.saveNameBtn.disabled = true;
     if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = true;
+    if (window.resetPushBtn) window.resetPushBtn.disabled = true;
 
     setStatus(window.dirCallStatus, "Idle.");
     if (window.myNameStatus) window.myNameStatus.textContent = "Not set.";
+    if (window.pushStatus) window.pushStatus.textContent = "Push: not enabled.";
+
+    window.bgStatus.textContent = 'Sign in required';
+    window.startBgBtn.disabled = true;
+    window.stopBgBtn.disabled = true;
 
     if (window.usersList) window.usersList.innerHTML = "";
     allUsersCache = [];
@@ -1418,11 +2111,21 @@ if (document.readyState === 'loading') {
     logDiag("DOM loaded, initializing...");
     initializeDomElements();
     updateVideoQualityUi();
+    
+    // Register service worker early
+    ensureServiceWorkerInstalled().then(() => {
+      logDiag("Service worker registration attempted");
+    });
   });
 } else {
   logDiag("DOM already loaded, initializing...");
   initializeDomElements();
   updateVideoQualityUi();
+  
+  // Register service worker early
+  ensureServiceWorkerInstalled().then(() => {
+    logDiag("Service worker registration attempted");
+  });
 }
 
 // Unlock audio on first click
