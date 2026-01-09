@@ -803,6 +803,39 @@ if(authBC){
 }
 
 /* ================== SINGLE PAGE INSTANCE LOCK ================== */
+// IMMEDIATE DUPLICATE CHECK - Add this at the VERY START of the script
+(function checkForExistingInstance() {
+  try {
+    const existingLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    if (existingLock) {
+      const [lockTabId, lockTime] = existingLock.split('|');
+      const lockAge = Date.now() - parseInt(lockTime, 10);
+      
+      // If lock is less than 5 seconds old, another tab is likely active
+      if (lockAge < 5000) {
+        console.warn(`Another tab (${lockTabId}) has the lock, age: ${lockAge}ms`);
+        
+        // Show immediate warning and try to close
+        setTimeout(() => {
+          alert("Another instance of this WebRTC app is already open in this browser.\n\nPlease use the existing tab or close it first before opening a new one.");
+          if (window.history.length > 1) {
+            window.history.back();
+          } else {
+            window.close();
+          }
+        }, 100);
+        
+        // Prevent further initialization
+        throw new Error("Duplicate instance prevented");
+      }
+    }
+  } catch (e) {
+    // Silently fail if localStorage isn't available
+  }
+})();
+ 
+
+ 
 const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
 const PAGE_INSTANCE_CHANNEL = "webrtc_page_instance_channel";
 
