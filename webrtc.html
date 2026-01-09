@@ -2701,9 +2701,7 @@ async function startCallToUid(toUid, toName=""){
 
   const note = String(callNoteInput?.value || "").trim().slice(0, 140);
 
-  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
-
-  // Update Person B title with recipient's name
+   // Update Person B title with recipient's name
   if (toName) {
     updatePersonBTitle(toName);
   }
