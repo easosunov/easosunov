@@ -15,6 +15,11 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 const firestore = firebase.firestore();
+// Audio context for playing ringtone
+let audioContext = null;
+let ringtoneSource = null;
+let ringtoneTimer = null;
+const RINGTONE_DURATION = 45000; // Ring for 45 seconds
 
 // --- In-memory state ---
 const recentlyShown = new Map();
@@ -30,48 +35,163 @@ const isAndroid = /Android/.test(navigator.userAgent);
 
 // --- Enhanced notification handling for Android ---
 function createAndroidNotificationPayload(title, body, data) {
-  return {
-    title: title,
-    body: body,
-    icon: '/easosunov/icons/RTC192.png',
-    badge: '/easosunov/icons/RTC96.png',
-    image: '/easosunov/icons/RTC512.png',
-    timestamp: Date.now(),
-    vibrate: [200, 100, 200, 100, 200, 100, 400], // More distinctive pattern
-    requireInteraction: true, // Prevents auto-dismissal
-    tag: `call-${data.callId || Date.now()}`,
-    renotify: true,
-    silent: false, // Ensures sound plays
-    data: {
-      ...data,
-      androidChannelId: 'incoming_calls',
-      androidChannelName: 'Incoming Calls',
-      androidChannelDescription: 'Incoming video call notifications',
-      androidPriority: 'max', // Changed from 'high' to 'max'
-      androidVisibility: 'public',
-      androidAutoCancel: false, // Prevents auto-dismissal
-      androidDefaults: ['sound', 'vibrate', 'lights'], // Added 'lights'
-      androidLights: ['#4CAF50', 300, 1000],
-      // Add persistent notification settings
-      sticky: true,
-      ongoing: true, // Makes notification persistent (can't be swiped away)
-      // Sound configuration
-      sound: 'default',
-      // Extended Android options
-      androidNotification: {
-        channelId: 'incoming_calls',
-        sound: 'default',
-        priority: 'max',
+  // For Android, we need to use a different approach
+  if (isAndroid) {
+    return {
+      title: title,
+      body: body,
+      icon: '/easosunov/icons/RTC192.png',
+      badge: '/easosunov/icons/RTC96.png',
+      image: '/easosunov/icons/RTC512.png',
+      timestamp: Date.now(),
+      vibrate: [1000, 500, 1000, 500, 2000], // Longer vibration pattern
+      requireInteraction: true, // Critical: prevents auto-dismiss
+      tag: `persistent-call-${data.callId || Date.now()}`,
+      renotify: true,
+      silent: false, // Must be false for sound
+      sound: 'default', // Explicitly request default sound
+      priority: 2, // High priority (Android-specific)
+      // Android-specific options
+      data: {
+        ...data,
+        // Force Android to show as high priority call notification
+        notificationType: 'call',
+        callType: 'incoming',
+        timestamp: Date.now(),
+        // Android channel settings
+        channelId: 'incoming_calls_channel',
+        channelName: 'Incoming Calls',
+        channelDescription: 'Incoming video call notifications',
+        importance: 'high',
+        // Make it sticky/ongoing
+        ongoing: true,
+        autoCancel: false,
+        // Visibility settings
         visibility: 'public',
-        ongoing: true, // Persistent notification
-        autoCancel: false, // Won't auto-dismiss
-        showWhen: true,
-        localOnly: false,
-        category: 'call',
-        fullScreenIntent: true // Shows even on locked screen
+        // Full screen intent for locked screens
+        fullScreenIntent: true,
+        // LED and light settings
+        lights: [true, 1000, 1000],
+        color: '#4CAF50'
+      },
+      // Add actions that will keep notification alive
+      actions: [
+        {
+          action: 'answer',
+          title: '📞 Answer',
+          icon: '/easosunov/icons/answer.png'
+        },
+        {
+          action: 'decline',
+          title: '❌ Decline',
+          icon: '/easosunov/icons/decline.png'
+        }
+      ]
+    };
+  } else {
+    // Standard for other platforms
+    return {
+      title: title,
+      body: body,
+      icon: '/easosunov/icons/RTC192.png',
+      badge: '/easosunov/icons/RTC96.png',
+      image: '/easosunov/icons/RTC512.png',
+      timestamp: Date.now(),
+      vibrate: [200, 100, 200],
+      requireInteraction: true,
+      tag: `call-${data.callId || Date.now()}`,
+      renotify: true,
+      silent: false,
+      data: {
+        ...data,
+        androidChannelId: 'incoming_calls',
+        androidChannelName: 'Incoming Calls',
+        androidChannelDescription: 'Incoming video call notifications',
+        androidPriority: 'high',
+        androidVisibility: 'public',
+        androidAutoCancel: false,
+        androidDefaults: ['sound', 'vibrate'],
+        androidLights: ['#4CAF50', 300, 1000]
       }
+    };
+  }
+}
+
+// --- Audio functions for ringtone ---
+function initAudioContext() {
+  if (!audioContext) {
+    try {
+      audioContext = new (self.AudioContext || self.webkitAudioContext)();
+    } catch (e) {
+      console.error('[SW] Could not create AudioContext:', e);
     }
-  };
+  }
+  return audioContext;
+}
+
+async function playRingtone() {
+  try {
+    const ctx = initAudioContext();
+    if (!ctx) return;
+    
+    // Resume audio context (required by browsers)
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+    
+    // Stop any existing ringtone
+    stopRingtone();
+    
+    // Create oscillator for ringtone
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 800;
+    
+    gainNode.gain.value = 0.3;
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    // Start the oscillator
+    oscillator.start();
+    
+    // Store reference
+    ringtoneSource = { oscillator, gainNode };
+    
+    // Create pulsing effect (on/off every 2 seconds)
+    let isLoud = true;
+    ringtoneTimer = setInterval(() => {
+      if (ringtoneSource && ringtoneSource.gainNode) {
+        ringtoneSource.gainNode.gain.value = isLoud ? 0.3 : 0.05;
+        isLoud = !isLoud;
+      }
+    }, 2000);
+    
+    console.log('[SW] Ringtone started');
+    
+  } catch (error) {
+    console.error('[SW] Error playing ringtone:', error);
+  }
+}
+
+function stopRingtone() {
+  if (ringtoneTimer) {
+    clearInterval(ringtoneTimer);
+    ringtoneTimer = null;
+  }
+  
+  if (ringtoneSource) {
+    try {
+      ringtoneSource.oscillator.stop();
+      ringtoneSource.oscillator.disconnect();
+      ringtoneSource.gainNode.disconnect();
+    } catch (e) {
+      // Ignore errors when stopping
+    }
+    ringtoneSource = null;
+  }
 }
 
 // --- Handle messages from web page ---
@@ -303,41 +423,77 @@ async function showCallNotification(data) {
     };
   }
   
-  try {
+   try {
     // Close any existing notifications with same tag
     const existing = await self.registration.getNotifications({ 
       tag: notificationOptions.tag 
     });
     for (const n of existing) n.close();
     
+    // For Android, start playing ringtone BEFORE showing notification
+    if (isAndroid) {
+      await playRingtone();
+      
+      // Auto-stop ringtone after duration
+      setTimeout(() => {
+        stopRingtone();
+        console.log('[SW] Ringtone stopped after timeout');
+      }, RINGTONE_DURATION);
+    }
+    
     // Show the notification
     await self.registration.showNotification(title, notificationOptions);
     console.log('[SW] Notification shown:', callId);
     
-    // For Android, set up a re-show mechanism to keep notification visible
+    // For Android, set up aggressive persistence
     if (isAndroid) {
-      // Check every 15 seconds if notification was dismissed and re-show if needed
-      const checkAndReshow = () => {
+      // Create a persistent checking mechanism
+      const persistentCheck = () => {
         self.registration.getNotifications({ tag: notificationOptions.tag })
           .then(notifications => {
             if (notifications.length === 0 && data.callId) {
-              // Notification was dismissed, re-show it to keep it visible
-              console.log('[SW] Android notification dismissed, re-showing');
-              showCallNotification(data);
+              console.log('[SW] Android notification disappeared, re-creating');
+              // Re-show the notification
+              self.registration.showNotification(title, notificationOptions);
+              
+              // Continue ringtone if it stopped
+              if (!ringtoneSource) {
+                playRingtone();
+              }
             }
+          })
+          .catch(err => {
+            console.error('[SW] Error checking notifications:', err);
           });
       };
       
-      // Start periodic checks (every 15 seconds for 2 minutes total)
+      // Check every 5 seconds (very aggressive)
       let checkCount = 0;
-      const maxChecks = 8; // 15s × 8 = 120s (2 minutes)
-      const checkInterval = setInterval(() => {
-        checkAndReshow();
+      const maxChecks = RINGTONE_DURATION / 5000; // Check for entire ringtone duration
+      
+      const persistenceInterval = setInterval(() => {
+        persistentCheck();
         checkCount++;
         if (checkCount >= maxChecks) {
-          clearInterval(checkInterval);
+          clearInterval(persistenceInterval);
+          stopRingtone();
+          console.log('[SW] Stopped persistence checks');
         }
-      }, 15000);
+      }, 5000);
+      
+      // Also set up one-time renotification after 10 seconds as backup
+      setTimeout(() => {
+        self.registration.getNotifications({ tag: notificationOptions.tag })
+          .then(notifications => {
+            if (notifications.length > 0) {
+              // Update existing notification to keep it fresh
+              notifications.forEach(notification => {
+                notification.close();
+              });
+              self.registration.showNotification(title + ' 📞', notificationOptions.body, notificationOptions);
+            }
+          });
+      }, 10000);
     }
     
     // Send analytics if available
@@ -345,6 +501,7 @@ async function showCallNotification(data) {
     
   } catch (error) {
     console.error('[SW] Error showing notification:', error);
+    stopRingtone();
   }
 }
 
@@ -426,6 +583,9 @@ self.addEventListener("notificationclick", (event) => {
 });
 
 function handleAnswerAction(data) {
+  // Stop ringtone when answering
+  stopRingtone();
+  
   const url = buildUrlWithParams('/easosunov/webrtc.html', {
     callId: data.callId,
     roomId: data.roomId,
@@ -445,6 +605,9 @@ function handleAnswerAction(data) {
 }
 
 function handleDeclineAction(data) {
+  // Stop ringtone when declining
+  stopRingtone();
+  
   // Mark call as declined
   if (data.callId) {
     firestore.collection('calls').doc(data.callId).update({
@@ -559,5 +722,18 @@ if ('periodicSync' in self.registration) {
     }
   });
 }
+
+// Clean up on service worker shutdown
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'STOP_RINGTONE') {
+    stopRingtone();
+  }
+});
+
+// Also stop ringtone when page is closed/refreshed
+self.addEventListener('activate', (event) => {
+  // Stop any lingering ringtones
+  stopRingtone();
+});
 
 console.log('[SW] Enhanced Service Worker loaded with Android support');
