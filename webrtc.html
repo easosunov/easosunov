@@ -838,7 +838,21 @@ if(authBC){
     }
   };
 }
-
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front
+      window.focus();
+      if (document.hidden) {
+        // Try to make browser bring tab to front (may not work due to browser restrictions)
+        console.log("Focus requested by duplicate tab");
+      }
+    }
+  };
+}
 /* ================== SINGLE PAGE INSTANCE LOCK ================== */
 const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
 const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
@@ -872,65 +886,34 @@ function disableAppImmediately() {
     loginOverlay.style.display = 'none';
   }
   
-  // Create blocking overlay
-  const blocker = document.createElement('div');
-  blocker.id = 'instanceBlocker';
-  blocker.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.95);
-    color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-    text-align: center;
-    padding: 20px;
-    font-family: system-ui;
-    cursor: not-allowed;
-  `;
+  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
+  // by closing this tab/window and focusing the original one
   
-  blocker.innerHTML = `
-    <div style="max-width: 500px; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); border: 1px solid #444;">
-      <div style="font-size: 48px; margin-bottom: 15px;">⚠️</div>
-      <h2 style="color: #ff9e9e; margin-top: 0; font-size: 24px;">WebRTC App Already Running</h2>
-      <p style="font-size: 16px; line-height: 1.5; color: #e0e0e0; margin: 15px 0;">
-        This WebRTC app is already open in another browser tab.
-      </p>
-      <p style="font-size: 14px; color: #aaa; margin: 15px 0; line-height: 1.4;">
-        <strong>Only one instance is allowed at a time</strong> to prevent conflicts with audio/video devices and WebRTC connections.
-      </p>
-      <div style="background: rgba(255, 100, 100, 0.1); border-left: 4px solid #ff6b6b; padding: 12px; margin: 20px 0; border-radius: 0 8px 8px 0; text-align: left;">
-        <div style="font-size: 14px; color: #ff9e9e;">What to do:</div>
-        <div style="font-size: 13px; color: #ccc; margin-top: 5px;">
-          1. Return to the existing tab<br>
-          2. Or close the other tab first<br>
-          3. Then reload this page
-        </div>
-      </div>
-      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 25px; flex-wrap: wrap;">
-        <button id="goBackBtn" style="padding: 12px 24px; background: #4a5568; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; flex: 1; min-width: 140px; transition: background 0.2s;">
-          ← Go Back
-        </button>
-        <button id="closePageBtn" style="padding: 12px 24px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; flex: 1; min-width: 140px; font-weight: bold; transition: background 0.2s;">
-          Close This Page
-        </button>
-      </div>
-      <div style="margin-top: 20px;">
-        <button id="reloadBtn" style="padding: 10px 20px; background: transparent; color: #aaa; border: 1px solid #555; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s;">
-          Reload to Check Again
-        </button>
-      </div>
-      <p style="font-size: 11px; color: #666; margin-top: 20px; font-family: monospace;">
-        Tab ID: ${tabId.substring(0, 12)}...
-      </p>
-    </div>
-  `;
-  
-  document.body.appendChild(blocker);
+  // Try to close this tab/window
+  try {
+    // Try to find and focus the original tab by broadcasting a message
+    if (hasBroadcastChannel) {
+      const focusChannel = new BroadcastChannel("webrtc_focus_request");
+      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
+      setTimeout(() => {
+        focusChannel.close();
+      }, 1000);
+    }
+    
+    // Close this tab after a short delay
+    setTimeout(() => {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    }, 100);
+    
+  } catch (e) {
+    // If we can't close, show a minimal message and redirect to about:blank
+    console.log("Another instance is already running");
+    window.location.href = "about:blank";
+  }
   
   // Add button hover effects
   const buttons = blocker.querySelectorAll('button');
