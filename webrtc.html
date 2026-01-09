@@ -1,262 +1,28 @@
-<!doctype html>
-<html lang="en">
-<head>
-<!-- ==================== METADATA & STYLES ==================== -->
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>WebRTC</title>
-<link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="styles.css">
-</head>
-
-<body>
-<!-- ==================== PAGE HEADER ==================== -->
-<h1>2-Person Video/Sound Communicator (WebRTC)</h1>
-<div id="errorBox"></div>
-
-<!-- ==================== Android ==================== -->
-<!-- Add this near the top of your body, after the errorBox -->
-<div id="pwaInstallBanner" style="display: none;">
-  <div style="
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 12px 16px;
-    border-radius: 12px;
-    margin: 12px 0;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  ">
-    <div>
-      <strong>📱 Install as App</strong>
-      <div style="font-size: 13px; opacity: 0.9;">
-        Get native notifications and work offline
-      </div>
-    </div>
-    <button id="installPwaBtnMain" style="
-      background: white;
-      color: #667eea;
-      border: none;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-weight: bold;
-      cursor: pointer;
-    ">
-      Install
-    </button>
-  </div>
-</div>
-
-<!-- Add to your Utilities card in the bottom panel -->
-<div class="bottomCard">
-  <b>PWA & Android</b>
-  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="checkPwaBtn">Check PWA Status</button>
-    <button id="installBtn" style="display:none;">Install as App</button>
-  </div>
-  <div class="status" id="pwaStatus">PWA: Not installed</div>
-  <div class="small">
-    <strong>Android users:</strong> Install for background notifications.<br>
-    Tap "Install as App" when prompted.
-  </div>
-</div>
-
-
+{
+  "name": "WebRTC Communicator",
+  "short_name": "WebRTC",
+  "start_url": "/easosunov/webrtc.html?v=1",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4CAF50",
+  "scope": "/easosunov/",
+  "description": "Video/Audio Communication",
+  "categories": ["communication"],
+  "orientation": "portrait",
+  "lang": "en-US",
   
-<!-- ==================== INCOMING CALL MODAL ==================== -->
-<div id="incomingOverlay">
-  <div id="incomingCard">
-    <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
-    <div id="incomingText" class="status">Someone is calling…</div>
-    <div class="small">If you don't hear ringing, tap once anywhere to enable sound.</div>
-    <div class="incomingActions">
-      <button id="answerBtn">Answer</button>
-      <button id="declineBtn">Decline</button>
-    </div>
-  </div>
-</div>
-
-<!-- ==================== LOGIN OVERLAY ==================== -->
-<div id="loginOverlay">
-  <div id="loginCard">
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
-    <div class="small">Only approved users can access this communicator.</div>
-
-    <label class="small">Email</label>
-    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
-
-    <label class="small">Password</label>
-    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
-
-    <div id="loginRow">
-      <button id="loginBtn">Login</button>
-    </div>
-    <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
-  </div>
-</div>
-
-<!-- ==================== MAIN APPLICATION ==================== -->
-<div id="app" class="locked">
-
-  <!-- ==================== VIDEO PANEL ==================== -->
-  <div class="videos">
-    <!-- LEFT PANEL: Person A (You) -->
-    <div class="card">
-      <b>Person A (You)</b>
-      <video id="localVideo" autoplay muted playsinline></video>
-      <div class="small">Muted so you don't hear yourself.</div>
-      
-      <!-- Call note input moved to Person B panel -->
-      <!-- Hang up button moved to Person B panel -->
-      
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-    </div>
-
-    <!-- RIGHT PANEL: Person B (Other) -->
-    <div class="card">
-      <b>Person B (Other)</b>
-      <video id="remoteVideo" autoplay playsinline></video>
-      <div class="small">If audio doesn't play, click the video once.</div>
-      
-      <!-- Hang up button moved here -->
-      <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-        <button id="hangupBtn" disabled>Hang up</button>
-      </div>
-      
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-      
-      <!-- Call note input moved here (between callee name and Call button) -->
-      <div>
-        <div class="small">Message to send with call (optional)</div>
-        <input
-          id="callNoteInput"
-          placeholder="e.g. Let us talk at 3 pm"
-          maxlength="140"
-        />
-        <div class="small" style="color:#777">
-          This text will appear in the notification for Person B.
-        </div>
-      </div>
-      
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-      
-      <div class="small">All allowed users</div>
-      <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
-    </div>
-  </div>
-
-  <!-- ==================== BOTTOM CONTROL PANEL ==================== -->
-  <div class="bottomPanel">
-    <div class="bottomGrid">
-
-      <!-- STATUS / PUSH CARD -->
-      <div class="bottomCard">
-        <b>Status</b>
-        <div class="status" id="myNameStatus">Not set.</div>
-        <div class="status" id="pushStatus">Push: not enabled.</div>
-        <div class="status" id="dirCallStatus">Idle.</div>
-      </div>
-
-      <!-- VIDEO QUALITY CARD -->
-      <div class="bottomCard">
-        <b>Video quality</b>
-        <div class="small">Choose before Start (you can change during a call).</div>
-        <select id="videoQualitySelect" disabled>
-          <option value="low">Low (360p)</option>
-          <option value="medium" selected>Medium (720p)</option>
-          <option value="high">High (1080p)</option>
-        </select>
-        <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
-      </div>
-
-      <!-- PROFILE CARD -->
-      <div class="bottomCard">
-        <b>Your name</b>
-        <div class="small">Shown to other users.</div>
-        <input id="myNameInput" placeholder="e.g. Alex"/>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-          <button id="saveNameBtn" disabled>Save Name</button>
-        </div>
-      </div>
-
-      <!-- CALL / ROOM CARD -->
-      <div class="bottomCard">
-        <b>Call controls</b>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-          <button id="startBtn" disabled>Start</button>
-          <button id="createBtn" disabled>Create Room</button>
-          <button id="joinBtn" disabled>Join Room</button>
-        </div>
-        <div class="status" id="mediaStatus">Not started.</div>
-        <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-        <div class="small">Room ID</div>
-        <input id="roomId" placeholder="Room ID"/>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-          <button id="copyLinkBtn" disabled>Copy Invite</button>
-        </div>
-        <div class="status" id="callStatus">No room yet.</div>
-        <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
-      </div>
-
-      <!-- BACKGROUND NOTIFIER CARD -->
-      <div class="bottomCard">
-        <b>Background Notifier</b>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-          <button id="startBgBtn" disabled>Start Background Service</button>
-          <button id="stopBgBtn" disabled>Stop Background Service</button>
-        </div>
-        <div class="status" id="bgStatus">Status: Not connected</div>
-        <div class="small">
-          Runs in system tray to show notifications when browser is closed.<br>
-          <strong>Download installer:</strong><br>
-          <a href="https://github.com/easosunov/easosunov/releases/download/v1.0.0/webrtc-notifier-installer.zip" 
-             id="downloadBgLink"
-             target="_blank"
-             download="webrtc-notifier-installer.zip"
-             style="color:#1976d2; text-decoration:underline">
-            webrtc-notifier-installer.zip
-          </a>
-          <div class="small" style="color:#666; margin-top:4px; font-size:11px">
-            After downloading:<br>
-            1. Extract the ZIP file<br>
-            2. Run <code style="background:#f5f5f5; padding:2px 6px">webrtc-notifier-installer.exe</code><br>
-            3. Look for 📞 icon in system tray
-          </div>
-        </div>
-      </div>
-      
-      <!-- UTILITIES CARD -->
-      <div class="bottomCard">
-        <b>Utilities</b>
-        <div style="margin-top:8px">
-          <div class="small">Search users</div>
-          <input id="userSearchInput" placeholder="Search users…" />
-        </div>
-        <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-          <button id="testSoundBtn" disabled>Test Ring Sound</button>
-          <button id="resetPushBtn" disabled>Reset Push</button>
-          <button id="refreshUsersBtn" disabled>Refresh Users</button>
-        </div>
-        <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-        <button id="diagBtn">Diagnostics</button>
-        <div class="diagActions">
-          <button id="copyDiagBtn" disabled>Copy log</button>
-          <button id="clearDiagBtn" disabled>Clear log</button>
-        </div>
-        <pre id="diagBox"></pre>
-        <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
-      </div>
-
-    </div>
-  </div>
-
-</div>
-
-<!-- ==================== JAVASCRIPT MODULES ==================== -->
-<script type="module" src="modules.js"></script>
-<script type="module" src="main.js"></script>
-</body>
-</html>
+  "icons": [
+    {
+      "src": "icons/RTC192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/RTC512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
