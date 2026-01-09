@@ -129,11 +129,33 @@ select{
   }
 }
 
+/* Recent calls styling */
+.call-item {
+  padding: 6px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  border-left: 3px solid #ccc;
+  background: white;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.call-incoming { border-left-color: #4CAF50; }
+.call-outgoing { border-left-color: #2196F3; }
+.call-missed { border-left-color: #f44336; }
+.call-ended { border-left-color: #9E9E9E; }
+.call-accepted { border-left-color: #8BC34A; }
+.call-declined { border-left-color: #FF9800; }
+.call-ringing { border-left-color: #FFC107; }
+.call-item-time {
+  color: #666;
+  font-size: 10px;
+  margin-top: 2px;
+}
 </style>
 </head>
 
 <body>
-<h1>2-Person Video/Sound Communicator (WebRTC)</h1>
+<h1>Telefon WebRTC</h1>
 
 <div id="errorBox"></div>
 
@@ -182,6 +204,16 @@ select{
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don't hear yourself.</div>
 <!-- Hang up button and call note moved to Person B section -->
+     <!-- Recent calls list -->
+<div style="margin-top:10px;">
+  <div class="small" style="display:flex;justify-content:space-between;align-items:center;">
+    <b>Recent Calls (max 30)</b>
+    <button id="refreshCallsBtn" class="small" style="padding:4px 8px;font-size:11px;">Refresh</button>
+  </div>
+  <div id="callsList" style="margin-top:8px;max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:8px;font-size:12px;background:#f9f9f9;">
+    <div style="color:#777;text-align:center;">No calls yet</div>
+  </div>
+</div>
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
     </div>
 
@@ -459,6 +491,10 @@ const userSearchInput = document.getElementById("userSearchInput");
 const usersList = document.getElementById("usersList");
 const dirCallStatus = document.getElementById("dirCallStatus");
 
+/* Calls list UI */
+const callsList = document.getElementById("callsList");
+const refreshCallsBtn = document.getElementById("refreshCallsBtn");
+ 
 /* Push + sound + hangup */
 const pushStatus = document.getElementById("pushStatus");
 const testSoundBtn = document.getElementById("testSoundBtn");
@@ -1913,6 +1949,7 @@ if (snap.exists()) {
   stopAll();
   cleanupCallUI();
   setStatus(dirCallStatus, "Ended.");
+  try { await loadRecentCalls(); } catch {} // Refresh calls list
 }
 
 /* Answer / Decline buttons for incoming */
@@ -1950,6 +1987,7 @@ answerBtn.onclick = async ()=>{
     await joinRoom();
 
     try { await listenIncomingCalls(); } catch {}
+    try { await loadRecentCalls(); } catch {} // Refresh calls list
   }catch(e){
     showError(e);
   }
@@ -1975,6 +2013,7 @@ declineBtn.onclick = async ()=>{
 
     setStatus(dirCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
+    try { await loadRecentCalls(); } catch {} // Refresh calls list
   }catch(e){
     showError(e);
   }
@@ -2091,6 +2130,111 @@ async function loadAllAllowedUsers(){
   logDiag("Loaded users directory: " + users.length);
 }
 
+
+/* ================== RECENT CALLS LIST ================== */
+async function loadRecentCalls() {
+  if (!requireAuthOrPrompt()) return;
+  
+  try {
+    // Load calls where user is the recipient (incoming)
+    const q1 = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      orderBy("createdAt", "desc"),
+      limit(15)
+    );
+    
+    // Load calls where user is the caller (outgoing)
+    const q2 = query(
+      collection(db, "calls"),
+      where("fromUid", "==", myUid),
+      orderBy("createdAt", "desc"),
+      limit(15)
+    );
+    
+    const [snap1, snap2] = await Promise.all([
+      getDocs(q1),
+      getDocs(q2)
+    ]);
+    
+    // Combine and deduplicate calls
+    const callsMap = new Map();
+    
+    snap1.docs.forEach(doc => {
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+    });
+    
+    snap2.docs.forEach(doc => {
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+    });
+    
+    // Convert to array, sort by most recent, limit to 30
+    const allCalls = Array.from(callsMap.values())
+      .sort((a, b) => {
+        const aTime = a.createdAt?.toMillis?.() || 0;
+        const bTime = b.createdAt?.toMillis?.() || 0;
+        return bTime - aTime;
+      })
+      .slice(0, 30);
+    
+    renderCallsList(allCalls);
+    logDiag(`Loaded ${allCalls.length} recent calls`);
+    
+  } catch (error) {
+    logDiag("Error loading recent calls: " + error.message);
+    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error loading calls</div>`;
+  }
+}
+
+function renderCallsList(calls) {
+  if (!callsList || calls.length === 0) {
+    callsList.innerHTML = `<div style="color:#777;text-align:center;">No calls yet</div>`;
+    return;
+  }
+  
+  let html = '';
+  
+  calls.forEach(call => {
+    const isIncoming = call.toUid === myUid;
+    const isOutgoing = call.fromUid === myUid;
+    const status = call.status || 'unknown';
+    
+    // Determine CSS class based on status and direction
+    let statusClass = '';
+    if (status === 'ringing') statusClass = 'call-ringing';
+    else if (status === 'accepted') statusClass = 'call-accepted';
+    else if (status === 'declined') statusClass = 'call-declined';
+    else if (status === 'missed') statusClass = 'call-missed';
+    else if (status === 'ended') statusClass = 'call-ended';
+    else if (isIncoming) statusClass = 'call-incoming';
+    else if (isOutgoing) statusClass = 'call-outgoing';
+    
+    // Format timestamp
+    let timeText = '';
+    if (call.createdAt) {
+      const timeMs = call.createdAt.toMillis ? call.createdAt.toMillis() : Date.now();
+      const date = new Date(timeMs);
+      timeText = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    }
+    
+    // Determine display text
+    const otherName = isIncoming ? call.fromName || 'Unknown' : call.toName || 'Unknown';
+    const directionIcon = isIncoming ? '📥' : '📤';
+    const directionText = isIncoming ? 'From' : 'To';
+    
+    html += `
+      <div class="call-item ${statusClass}">
+        <div>${directionIcon} ${directionText}: <b>${otherName}</b></div>
+        <div>Status: ${status}${call.note ? ` - "${call.note}"` : ''}</div>
+        <div class="call-item-time">${timeText}</div>
+      </div>
+    `;
+  });
+  
+  callsList.innerHTML = html;
+}
+
+ 
 async function startCallToUid(toUid, toName=""){
   logDiag("startCallToUid(): ENTER toUid=" + toUid);
 
@@ -2161,6 +2305,8 @@ await sendIncomingCallNotification(messagePayload);
   note: note,             // the optional note/message
   roomId: created.roomId, // the unique room ID
 });
+   // Refresh calls list to show the new outgoing call
+  try { await loadRecentCalls(); } catch {};
 
  // NEW: Function to send incoming call push notification
 async function sendIncomingCallNotification(message) {
@@ -2493,6 +2639,11 @@ myNameInput.addEventListener("input", ()=>{
 });
 userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
+
+/* Calls list button */
+refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
+
+ 
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
@@ -2547,7 +2698,7 @@ onAuthStateChanged(auth, async (user)=>{
     await catchUpMissedCallNotification();
     try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
     try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
-
+    try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
     // Process any pending notifications after auth
     await processPendingNotifications();
 
