@@ -524,7 +524,7 @@ appRoot.classList.add("locked");
 // Check if we should redirect to the primary tab
 // Only do this check once when the page loads
 let hasCheckedRedirect = false;
-if (!hasCheckedRedirect && primaryTabUrl && primaryTabUrl !== window.location.href && hasLock) {
+if (!hasCheckedRedirect && primaryTabUrl && primaryTabUrl !== window.location.href) {
   hasCheckedRedirect = true;
   // We're a duplicate tab - redirect to the primary tab
   window.location.href = primaryTabUrl;
@@ -908,10 +908,6 @@ function disableAppImmediately() {
   
   logDiag("IMMEDIATE DISABLE: Another instance detected");
   
-  // Clear the redirect flag to prevent loops
-  localStorage.removeItem('webrtc_primary_tab_url');
-
- 
   // Disable UI
   if (appRoot) {
     appRoot.classList.add('locked');
@@ -924,25 +920,140 @@ function disableAppImmediately() {
     loginOverlay.style.display = 'none';
   }
   
-  // Instead of redirecting, just close the duplicate tab
-  try {
-    if (hasBroadcastChannel) {
-      const focusChannel = new BroadcastChannel("webrtc_focus_request");
-      focusChannel.postMessage({ 
-        type: "FOCUS_REQUEST", 
-        fromTab: tabId
-      });
+  // Create blocking overlay
+  const blocker = document.createElement('div');
+  blocker.id = 'instanceBlocker';
+  blocker.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.95);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    text-align: center;
+    padding: 20px;
+    font-family: system-ui;
+    cursor: not-allowed;
+  `;
+  
+  blocker.innerHTML = `
+    <div style="max-width: 500px; background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%); padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.7); border: 1px solid #444;">
+      <div style="font-size: 48px; margin-bottom: 15px;">⚠️</div>
+      <h2 style="color: #ff9e9e; margin-top: 0; font-size: 24px;">WebRTC App Already Running</h2>
+      <p style="font-size: 16px; line-height: 1.5; color: #e0e0e0; margin: 15px 0;">
+        This WebRTC app is already open in another browser tab.
+      </p>
+      <p style="font-size: 14px; color: #aaa; margin: 15px 0; line-height: 1.4;">
+        <strong>Only one instance is allowed at a time</strong> to prevent conflicts with audio/video devices and WebRTC connections.
+      </p>
+      <div style="background: rgba(255, 100, 100, 0.1); border-left: 4px solid #ff6b6b; padding: 12px; margin: 20px 0; border-radius: 0 8px 8px 0; text-align: left;">
+        <div style="font-size: 14px; color: #ff9e9e;">What to do:</div>
+        <div style="font-size: 13px; color: #ccc; margin-top: 5px;">
+          1. Return to the existing tab<br>
+          2. Or close the other tab first<br>
+          3. Then reload this page
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; justify-content: center; margin-top: 25px; flex-wrap: wrap;">
+        <button id="goBackBtn" style="padding: 12px 24px; background: #4a5568; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; flex: 1; min-width: 140px; transition: background 0.2s;">
+          ← Go Back
+        </button>
+        <button id="closePageBtn" style="padding: 12px 24px; background: #ff6b6b; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; flex: 1; min-width: 140px; font-weight: bold; transition: background 0.2s;">
+          Close This Page
+        </button>
+      </div>
+      <div style="margin-top: 20px;">
+        <button id="reloadBtn" style="padding: 10px 20px; background: transparent; color: #aaa; border: 1px solid #555; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s;">
+          Reload to Check Again
+        </button>
+      </div>
+      <p style="font-size: 11px; color: #666; margin-top: 20px; font-family: monospace;">
+        Tab ID: ${tabId.substring(0, 12)}...
+      </p>
+    </div>
+  `;
+  
+  document.body.appendChild(blocker);
+  
+  // Add button hover effects
+  const buttons = blocker.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff5252';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#5a6573';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.color = '#ddd';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff6b6b';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#4a5568';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'transparent';
+        btn.style.color = '#aaa';
+      }
+    });
+  });
+  
+  // Add button handlers
+  document.getElementById('goBackBtn')?.addEventListener('click', () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // If no history, redirect to a blank page or previous page
+      window.location.href = 'about:blank';
     }
+  });
+  
+  document.getElementById('closePageBtn')?.addEventListener('click', () => {
+    // Try multiple methods to close or navigate away
+    try {
+      // Method 1: Try to close (works for popup windows)
+      if (window.opener || window.history.length <= 1) {
+        window.close();
+      } else {
+        // Method 2: For regular tabs, navigate to blank page
+        window.location.href = 'about:blank';
+        // Method 3: Try to close after a delay
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+      }
+    } catch (e) {
+      // Method 4: If close fails, navigate to previous page or blank
+      if (window.history.length > 1) {
+        window.history.go(-1);
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    // First clear the lock so we can try to acquire it again
+    try {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    } catch (e) {}
     
-    // Close this tab/window
+    // Remove blocker and reload
+    blocker.remove();
+    isDisabled = false;
     setTimeout(() => {
-      window.close();
-    }, 100);
-    
-  } catch (e) {
-    // If we can't close, redirect to about:blank
-    window.location.href = "about:blank";
-  }
+      window.location.reload();
+    }, 300);
+  });
   
   // Add button hover effects
   const buttons = blocker.querySelectorAll('button');
