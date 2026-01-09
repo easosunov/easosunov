@@ -2153,18 +2153,32 @@ async function loadRecentCalls() {
       getDocs(q2)
     ]);
     
+    // DEBUG: Log what we found
+    logDiag(`DEBUG: Found ${snap1.docs.length} incoming calls, ${snap2.docs.length} outgoing calls`);
+    
     // Combine with deduplication using a Map
     const callsMap = new Map();
     
     // Process incoming calls
     snap1.docs.forEach(doc => {
-      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      const data = doc.data();
+      callsMap.set(doc.id, { id: doc.id, ...data });
+      // DEBUG: Log each incoming call
+      logDiag(`DEBUG: Incoming call ${doc.id} - from: ${data.fromName}, status: ${data.status}, time: ${data.createdAt?.toMillis?.() || 'unknown'}`);
     });
     
-    // Process outgoing calls (will overwrite duplicates with same ID)
+    // Process outgoing calls
     snap2.docs.forEach(doc => {
-      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      const data = doc.data();
+      if (callsMap.has(doc.id)) {
+        logDiag(`DEBUG: Duplicate ID found: ${doc.id} (already in map)`);
+      }
+      callsMap.set(doc.id, { id: doc.id, ...data });
+      // DEBUG: Log each outgoing call
+      logDiag(`DEBUG: Outgoing call ${doc.id} - to: ${data.toName}, status: ${data.status}, time: ${data.createdAt?.toMillis?.() || 'unknown'}`);
     });
+    
+    logDiag(`DEBUG: Map size after deduplication: ${callsMap.size}`);
     
     // Convert to array, sort by timestamp (most recent first), limit to 30
     const calls = Array.from(callsMap.values())
@@ -2174,6 +2188,12 @@ async function loadRecentCalls() {
         return bTime - aTime; // Descending order
       })
       .slice(0, 30);
+    
+    // DEBUG: Log final list
+    logDiag(`DEBUG: Final calls list has ${calls.length} items`);
+    calls.forEach((call, index) => {
+      logDiag(`DEBUG: [${index}] ${call.id} - ${call.fromName} to ${call.toName} - ${call.status}`);
+    });
     
     renderCallsList(calls);
     logDiag(`Loaded ${calls.length} recent calls (deduplicated)`);
