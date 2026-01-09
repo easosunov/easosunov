@@ -2136,20 +2136,20 @@ async function loadRecentCalls() {
   if (!requireAuthOrPrompt()) return;
   
   try {
-    // Load calls where user is the recipient (incoming)
+    // Simple query without orderBy to avoid index requirement
+    // Get all calls where user is either recipient OR caller
+    const allCalls = [];
+    
+    // Get incoming calls
     const q1 = query(
       collection(db, "calls"),
-      where("toUid", "==", myUid),
-      orderBy("createdAt", "desc"),
-      limit(15)
+      where("toUid", "==", myUid)
     );
     
-    // Load calls where user is the caller (outgoing)
+    // Get outgoing calls  
     const q2 = query(
       collection(db, "calls"),
-      where("fromUid", "==", myUid),
-      orderBy("createdAt", "desc"),
-      limit(15)
+      where("fromUid", "==", myUid)
     );
     
     const [snap1, snap2] = await Promise.all([
@@ -2157,32 +2157,30 @@ async function loadRecentCalls() {
       getDocs(q2)
     ]);
     
-    // Combine and deduplicate calls
-    const callsMap = new Map();
-    
+    // Combine all calls
     snap1.docs.forEach(doc => {
-      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      allCalls.push({ id: doc.id, ...doc.data() });
     });
     
     snap2.docs.forEach(doc => {
-      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      allCalls.push({ id: doc.id, ...doc.data() });
     });
     
-    // Convert to array, sort by most recent, limit to 30
-    const allCalls = Array.from(callsMap.values())
+    // Sort manually by timestamp (most recent first) and limit to 30
+    const sortedCalls = allCalls
       .sort((a, b) => {
-        const aTime = a.createdAt?.toMillis?.() || 0;
-        const bTime = b.createdAt?.toMillis?.() || 0;
+        const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0;
+        const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0;
         return bTime - aTime;
       })
       .slice(0, 30);
     
-    renderCallsList(allCalls);
-    logDiag(`Loaded ${allCalls.length} recent calls`);
+    renderCallsList(sortedCalls);
+    logDiag(`Loaded ${sortedCalls.length} recent calls from ${allCalls.length} total`);
     
   } catch (error) {
     logDiag("Error loading recent calls: " + error.message);
-    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error loading calls</div>`;
+    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error loading calls: ${error.message}</div>`;
   }
 }
 
