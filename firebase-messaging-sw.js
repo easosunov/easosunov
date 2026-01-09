@@ -1,4 +1,4 @@
-/* firebase-messaging-sw.js - Android Ringtone Version */
+/* firebase-messaging-sw.js - Android Background Fix */
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
@@ -16,340 +16,343 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 const firestore = firebase.firestore();
 
-// Android detection
+// Android detection and state
 const isAndroid = /Android/.test(navigator.userAgent);
-const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
-
-// Audio context for playing ringtone (limited in Service Worker)
-let audioContext = null;
-let ringtoneSource = null;
-let ringtoneTimer = null;
-let ringtoneTimeout = null;
-const RINGTONE_DURATION = 60000; // Ring for 60 seconds
-
-// Current user state
 let currentUid = null;
+let notificationCheckInterval = null;
+
+// --- Service Worker Registration Check ---
+self.addEventListener('install', (event) => {
+  console.log('[SW] Installing service worker for Android background');
+  
+  // Force immediate activation
+  self.skipWaiting();
+  
+  // Cache critical resources
+  event.waitUntil(
+    caches.open('webrtc-pwa-v2').then(cache => {
+      return cache.addAll([
+        '/easosunov/webrtc.html',
+        '/easosunov/icons/RTC192.png',
+        '/easosunov/icons/RTC512.png',
+        '/easosunov/manifest.json',
+        '/easosunov/firebase-messaging-sw.js'
+      ]);
+    })
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  console.log('[SW] Activating service worker');
+  
+  event.waitUntil(
+    Promise.all([
+      // Take control of all clients immediately
+      self.clients.claim(),
+      
+      // Clean up old caches
+      caches.keys().then(cacheNames => {
+        return Promise.all(
+          cacheNames.map(cacheName => {
+            if (cacheName !== 'webrtc-pwa-v2') {
+              console.log('[SW] Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }),
+      
+      // Start background sync if supported
+      ('periodicSync' in self.registration) ? 
+        self.registration.periodicSync.register('check-calls', {
+          minInterval: 24 * 60 * 60 * 1000 // 24 hours
+        }).then(() => {
+          console.log('[SW] Periodic sync registered');
+        }).catch(console.error) : 
+        Promise.resolve()
+    ])
+  );
+  
+  // Start checking for incoming calls in background
+  startBackgroundCallCheck();
+});
+
+// --- Background call checking (for when PWA is closed) ---
+function startBackgroundCallCheck() {
+  if (notificationCheckInterval) {
+    clearInterval(notificationCheckInterval);
+  }
+  
+  // Check every 5 minutes for new calls
+  notificationCheckInterval = setInterval(() => {
+    if (currentUid) {
+      checkForMissedCalls(currentUid).catch(console.error);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+  
+  console.log('[SW] Background call checker started');
+}
+
+async function checkForMissedCalls(uid) {
+  try {
+    console.log('[SW] Background check for UID:', uid);
+    
+    // Query Firestore for recent calls
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    
+    const callsSnapshot = await firestore
+      .collection('calls')
+      .where('toUid', '==', uid)
+      .where('status', '==', 'ringing')
+      .where('createdAt', '>', oneHourAgo)
+      .limit(5)
+      .get();
+    
+    if (!callsSnapshot.empty) {
+      console.log(`[SW] Found ${callsSnapshot.size} ringing calls in background`);
+      
+      callsSnapshot.forEach(doc => {
+        const callData = doc.data();
+        showCallNotification({
+          callId: doc.id,
+          toUid: uid,
+          roomId: callData.roomId,
+          fromName: callData.fromName || 'Unknown',
+          note: callData.note || '',
+          sentAtMs: callData.createdAt?.toMillis?.() || Date.now()
+        }).catch(console.error);
+      });
+    }
+  } catch (error) {
+    console.error('[SW] Background check error:', error);
+  }
+}
 
 // --- Handle messages from web page ---
-self.addEventListener('message', (event) => {
+self.addEventListener('message', async (event) => {
   const data = event.data || {};
   
   if (data.type === 'SET_UID') {
     currentUid = data.uid;
-    console.log('[SW] UID set:', currentUid);
+    console.log('[SW] UID set for background:', currentUid);
+    
+    // Store UID in IndexedDB for persistence
+    await storeUidInIndexedDB(currentUid);
+    
+    // Send acknowledgment
+    event.ports?.[0]?.postMessage({ 
+      type: 'UID_ACK', 
+      uid: currentUid,
+      timestamp: Date.now() 
+    });
   }
   
-  if (data.type === 'STOP_RINGTONE') {
-    stopRingtone();
+  if (data.type === 'GET_UID') {
+    // Return stored UID
+    const storedUid = await getUidFromIndexedDB();
+    event.ports?.[0]?.postMessage({
+      type: 'UID_RESPONSE',
+      uid: storedUid
+    });
+  }
+  
+  if (data.type === 'TEST_NOTIFICATION') {
+    // Test notification from web page
+    showCallNotification({
+      callId: 'test-' + Date.now(),
+      toUid: currentUid,
+      roomId: 'test-room',
+      fromName: 'Test Caller',
+      note: 'This is a test notification',
+      sentAtMs: Date.now()
+    }).then(() => {
+      event.ports?.[0]?.postMessage({ type: 'TEST_SUCCESS' });
+    }).catch(error => {
+      event.ports?.[0]?.postMessage({ type: 'TEST_ERROR', error: error.message });
+    });
   }
 });
 
-// --- Audio functions for ringtone ---
-async function playRingtone() {
+// --- IndexedDB for UID persistence ---
+async function storeUidInIndexedDB(uid) {
   try {
-    console.log('[SW] Attempting to play ringtone...');
-    
-    // Stop any existing ringtone first
-    stopRingtone();
-    
-    // Note: Service Workers have limited audio capabilities
-    // We'll try to play a simple tone as a fallback
-    
-    // Create a simple beep pattern (beep every 2 seconds)
-    let beepCount = 0;
-    const maxBeeps = Math.floor(RINGTONE_DURATION / 2000);
-    
-    ringtoneTimer = setInterval(() => {
-      // Create a simple notification to trigger sound
-      // This is a workaround since Service Workers can't play audio directly
-      self.registration.showNotification('📞 Ringing...', {
-        body: 'Incoming call',
-        tag: 'ringtone-beep-' + Date.now(),
-        silent: false,
-        requireInteraction: false,
-        vibrate: [200, 100, 200],
-        // Close immediately to not show visually
-      }).then(notification => {
-        // Close immediately - we just want the sound
-        setTimeout(() => notification.close(), 100);
-      });
-      
-      beepCount++;
-      if (beepCount >= maxBeeps) {
-        stopRingtone();
-      }
-    }, 2000);
-    
-    console.log('[SW] Ringtone pattern started');
-    
-    // Auto-stop after duration
-    ringtoneTimeout = setTimeout(() => {
-      stopRingtone();
-    }, RINGTONE_DURATION);
-    
+    const db = await openIndexedDB();
+    const tx = db.transaction('sw_storage', 'readwrite');
+    const store = tx.objectStore('sw_storage');
+    await store.put({ key: 'current_uid', value: uid, timestamp: Date.now() });
+    await tx.complete;
+    console.log('[SW] UID stored in IndexedDB');
   } catch (error) {
-    console.error('[SW] Error playing ringtone:', error);
+    console.error('[SW] Error storing UID:', error);
   }
 }
 
-function stopRingtone() {
-  if (ringtoneTimer) {
-    clearInterval(ringtoneTimer);
-    ringtoneTimer = null;
-  }
-  
-  if (ringtoneTimeout) {
-    clearTimeout(ringtoneTimeout);
-    ringtoneTimeout = null;
-  }
-  
-  console.log('[SW] Ringtone stopped');
-}
-
-
-// --- Android ringtone via separate page ---
-async function playAndroidRingtone(data) {
+async function getUidFromIndexedDB() {
   try {
-    console.log('[SW] Opening ringtone page for Android...');
-    
-    const url = `/easosunov/ringtone.html?action=play&duration=60000&callId=${data.callId}`;
-    
-    // Try to open the ringtone page
-    const clients = await self.clients.matchAll();
-    let existingClient = null;
-    
-    // Check if ringtone page is already open
-    for (const client of clients) {
-      if (client.url.includes('ringtone.html')) {
-        existingClient = client;
-        break;
-      }
-    }
-    
-    if (existingClient) {
-      // Focus existing ringtone page
-      await existingClient.focus();
-      existingClient.postMessage({ 
-        type: 'PLAY_RINGTONE',
-        duration: 60000,
-        callId: data.callId 
-      });
-    } else {
-      // Open new ringtone page
-      const newClient = await self.clients.openWindow(url);
-      
-      if (!newClient) {
-        console.error('[SW] Could not open ringtone page - popup blocked?');
-        return;
-      }
-      
-      // Send stop signal when call is answered/declined (handled elsewhere)
-      ringtoneTimeout = setTimeout(() => {
-        if (newClient) {
-          newClient.postMessage({ type: 'STOP_RINGTONE' });
-        }
-      }, 60000);
-    }
-    
+    const db = await openIndexedDB();
+    const tx = db.transaction('sw_storage', 'readonly');
+    const store = tx.objectStore('sw_storage');
+    const result = await store.get('current_uid');
+    await tx.complete;
+    return result?.value || null;
   } catch (error) {
-    console.error('[SW] Error opening ringtone page:', error);
-    // Fall back to regular ringtone method
-    playRingtone();
+    console.error('[SW] Error getting UID:', error);
+    return null;
   }
 }
 
-// --- Create Android notification with sound priority ---
-function createAndroidNotification(title, body, data) {
-  // For Android, we need to create a high-priority notification
-  // that triggers the default ringtone
-  
-  const notificationData = {
-    callId: data.callId,
-    toUid: data.toUid,
-    roomId: data.roomId,
-    fromName: data.fromName,
-    note: data.note,
-    sentAtMs: data.sentAtMs,
-    source: 'android_ringtone',
-    launchUrl: data.launchUrl
-  };
-  
-  return {
-    title: title,
-    body: body,
-    icon: '/easosunov/icons/RTC192.png',
-    badge: '/easosunov/icons/RTC96.png',
-    tag: `call-${data.callId}`,
-    renotify: true,
-    requireInteraction: true, // Critical for Android to keep showing
-    silent: false, // MUST be false for sound
-    timestamp: Date.now(),
-    data: notificationData,
-    actions: [
-      {
-        action: 'answer',
-        title: '📞 Answer',
-        icon: '/easosunov/icons/answer.png'
-      },
-      {
-        action: 'decline',
-        title: '❌ Decline',
-        icon: '/easosunov/icons/decline.png'
+function openIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('sw_storage_db', 1);
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('sw_storage')) {
+        db.createObjectStore('sw_storage', { keyPath: 'key' });
       }
-    ],
-    // Android-specific options
-    vibrate: [1000, 500, 1000, 500, 2000, 500, 1000], // Long distinctive pattern
-    // Add sound configuration
-    sound: 'default', // Use default notification sound
-    // Priority settings for Android
-    priority: 2, // High priority (Android)
-    // Android notification channel settings
-    android: {
-      channelId: 'incoming_calls_channel',
-      priority: 'high',
-      visibility: 'public',
-      sound: 'default',
-      vibrate: 'default',
-      lights: ['#4CAF50', 1000, 1000],
-      // Make it sticky/ongoing
-      ongoing: true,
-      autoCancel: false
-    }
-  };
+    };
+    
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
 }
 
-// --- Handle FCM background messages ---
+// --- Handle FCM background messages (CRITICAL FOR ANDROID) ---
 messaging.onBackgroundMessage(async (payload) => {
-  console.log('[SW] Received FCM background message:', payload);
+  console.log('[SW] FCM background message received (app closed):', payload);
   
-  try {
-    const data = payload?.data || {};
-    
-    if (data.callId) {
-      await showCallNotification(data);
-      
-      // Start ringtone for Android
-      if (isAndroid) {
-        await playRingtone();
-      }
+  // IMPORTANT: Show notification immediately
+  const data = payload?.data || {};
+  
+  if (data.callId) {
+    // Get UID from IndexedDB if not in memory
+    if (!currentUid) {
+      currentUid = await getUidFromIndexedDB();
     }
-  } catch (error) {
-    console.error('[SW] Error in onBackgroundMessage:', error);
+    
+    // Check if this notification is for current user
+    if (currentUid && data.toUid === currentUid) {
+      await showCallNotification(data);
+    } else if (!data.toUid) {
+      // If no toUid in data, show anyway (might be for current user)
+      await showCallNotification(data);
+    }
   }
+});
+
+// --- Handle push events ---
+self.addEventListener("push", (event) => {
+  console.log('[SW] Push event received');
+  
+  // Parse push data
+  let payload;
+  try {
+    payload = event.data?.json();
+  } catch (e) {
+    try {
+      payload = JSON.parse(event.data?.text() || '{}');
+    } catch (e2) {
+      console.error('[SW] Failed to parse push data');
+      payload = {};
+    }
+  }
+  
+  const data = payload?.data || {};
+  
+  // Show notification
+  event.waitUntil(
+    (async () => {
+      if (data.callId) {
+        await showCallNotification(data);
+      }
+    })()
+  );
 });
 
 // --- Show call notification ---
 async function showCallNotification(data) {
-  if (!data.callId) return;
-  
-  const callId = String(data.callId);
-  const fromName = String(data.fromName || "Unknown");
-  const note = String(data.note || "").trim();
-  const roomId = String(data.roomId || "");
-  
-  // Create notification content
-  const title = "📞 Incoming Call";
-  let body = `From: ${fromName}`;
-  if (note) body += ` - ${note}`;
-  
-  // Prepare notification data
-  const notificationData = {
-    callId,
-    toUid: data.toUid || currentUid,
-    roomId,
-    fromName,
-    note,
-    sentAtMs: data.sentAtMs || Date.now(),
-    source: 'fcm_push',
-    launchUrl: `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}&fromName=${encodeURIComponent(fromName)}&note=${encodeURIComponent(note)}`
-  };
-  
-  // Create notification options based on platform
-  let notificationOptions;
-  
-  if (isAndroid) {
-    notificationOptions = createAndroidNotification(title, body, notificationData);
-  } else if (isIOS) {
-    // iOS specific options
-    notificationOptions = {
-      title: title,
-      body: body,
+  try {
+    const callId = String(data.callId || 'unknown');
+    const fromName = String(data.fromName || "Unknown");
+    const note = String(data.note || "").trim();
+    const roomId = String(data.roomId || "");
+    
+    const title = "📞 Incoming Call";
+    let body = `From: ${fromName}`;
+    if (note) body += ` - ${note}`;
+    
+    // Notification data
+    const notificationData = {
+      callId,
+      toUid: data.toUid || currentUid,
+      roomId,
+      fromName,
+      note,
+      sentAtMs: data.sentAtMs || Date.now(),
+      source: 'service_worker',
+      launchUrl: `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}&fromName=${encodeURIComponent(fromName)}&note=${encodeURIComponent(note)}&ts=${Date.now()}`
+    };
+    
+    // Create notification
+    const notificationOptions = {
+      body,
       icon: '/easosunov/icons/RTC192.png',
       badge: '/easosunov/icons/RTC96.png',
       tag: `call-${callId}`,
       renotify: true,
-      requireInteraction: true,
-      silent: false,
+      requireInteraction: true, // Don't auto-dismiss
+      silent: false, // Ensure sound
       timestamp: Date.now(),
       data: notificationData,
       actions: [
         {
           action: 'answer',
-          title: 'Answer',
+          title: '📞 Answer',
           icon: '/easosunov/icons/answer.png'
         },
         {
           action: 'decline',
-          title: 'Decline',
+          title: '❌ Decline',
           icon: '/easosunov/icons/decline.png'
         }
       ],
-      sound: 'default'
+      vibrate: [1000, 500, 1000, 500, 2000]
     };
-  } else {
-    // Desktop/other platforms
-    notificationOptions = {
-      title: title,
-      body: body,
-      icon: '/easosunov/icons/RTC192.png',
-      badge: '/easosunov/icons/RTC96.png',
-      tag: `call-${callId}`,
-      renotify: true,
-      requireInteraction: true,
-      silent: false,
-      timestamp: Date.now(),
-      data: notificationData,
-      actions: [
-        {
-          action: 'answer',
-          title: 'Answer',
-          icon: '/easosunov/icons/answer.png'
-        },
-        {
-          action: 'decline',
-          title: 'Decline',
-          icon: '/easosunov/icons/decline.png'
-        }
-      ]
-    };
-  }
-  
-  try {
-    // Close any existing notifications with same tag
-    const existing = await self.registration.getNotifications({ 
-      tag: notificationOptions.tag 
-    });
-    for (const n of existing) n.close();
     
-    // Show the notification
-    await self.registration.showNotification(title, notificationOptions);
-    console.log('[SW] Notification shown for call:', callId);
-    
-    // For Android, start periodic re-notification to keep sound playing
+    // Android-specific enhancements
     if (isAndroid) {
-      // Re-show notification every 15 seconds to keep it fresh and playing sound
-      const renotificationInterval = setInterval(async () => {
-        try {
-          await self.registration.showNotification(title + ' 📞', notificationOptions);
-        } catch (e) {
-          clearInterval(renotificationInterval);
-        }
-      }, 15000);
+      // Use Android-specific options
+      notificationOptions.data.android = {
+        channelId: 'incoming_calls',
+        priority: 'max',
+        visibility: 'public',
+        sound: 'default',
+        vibrate: 'default',
+        ongoing: true, // Persistent
+        autoCancel: false,
+        fullScreenIntent: true // Show on locked screen
+      };
       
-      // Stop after 60 seconds
-      setTimeout(() => {
-        clearInterval(renotificationInterval);
-      }, RINGTONE_DURATION);
+      // Also add to main data for compatibility
+      notificationOptions.data.priority = 'high';
+      notificationOptions.data.sound = 'default';
+    }
+    
+    // Show notification
+    await self.registration.showNotification(title, notificationOptions);
+    console.log('[SW] Notification shown (background):', callId);
+    
+    // Mark as delivered in Firestore if possible
+    try {
+      if (callId && callId !== 'unknown') {
+        await firestore.collection('calls').doc(callId).update({
+          deliveredAt: firebase.firestore.FieldValue.serverTimestamp(),
+          deliveredVia: 'service_worker_background',
+          deliveredAtMs: Date.now()
+        });
+      }
+    } catch (firestoreError) {
+      // Silent fail - normal if no permission
     }
     
   } catch (error) {
@@ -359,104 +362,93 @@ async function showCallNotification(data) {
 
 // --- Handle notification clicks ---
 self.addEventListener("notificationclick", (event) => {
-  console.log('[SW] Notification clicked:', event.notification?.data);
+  console.log('[SW] Notification clicked (background):', event.notification?.data);
   
   event.notification.close();
-  stopRingtone(); // Stop ringtone when notification is clicked
   
   const data = event.notification?.data || {};
   const action = event.action;
   
-  if (action === 'answer') {
-    handleAnswerAction(data);
-  } else if (action === 'decline') {
-    handleDeclineAction(data);
-  } else {
-    handleDefaultClick(data);
-  }
-});
-
-function handleAnswerAction(data) {
-  const url = buildUrlWithParams('/easosunov/webrtc.html', {
-    callId: data.callId,
-    roomId: data.roomId,
-    action: 'answer',
-    autoJoin: 'true'
-  });
-  
-  openOrFocusWindow(url);
-}
-
-function handleDeclineAction(data) {
-  if (data.callId) {
-    firestore.collection('calls').doc(data.callId).update({
-      status: 'declined',
-      declinedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      declinedVia: 'notification'
-    }).catch(console.error);
-  }
-}
-
-function handleDefaultClick(data) {
-  const url = buildUrlWithParams('/easosunov/webrtc.html', {
+  // Build URL based on action
+  let url = `/easosunov/webrtc.html`;
+  const params = {
     callId: data.callId,
     roomId: data.roomId,
     fromName: data.fromName,
     note: data.note
-  });
+  };
   
-  openOrFocusWindow(url);
-}
-
-function buildUrlWithParams(base, params) {
-  const url = new URL(base, self.location.origin);
-  Object.entries(params).forEach(([key, value]) => {
-    if (value) url.searchParams.set(key, value);
-  });
-  return url.toString();
-}
-
-async function openOrFocusWindow(url) {
-  const clients = await self.clients.matchAll({
-    type: 'window',
-    includeUncontrolled: true
-  });
-  
-  for (const client of clients) {
-    if (client.url.includes('/easosunov/')) {
-      await client.focus();
-      client.postMessage({
-        type: 'NAVIGATE_TO_CALL',
-        url: url,
-        timestamp: Date.now()
-      });
-      return;
+  if (action === 'answer') {
+    params.action = 'answer';
+    params.autoJoin = 'true';
+    
+    // Mark as answered
+    if (data.callId) {
+      firestore.collection('calls').doc(data.callId).update({
+        answeredVia: 'notification_background',
+        answeredAtMs: Date.now()
+      }).catch(console.error);
+    }
+  } else if (action === 'decline') {
+    params.action = 'decline';
+    
+    // Mark as declined
+    if (data.callId) {
+      firestore.collection('calls').doc(data.callId).update({
+        status: 'declined',
+        declinedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        declinedVia: 'notification_background'
+      }).catch(console.error);
     }
   }
   
-  await self.clients.openWindow(url);
-}
-
-// --- Service worker lifecycle ---
-self.addEventListener('install', (event) => {
-  console.log('[SW] Installing service worker');
-  self.skipWaiting();
+  // Build URL
+  const urlObj = new URL(url, self.location.origin);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value) urlObj.searchParams.set(key, value);
+  });
   
+  url = urlObj.toString();
+  
+  // Open or focus window
   event.waitUntil(
-    caches.open('webrtc-v1').then(cache => {
-      return cache.addAll([
-        '/easosunov/webrtc.html',
-        '/easosunov/icons/RTC192.png',
-        '/easosunov/icons/RTC512.png',
-        '/easosunov/manifest.json'
-      ]);
-    })
+    (async () => {
+      const clients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true
+      });
+      
+      // Look for existing window
+      for (const client of clients) {
+        if (client.url.includes('/easosunov/')) {
+          await client.focus();
+          client.postMessage({
+            type: 'NAVIGATE_TO_CALL',
+            url: url,
+            timestamp: Date.now()
+          });
+          return;
+        }
+      }
+      
+      // Open new window
+      await self.clients.openWindow(url);
+    })()
   );
 });
 
-self.addEventListener('activate', (event) => {
-  console.log('[SW] Activating service worker');
-  event.waitUntil(self.clients.claim());
+// --- Periodic background sync (if supported) ---
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'check-calls') {
+    console.log('[SW] Periodic sync triggered');
+    event.waitUntil(
+      (async () => {
+        if (currentUid) {
+          await checkForMissedCalls(currentUid);
+        }
+      })()
+    );
+  }
 });
 
-console.log('[SW] Android Ringtone Service Worker loaded');
+console.log('[SW] Android Background Service Worker loaded');
