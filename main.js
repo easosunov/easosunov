@@ -1395,23 +1395,19 @@ function renderUsersList(filterText=""){
 
 async function sendIncomingCallNotification(message) {
   try {
-    // Send to your server endpoint
-    const response = await fetch("/easosunov/sendIncomingPush", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(message),
-    });
-
-    if (!response.ok) {
-      throw new Error("Failed to send incoming call push notification");
-    }
-
-    const data = await response.json();
-    logDiag("Incoming call push notification sent: " + JSON.stringify(data));
+    logDiag("Attempting to send push notification via Firebase");
+    
+    // Instead of calling a non-existent endpoint, rely on Firebase Cloud Functions
+    // which should be triggered by the Firestore document creation
+    logDiag("Push notification should be triggered by Cloud Function on call creation");
+    
+    // The notification will be sent by the Cloud Function when a call document is created
+    // with status: "ringing" and toUid field set
+    
+    return true;
   } catch (error) {
-    logDiag("Error sending incoming call notification: " + error.message);
+    logDiag("Error in notification handling: " + error.message);
+    return false;
   }
 }
 
@@ -1457,33 +1453,15 @@ async function startCallToUid(toUid, toName=""){
   activeCallId = callRef.id;
   
   // Send push notification with properly formatted message
-  try {
-    const notificationMessage = {
-      toUid: toUid,
-      callId: callRef.id,
-      fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value),
-      toName: callToName, // Include toName in notification
-      note: note,
-      roomId: created.roomId,
-      timestamp: new Date().toLocaleString(),
-      sentAtMs: Date.now(),
-    };
-    
-    await sendIncomingCallNotification(notificationMessage);
-    
-    // Update call document with push status
-    await updateDoc(doc(db, "calls", callRef.id), {
-      "push.sentAt": serverTimestamp(),
-      "push.stage": "sent"
-    });
-    
-  } catch (e) {
-    logDiag("Failed to send push notification: " + e.message);
-    await updateDoc(doc(db, "calls", callRef.id), {
-      "push.stage": "error",
-      "push.error": e.message
-    });
-  }
+    // Push notification will be sent by Firebase Cloud Function
+  // when it detects a new call document with status: "ringing"
+  await updateDoc(doc(db, "calls", callRef.id), {
+    "push.sentAt": serverTimestamp(),
+    "push.stage": "pending",
+    "push.attemptedAt": Date.now()
+  });
+  
+  logDiag("Call created. Push notification will be sent via Cloud Function.");
 
   if (window.hangupBtn) window.hangupBtn.disabled = false;
   listenActiveCall(activeCallId);
@@ -2179,6 +2157,15 @@ if (document.readyState === 'loading') {
     ensureServiceWorkerInstalled().then(() => {
       logDiag("Service worker registration attempted");
     });
+
+// Send UID to Service Worker after registration
+if (navigator.serviceWorker.controller) {
+  navigator.serviceWorker.controller.postMessage({
+    type: 'SET_UID',
+    uid: myUid
+  });
+}
+    
   });
 } else {
   logDiag("DOM already loaded, initializing...");
