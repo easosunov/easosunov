@@ -802,6 +802,177 @@ if(authBC){
   };
 }
 
+/* ================== SINGLE PAGE INSTANCE LOCK ================== */
+const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
+const PAGE_INSTANCE_CHANNEL = "webrtc_page_instance_channel";
+
+// Create BroadcastChannel for page instance coordination
+const pageBC = ("BroadcastChannel" in window) ? 
+  new BroadcastChannel(PAGE_INSTANCE_CHANNEL) : null;
+
+// Generate unique tab ID
+const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+function acquirePageLock() {
+  try {
+    const current = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const now = Date.now();
+    
+    // If lock is held by another tab and is fresh (less than 3 seconds old)
+    if (current && current !== tabId) {
+      const [lockTabId, lockTime] = current.split('|');
+      const lockAge = now - parseInt(lockTime, 10);
+      
+      if (lockAge < 3000) { // 3 seconds grace period
+        logDiag(`Page lock held by tab ${lockTabId} (age: ${lockAge}ms)`);
+        return false;
+      }
+    }
+    
+    // Acquire or renew lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, `${tabId}|${now}`);
+    logDiag(`Page lock acquired by tab ${tabId}`);
+    return true;
+  } catch (e) {
+    logDiag("Page lock error: " + e.message);
+    return true; // Allow if localStorage fails
+  }
+}
+
+function renewPageLock() {
+  try {
+    localStorage.setItem(PAGE_INSTANCE_KEY, `${tabId}|${Date.now()}`);
+  } catch (e) {
+    // Ignore errors
+  }
+}
+
+function releasePageLock() {
+  try {
+    const current = localStorage.getItem(PAGE_INSTANCE_KEY);
+    if (current && current.startsWith(tabId)) {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      logDiag(`Page lock released by tab ${tabId}`);
+    }
+  } catch (e) {
+    // Ignore errors
+  }
+}
+
+// Listen for other tabs trying to acquire lock
+if (pageBC) {
+  pageBC.onmessage = (event) => {
+    const msg = event.data;
+    if (msg.type === 'lock_request') {
+      // Send back our lock status
+      pageBC.postMessage({
+        type: 'lock_response',
+        tabId: tabId,
+        hasLock: localStorage.getItem(PAGE_INSTANCE_KEY)?.startsWith(tabId) || false
+      });
+    } else if (msg.type === 'lock_response' && msg.tabId !== tabId && msg.hasLock) {
+      // Another tab has the lock
+      logDiag(`Another tab (${msg.tabId}) has page lock - this tab should close`);
+      // Show message to user
+      if (!document.hidden) {
+        alert("Another instance of this app is already open in this browser. Please use the existing tab.");
+        window.close(); // Try to close this tab
+      }
+    }
+  };
+}
+
+// Periodically renew lock while page is active
+let lockRenewalInterval = null;
+
+function startLockRenewal() {
+  if (lockRenewalInterval) clearInterval(lockRenewalInterval);
+  lockRenewalInterval = setInterval(() => {
+    renewPageLock();
+  }, 1000); // Renew every second
+}
+
+function stopLockRenewal() {
+  if (lockRenewalInterval) {
+    clearInterval(lockRenewalInterval);
+    lockRenewalInterval = null;
+  }
+}
+
+// Check and acquire lock on page load
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    if (!acquirePageLock()) {
+      // Another tab has the lock
+      if (pageBC) {
+        // Ask other tabs if they have the lock
+        pageBC.postMessage({ type: 'lock_request' });
+      }
+      
+      // Show warning and prevent further interaction
+      alert("Another instance of this app is already open in this browser. Please use the existing tab.");
+      
+      // Disable the app
+      if (appRoot) appRoot.classList.add('locked');
+      if (loginOverlay) loginOverlay.style.display = 'none';
+      
+      // Try to close this tab after a delay
+      setTimeout(() => {
+        window.close();
+      }, 2000);
+    } else {
+      // We have the lock, start renewal
+      startLockRenewal();
+    }
+  }, 500); // Small delay to ensure other tabs have initialized
+});
+
+ // Clean up on page unload
+window.addEventListener('beforeunload', () => {
+  stopLockRenewal();
+  releasePageLock();
+  
+  // Notify other tabs that we're releasing the lock
+  if (pageBC) {
+    pageBC.postMessage({ 
+      type: 'lock_released', 
+      tabId: tabId 
+    });
+  }
+});
+
+// Handle visibility change - release lock when page is hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    // Page is hidden, but keep lock for a bit
+    logDiag('Page hidden, keeping lock temporarily');
+  } else {
+    // Page is visible again, ensure we still have lock
+    if (!localStorage.getItem(PAGE_INSTANCE_KEY)?.startsWith(tabId)) {
+      logDiag('Page became visible but lost lock - another tab may be active');
+      if (acquirePageLock()) {
+        startLockRenewal();
+      }
+    }
+  }
+});
+
+// Also handle page freeze (when browser suspends tab)
+document.addEventListener('freeze', () => {
+  logDiag('Page frozen, releasing lock');
+  stopLockRenewal();
+  releasePageLock();
+});
+
+document.addEventListener('resume', () => {
+  logDiag('Page resumed, attempting to reacquire lock');
+  if (acquirePageLock()) {
+    startLockRenewal();
+  }
+});
+
+ 
+ 
 // Also listen via localStorage (works even if BroadcastChannel is unavailable)
 window.addEventListener("storage", (ev)=>{
   if(ev.key === DEVICE_OWNER_KEY && ev.newValue){
