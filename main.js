@@ -13,7 +13,7 @@ import {
 
 // ==================== GLOBAL DECLARATIONS ====================
 console.log("APP VERSION:", "2026-01-08-status-fix");
-
+const MISSED_CALL_TIMEOUT_MS = 60000;
 // ==================== NOTIFICATION HANDLING ====================
 let webPageShowedNotification = false;
 
