@@ -2157,15 +2157,19 @@ async function loadRecentCalls() {
       getDocs(q2)
     ]);
     
-    // Combine all calls
+    // Combine with deduplication
+    const callsMap = new Map();
+    
     snap1.docs.forEach(doc => {
-      allCalls.push({ id: doc.id, ...doc.data() });
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
     });
     
     snap2.docs.forEach(doc => {
-      allCalls.push({ id: doc.id, ...doc.data() });
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
     });
     
+    // Convert Map to array
+    const allCalls = Array.from(callsMap.values());    
     // Sort manually by timestamp (most recent first) and limit to 30
     const sortedCalls = allCalls
       .sort((a, b) => {
