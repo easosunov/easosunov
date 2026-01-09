@@ -619,6 +619,40 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+
+ /* UID allowlist */
+async function enforceAllowlist(user){
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
+
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
+
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
+    }
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
+    }
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
+  }
+}
+
+ 
 /* ================== BACKGROUND SERVICE ================== */
 // Test if background service is running
 async function checkBackgroundService() {
@@ -1141,6 +1175,7 @@ function releaseLock() {
 })();
 
 // Also add a pre-check before any significant action
+ /*
 const originalStartMedia = window.startMedia;
 if (originalStartMedia) {
   window.startMedia = function(...args) {
@@ -1151,7 +1186,9 @@ if (originalStartMedia) {
     }
     return originalStartMedia.apply(this, args);
   };
-}/* ================== AUTH GATE ================== */
+}
+ */
+ /* ================== AUTH GATE ================== */
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
   loginOverlay.style.display = "flex";
