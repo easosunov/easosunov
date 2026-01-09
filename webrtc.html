@@ -181,6 +181,17 @@ select{
       <b>Person A (You)</b>
       <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don't hear yourself.</div>
+<!-- Hang up button and call note moved to Person B section -->
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+    </div>
+
+    <!-- RIGHT: Person B video + directory list -->
+    <div class="card">
+      <b>Person B (Other)</b>
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="small">If audio doesn't play, click the video once.</div>
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+<!-- Hang up button and call note moved here -->
 <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
   <button id="hangupBtn" disabled>Hang up</button>
 
@@ -197,19 +208,7 @@ select{
   </div>
 </div>
 
-
-
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-    </div>
-
-    <!-- RIGHT: Person B video + directory list -->
-    <div class="card">
-      <b>Person B (Other)</b>
-      <video id="remoteVideo" autoplay playsinline></video>
-      <div class="small">If audio doesn't play, click the video once.</div>
-
-      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-
+<hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 <div class="small">All allowed users</div>
 <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
    
