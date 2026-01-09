@@ -1,6 +1,4 @@
 // ==================== IMPORT MODULES ====================
-console.log('=== WEBRTC APP STARTING ===');
-
 import { 
   initializeApp,
   getFirestore, doc, collection, addDoc, setDoc, getDoc, updateDoc,
@@ -12,8 +10,8 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-08-status-fix");
-const MISSED_CALL_TIMEOUT_MS = 60000;
+console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
+
 // ==================== NOTIFICATION HANDLING ====================
 let webPageShowedNotification = false;
 
@@ -60,32 +58,32 @@ async function ensureServiceWorkerInstalled() {
     return null;
   }
 
+  if (navigator.serviceWorker.controller) {
+    console.log("[SW] controller already active");
+  }
+
+  const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+  swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
+
   try {
-    const swUrl = "/easosunov/firebase-messaging-sw.js";
-    const registration = await navigator.serviceWorker.register(swUrl, {
+    swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
       scope: "/easosunov/",
-      updateViaCache: "none"
+      updateViaCache: "none",
     });
-    
     await navigator.serviceWorker.ready;
-    console.log("[SW] Registered:", registration.scope);
-    
-    // Send UID to service worker
-    if (myUid && registration.active) {
-      registration.active.postMessage({
-        type: 'SET_UID',
-        uid: myUid
-      });
-    }
-    
-    return registration;
+    console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
+    return swBootstrapReg;
   } catch (e) {
-    console.error("[SW] Register failed:", e);
+    console.error("[SW] bootstrap register failed:", e);
     return null;
   }
 }
 
+// RUN IT NOW (top-level)
+await ensureServiceWorkerInstalled();
+
 // ==================== CONFIGURATION ====================
+const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
 
 function cleanVapidKey(k){
@@ -93,170 +91,388 @@ function cleanVapidKey(k){
 }
 const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
 
+// ==================== DOM ELEMENT REFERENCES ====================
+const errorBox = document.getElementById("errorBox");
+
+const loginOverlay = document.getElementById("loginOverlay");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const loginStatus = document.getElementById("loginStatus");
+const emailInput = document.getElementById("emailInput");
+const passInput = document.getElementById("passInput");
+const appRoot = document.getElementById("app");
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+const startBtn = document.getElementById("startBtn");
+const createBtn= document.getElementById("createBtn");
+const joinBtn  = document.getElementById("joinBtn");
+const copyLinkBtn = document.getElementById("copyLinkBtn");
+const roomIdInput = document.getElementById("roomId");
+const mediaStatus = document.getElementById("mediaStatus");
+const callStatus  = document.getElementById("callStatus");
+
+const diagBtn = document.getElementById("diagBtn");
+const diagBox = document.getElementById("diagBox");
+const copyDiagBtn = document.getElementById("copyDiagBtn");
+const clearDiagBtn = document.getElementById("clearDiagBtn");
+
+const incomingOverlay = document.getElementById("incomingOverlay");
+const incomingText = document.getElementById("incomingText");
+const answerBtn = document.getElementById("answerBtn");
+const declineBtn = document.getElementById("declineBtn");
+
+const myNameInput = document.getElementById("myNameInput");
+const saveNameBtn = document.getElementById("saveNameBtn");
+const refreshUsersBtn = document.getElementById("refreshUsersBtn");
+const myNameStatus = document.getElementById("myNameStatus");
+const userSearchInput = document.getElementById("userSearchInput");
+const usersList = document.getElementById("usersList");
+const dirCallStatus = document.getElementById("dirCallStatus");
+
+const pushStatus = document.getElementById("pushStatus");
+const testSoundBtn = document.getElementById("testSoundBtn");
+const hangupBtn = document.getElementById("hangupBtn");
+const resetPushBtn = document.getElementById("resetPushBtn");
+const callNoteInput = document.getElementById("callNoteInput");
+
+const videoQualitySelect = document.getElementById("videoQualitySelect");
+const videoQualityStatus = document.getElementById("videoQualityStatus");
+
+const startBgBtn = document.getElementById('startBgBtn');
+const stopBgBtn = document.getElementById('stopBgBtn');
+const bgStatus = document.getElementById('bgStatus');
+const downloadBgLink = document.getElementById('downloadBgLink');
+
 // ==================== STATE VARIABLES ====================
 let isAuthed = false;
 let myUid = null;
-let myDisplayName = "";
-let allUsersCache = [];
-let localStream = null;
-let pc = null;
-let audioCtx = null;
-let ringOsc = null;
-let ringGain = null;
-let ringTimer = null;
-let ringbackTimer = null;
+let pendingIncomingCallWhileLoggedOut = null;
 
-// WebRTC states
-let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-let currentIncomingCall = null;
-let activeCallId = null;
-let lastDismissedIncomingCallId = null;
+const setStatus = (el,msg)=> el.textContent = msg;
 
-// Connection tracking
-let connectionEstablished = false;
-let currentCallType = null; // 'incoming' or 'outgoing'
+// ==================== BACKGROUND SERVICE FUNCTIONS ====================
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return { isRunning: false, uid: null };
+  }
+}
 
-// Firestore listeners
-let unsubRoomA = null, unsubCalleeA = null;
-let unsubRoomB = null, unsubCallerB = null;
-let unsubIncoming = null;
-let unsubCallDoc = null;
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    bgStatus.textContent = 'Connecting to background service...';
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = '✅ Background service active';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
 
-// Push notification states
-let messaging = null;
-let swReg = null;
-let lastPushUid = null;
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Background service stopped';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
 
-// ==================== ENHANCED LOGGING SYSTEM ====================
-const diagLog = [];
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        bgStatus.textContent = '✅ Background service active';
+        startBgBtn.disabled = true;
+        stopBgBtn.disabled = false;
+      } else {
+        bgStatus.textContent = 'Background service ready';
+        stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      bgStatus.textContent = 'Background app not detected';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// ==================== DIAGNOSTICS SYSTEM ====================
 let diagVisible = false;
+const diagLog = [];
 
 function logDiag(msg){
   const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
   diagLog.push(line);
   console.log(line);
-  
-  // Update diagnostics box if visible
-  if (diagVisible && window.diagBox) {
-    window.diagBox.textContent = diagLog.join("\n");
-    window.diagBox.scrollTop = window.diagBox.scrollHeight;
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
   }
-  
-  // Update button states
-  if (window.copyDiagBtn) window.copyDiagBtn.disabled = diagLog.length === 0;
-  if (window.clearDiagBtn) window.clearDiagBtn.disabled = diagLog.length === 0;
+  copyDiagBtn.disabled = diagLog.length === 0;
+  clearDiagBtn.disabled = diagLog.length === 0;
 }
 
-// ==================== DOM ELEMENT REFERENCES ====================
-function initializeDomElements() {
-  window.errorBox = document.getElementById("errorBox");
-  window.loginOverlay = document.getElementById("loginOverlay");
-  window.loginBtn = document.getElementById("loginBtn");
-  window.logoutBtn = document.getElementById("logoutBtn");
-  window.loginStatus = document.getElementById("loginStatus");
-  window.emailInput = document.getElementById("emailInput");
-  window.passInput = document.getElementById("passInput");
-  window.appRoot = document.getElementById("app");
-
-  window.localVideo = document.getElementById("localVideo");
-  window.remoteVideo = document.getElementById("remoteVideo");
-  window.startBtn = document.getElementById("startBtn");
-  window.createBtn = document.getElementById("createBtn");
-  window.joinBtn = document.getElementById("joinBtn");
-  window.copyLinkBtn = document.getElementById("copyLinkBtn");
-  window.roomIdInput = document.getElementById("roomId");
-  window.mediaStatus = document.getElementById("mediaStatus");
-  window.callStatus = document.getElementById("callStatus");
-  
-  window.diagBtn = document.getElementById("diagBtn");
-  window.diagBox = document.getElementById("diagBox");
-  window.copyDiagBtn = document.getElementById("copyDiagBtn");
-  window.clearDiagBtn = document.getElementById("clearDiagBtn");
-  
-  window.incomingOverlay = document.getElementById("incomingOverlay");
-  window.incomingText = document.getElementById("incomingText");
-  window.answerBtn = document.getElementById("answerBtn");
-  window.declineBtn = document.getElementById("declineBtn");
-  
-  window.myNameInput = document.getElementById("myNameInput");
-  window.saveNameBtn = document.getElementById("saveNameBtn");
-  window.refreshUsersBtn = document.getElementById("refreshUsersBtn");
-  window.myNameStatus = document.getElementById("myNameStatus");
-  window.userSearchInput = document.getElementById("userSearchInput");
-  window.usersList = document.getElementById("usersList");
-  window.dirCallStatus = document.getElementById("dirCallStatus");
-  
-  window.pushStatus = document.getElementById("pushStatus");
-  window.testSoundBtn = document.getElementById("testSoundBtn");
-  window.hangupBtn = document.getElementById("hangupBtn");
-  window.resetPushBtn = document.getElementById("resetPushBtn");
-  window.callNoteInput = document.getElementById("callNoteInput");
-  
-  window.videoQualitySelect = document.getElementById("videoQualitySelect");
-  window.videoQualityStatus = document.getElementById("videoQualityStatus");
-  
-  window.startBgBtn = document.getElementById('startBgBtn');
-  window.stopBgBtn = document.getElementById('stopBgBtn');
-  window.bgStatus = document.getElementById('bgStatus');
-  
-  setupEventListeners();
-  initializeDiagnostics();
-}
-
-// ==================== UTILITY FUNCTIONS ====================
-function setStatus(el, msg) {
-  if (el && el.textContent !== undefined) {
-    el.textContent = msg;
+diagBtn.onclick = () => {
+  diagVisible = !diagVisible;
+  diagBox.style.display = diagVisible ? "block" : "none";
+  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
   }
-}
+};
 
+clearDiagBtn.onclick = () => {
+  diagLog.length = 0;
+  if (diagVisible) diagBox.textContent = "";
+  copyDiagBtn.disabled = true;
+  clearDiagBtn.disabled = true;
+  logDiag("Diagnostics cleared.");
+};
+
+copyDiagBtn.onclick = async () => {
+  const text = diagLog.join("\n");
+  if (!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    logDiag("Copied diagnostics to clipboard.");
+  }catch{
+    window.prompt("Copy diagnostics:", text);
+  }
+};
+
+// ==================== ERROR HANDLING ====================
 function showError(e){
   const code = e?.code ? `\ncode: ${e.code}` : "";
   const msg  = e?.message ? `\nmessage: ${e.message}` : "";
-  const errorMsg = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
-  
-  if (window.errorBox) {
-    window.errorBox.style.display = "block";
-    window.errorBox.textContent = errorMsg;
-  }
-  
+  errorBox.style.display = "block";
+  errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
   logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
-  
-  // Also show in call status if available
-  if (window.callStatus) {
-    setStatus(window.callStatus, "Error: " + (e?.message || "Unknown error"));
-  }
 }
 
 function hideErrorBox(){
-  if (window.errorBox) {
-    window.errorBox.style.display = "none";
-    window.errorBox.textContent = "";
-  }
+  errorBox.style.display = "none";
+  errorBox.textContent = "";
 }
+
+window.addEventListener("error", (e)=> showError(e.error || e.message || e));
+window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
 // ==================== FIREBASE INITIALIZATION ====================
 const app = initializeApp({
-  apiKey: "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
-  authDomain: "easosunov-webrtc.firebaseapp.com",
-  projectId: "easosunov-webrtc",
-  storageBucket: "easosunov-webrtc.firebasestorage.app",
-  messagingSenderId: "100169991412",
-  appId: "1:100169991412:web:27ef6820f9a59add6b4aa1"
+  apiKey:"AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98",
+  authDomain:"easosunov-webrtc.firebaseapp.com",
+  projectId:"easosunov-webrtc",
+  storageBucket:"easosunov-webrtc.firebasestorage.app",
+  messagingSenderId:"100169991412",
+  appId:"1:100169991412:web:27ef6820f9a59add6b4aa1"
 });
-
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// ==================== AUTH PERSISTENCE ====================
-(async function initializeAuth() {
-  try {
-    await setPersistence(auth, inMemoryPersistence);
-    logDiag("Auth persistence set to inMemory");
-  } catch (error) {
-    logDiag(`Auth initialization error: ${error.message}`);
+// ==================== SINGLE USER PER COMPUTER ENFORCEMENT ====================
+const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
+const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
+
+const hasBroadcastChannel = ("BroadcastChannel" in window);
+const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
+
+function nowMs(){ return Date.now(); }
+
+function setDeviceOwner(uid){
+  try{
+    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
+    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
+  }catch{}
+}
+
+function clearDeviceOwner(){
+  try{
+    localStorage.removeItem(DEVICE_OWNER_KEY);
+    localStorage.removeItem(DEVICE_OWNER_AT);
+  }catch{}
+}
+
+function getDeviceOwner(){
+  try{
+    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
+  }catch{
+    return null;
+  }
+}
+
+async function forceSignOutBecauseDifferentUser(newUid){
+  const currentUid = auth.currentUser?.uid || null;
+  if (currentUid && newUid && currentUid !== newUid){
+    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
+    try{
+      stopAll();
+    }catch{}
+    try{
+      await signOut(auth);
+    }catch(e){
+      showError(e);
+    }
+  }
+}
+
+function broadcastNewOwner(uid){
+  if(authBC){
+    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
+  }
+}
+
+if(authBC){
+  authBC.onmessage = (ev)=>{
+    const msg = ev?.data || {};
+    if(msg.type === "NEW_OWNER" && msg.uid){
+      forceSignOutBecauseDifferentUser(String(msg.uid));
+    }
+    if(msg.type === "OWNER_CLEARED"){
+      // nothing required
+    }
+  };
+}
+
+window.addEventListener("storage", (ev)=>{
+  if(ev.key === DEVICE_OWNER_KEY && ev.newValue){
+    forceSignOutBecauseDifferentUser(String(ev.newValue));
+  }
+});
+
+(async function enforceSingleUserOnStartup(){
+  const owner = getDeviceOwner();
+  const currentUid = auth.currentUser?.uid || null;
+  if(owner && currentUid && owner !== currentUid){
+    await forceSignOutBecauseDifferentUser(owner);
   }
 })();
+
+await setPersistence(auth, inMemoryPersistence);
+
+// ==================== ALLOWLIST ENFORCEMENT ====================
+async function enforceAllowlist(user){
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
+
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
+
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
+    }
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
+    }
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
+  }
+}
+
+// ==================== AUTHENTICATION FUNCTIONS ====================
+function requireAuthOrPrompt(){
+  if (isAuthed) return true;
+  loginOverlay.style.display = "flex";
+  appRoot.classList.add("locked");
+  loginStatus.textContent = "Please sign in first.";
+  return false;
+}
+
+loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Signing in…";
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    loginStatus.textContent = "Signed in. Checking allowlist…";
+
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+
+  } catch (e) {
+    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
+  }
+};
+
+logoutBtn.onclick = async () => {
+  try{
+    stopAll();
+    await revokePushForCurrentDevice();
+    await signOut(auth);
+  }catch(e){
+    showError(e);
+  }
+};
 
 // ==================== PENDING NOTIFICATION PROCESSING ====================
 async function processPendingNotifications() {
@@ -285,7 +501,1275 @@ async function processPendingNotifications() {
   }
 }
 
+// ==================== URL PARAMETER HANDLING ====================
+(function handlePushOpen(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const callId = qs.get("callId");
+    const roomId = qs.get("roomId");
+    const fromName = qs.get("fromName");
+    const toName = qs.get("toName");
+
+    if(callId && roomId){
+      incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
+      incomingOverlay.style.display = "flex";
+      if (typeof startRingtone === "function") startRingtone();
+
+      pendingIncomingCallWhileLoggedOut = {
+        id: callId,
+        data: { roomId, fromName, toName }
+      };
+
+      roomIdInput.value = roomId;
+    }
+  }catch(e){
+    console.warn("Push open parse failed", e);
+  }
+})();
+
+// ==================== URL HASH / AUTOJOIN ====================
+const openedFromInvite = (location.hash.length > 1);
+let suppressAutoJoin = false;
+
+if (openedFromInvite) {
+  roomIdInput.value = location.hash.slice(1);
+  setStatus(callStatus, "Room ID detected in URL.");
+  logDiag("Room ID from URL hash: " + roomIdInput.value);
+}
+
+// ==================== WEBRTC CONFIGURATION ====================
+let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+async function loadIceServers() {
+  logDiag("Fetching ICE servers …");
+  const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
+  if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
+  const data = await r.json();
+  rtcConfig = { iceServers: data.iceServers };
+  logDiag("ICE servers detail (urls only): " + JSON.stringify(
+    (data.iceServers || []).map(s => ({ urls: s.urls }))
+  ));
+  logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
+}
+
+// ==================== MEDIA STREAM MANAGEMENT ====================
+let localStream = null;
+let pc = null;
+
+// ==================== VIDEO QUALITY PROFILES ====================
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+const LS_VIDEO_QUALITY = "webrtc_video_quality";
+function getSavedVideoQuality(){
+  try{
+    const v = String(localStorage.getItem(LS_VIDEO_QUALITY) || "").trim();
+    return (v && VIDEO_PROFILES[v]) ? v : "medium";
+  }catch{
+    return "medium";
+  }
+}
+function saveVideoQuality(v){
+  try{ localStorage.setItem(LS_VIDEO_QUALITY, String(v||"")); }catch{}
+}
+
+let selectedVideoQuality = getSavedVideoQuality();
+
+function updateVideoQualityUi(){
+  if(videoQualitySelect){
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if(videoQualityStatus) videoQualityStatus.textContent = `Video: ${label}.`;
+}
+
+updateVideoQualityUi();
+
+videoQualitySelect?.addEventListener("change", async ()=>{
+  const v = String(videoQualitySelect.value || "medium");
+  selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+  saveVideoQuality(selectedVideoQuality);
+  updateVideoQualityUi();
+
+  if(localStream){
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+      logDiag("Video quality applied while running: " + selectedVideoQuality);
+    }catch(e){
+      logDiag("applyVideoQuality error: " + (e?.message || e));
+      showError(e);
+    }
+  }
+});
+
+async function applyVideoQualityToCurrentStream(quality){
+  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  const vTrack = localStream?.getVideoTracks?.()[0];
+  if(!vTrack) throw new Error("No video track to apply constraints to.");
+  await vTrack.applyConstraints(profile.constraints);
+
+  const s = vTrack.getSettings ? vTrack.getSettings() : {};
+  logDiag("Video track settings now: " + JSON.stringify({
+    width: s.width, height: s.height, frameRate: s.frameRate
+  }));
+}
+
+// ==================== WEBRTC PEER CONNECTION MANAGEMENT ====================
+let pinnedRoomId = null;
+
+function closePeer(){
+  if(pc){
+    pc.onicecandidate=null;
+    pc.ontrack=null;
+    pc.onconnectionstatechange=null;
+    pc.oniceconnectionstatechange=null;
+    try{ pc.close(); }catch{}
+    pc=null;
+  }
+  remoteVideo.srcObject = null;
+}
+
+async function ensurePeer() {
+  closePeer();
+
+  if (!rtcConfig || !rtcConfig.iceServers || rtcConfig.iceServers.length === 0) {
+    await loadIceServers();
+  }
+
+  pc = new RTCPeerConnection(rtcConfig);
+  logDiag("Created RTCPeerConnection with ICE servers");
+
+  const rs = new MediaStream();
+  remoteVideo.srcObject = rs;
+
+  pc.ontrack = (e) => {
+    e.streams[0].getTracks().forEach(t => rs.addTrack(t));
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(() => {});
+    logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+  };
+
+  pc.onconnectionstatechange = () => { if (pc) logDiag("pc.connectionState=" + pc.connectionState); };
+  pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
+
+  if (!localStream) throw new Error("Local media not started.");
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+}
+
+// ==================== FIRESTORE HELPER FUNCTIONS ====================
+async function clearSub(col){
+  const s = await getDocs(col);
+  if(s.empty) return;
+  const b = writeBatch(db);
+  s.forEach(d=>b.delete(d.ref));
+  await b.commit();
+  logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
+}
+
+// ==================== UI STATE MANAGEMENT ====================
+function refreshCopyInviteState(){
+  const hasRoomId = !!roomIdInput.value.trim();
+  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
+}
+
+// ==================== MEDIA INITIALIZATION & AUTOJOIN ====================
+let startingPromise = null;
+let autoJoinDone = false;
+let autoJoinScheduled = false;
+let autoJoinTimer = null;
+
+async function startMedia(opts={skipAutoJoin:false}){
+  if(!requireAuthOrPrompt()) return;
+
+  if(localStream){
+    if(!opts.skipAutoJoin) scheduleAutoJoin();
+    return;
+  }
+  if(startingPromise) return startingPromise;
+
+  startingPromise = (async()=>{
+    hideErrorBox();
+
+    setStatus(mediaStatus,"Requesting camera/mic…");
+    logDiag("Requesting getUserMedia…");
+
+    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: profile.constraints,
+      audio: true
+    });
+
+    localVideo.srcObject = localStream;
+
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+    }catch(e){
+      logDiag("Initial applyConstraints failed (non-fatal): " + (e?.message || e));
+    }
+
+    setStatus(mediaStatus,"Camera/mic started.");
+    logDiag("Camera/mic started (stream attached).");
+
+    localVideo.onloadedmetadata = async () => {
+      try { await localVideo.play(); } catch {}
+      setStatus(mediaStatus,"Camera/mic started.");
+      logDiag("Local video playing.");
+    };
+
+    await loadIceServers();
+
+    startBtn.disabled = true;
+    createBtn.disabled = false;
+    joinBtn.disabled   = false;
+
+  })();
+
+  try{ await startingPromise; }
+  finally{ startingPromise = null; }
+
+  if(!opts.skipAutoJoin) scheduleAutoJoin();
+}
+
+function cancelPendingAutoJoin(){
+  autoJoinScheduled = false;
+  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
+}
+
+function scheduleAutoJoin(){
+  if (!openedFromInvite) return;
+  if (suppressAutoJoin) return;
+  if (autoJoinScheduled) return;
+
+  cancelPendingAutoJoin();
+  autoJoinScheduled = true;
+
+  autoJoinTimer = setTimeout(async ()=>{
+    autoJoinScheduled = false;
+    autoJoinTimer = null;
+    try{ await autoJoinIfNeeded(); }
+    catch(e){
+      setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
+      showError(e);
+    }
+  }, 0);
+}
+
+async function autoJoinIfNeeded(){
+  if(autoJoinDone) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus,"Auto-joining room…");
+  logDiag("Auto-joining triggered.");
+
+  try{
+    await joinRoom();
+  }catch(e){
+    autoJoinDone = false;
+    throw e;
+  }
+}
+
+// ==================== FIRESTORE LISTENER MANAGEMENT ====================
+let unsubRoomA=null, unsubCalleeA=null;
+let unsubRoomB=null, unsubCallerB=null;
+
+function stopListeners(){
+  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
+  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
+  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
+  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+}
+
+// ==================== SYSTEM CLEANUP FUNCTIONS ====================
+function stopAll(){
+  stopListeners();
+  closePeer();
+  stopCallListeners();
+  stopIncomingUI();
+  stopRingback();
+
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+  localVideo.srcObject=null;
+
+  startBtn.disabled = !isAuthed;
+  createBtn.disabled = true;
+  joinBtn.disabled = true;
+
+  setStatus(mediaStatus,"Not started.");
+  setStatus(callStatus,"No room yet.");
+
+  autoJoinDone = false;
+  suppressAutoJoin = false;
+  cancelPendingAutoJoin();
+
+  refreshCopyInviteState();
+
+  hangupBtn.disabled = true;
+  setStatus(dirCallStatus, "Idle.");
+
+  pinnedRoomId = null;
+}
+
+// ==================== REJOIN SUPPORT ====================
+let lastSeenJoinRequestA = 0;
+let lastAnsweredSessionB = null;
+let bRetryTimer = null;
+
+function clearBRetry(){
+  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
+}
+
+async function requestFreshOffer(roomRef){
+  lastAnsweredSessionB = null;
+  await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
+  logDiag("Requested fresh offer (joinRequest).");
+}
+
+// ==================== ROOM CREATION (CALLER SIDE) ====================
+let createAttemptA = 0;
+
+async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
+  if(!requireAuthOrPrompt()) return null;
+
+  suppressAutoJoin = true;
+  autoJoinDone = true;
+  cancelPendingAutoJoin();
+
+  stopListeners();
+  clearBRetry();
+
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++createAttemptA;
+
+  const existing =
+    (options.fixedRoomId ? String(options.fixedRoomId).trim() : "") ||
+    (pinnedRoomId ? String(pinnedRoomId).trim() : "") ||
+    (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
+
+  const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
+
+  roomIdInput.value = roomRef.id;
+  if (options.updateHash) location.hash = roomRef.id;
+
+  refreshCopyInviteState();
+  logDiag("CreateRoom: roomId=" + roomRef.id);
+
+  const caller = collection(roomRef,"callerCandidates");
+  const callee = collection(roomRef,"calleeCandidates");
+  const snap = await getDoc(roomRef);
+  const prev = snap.exists() ? (snap.data().session || 0) : 0;
+  const session = Number(prev) + 1;
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await clearSub(caller);
+  await clearSub(callee);
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await ensurePeer();
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate){
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now()
+  }, { merge:true });
+
+  setStatus(callStatus, `Room active (session ${session}).`);
+  logDiag(`Room written. session=${session}`);
+
+  unsubRoomA = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== createAttemptA) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+      lastSeenJoinRequestA = d.joinRequest;
+      setStatus(callStatus, "Join request received — restarting session…");
+      logDiag("JoinRequest seen => restarting offer/session.");
+      setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 150);
+      return;
+    }
+
+    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        await pc.setRemoteDescription(d.answer);
+        setStatus(callStatus, `Connected (session ${session}).`);
+        logDiag("Applied remote answer.");
+      }catch(e){
+        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(callStatus, "Answer failed — restarting session…");
+        setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 200);
+      }
+    }
+  });
+
+  unsubCalleeA = onSnapshot(callee, (ss)=>{
+    ss.docChanges().forEach(ch=>{
+      if(ch.type !== "added" || !pc) return;
+      const c = ch.doc.data();
+      if(c.session !== session) return;
+      try{ pc.addIceCandidate(c); }catch{}
+    });
+  });
+
+  return { roomId: roomRef.id, roomRef };
+}
+
+// ==================== ROOM JOINING (CALLEE SIDE) ====================
+let joinAttemptB = 0;
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  suppressAutoJoin = false;
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++joinAttemptB;
+  stopListeners();
+  clearBRetry();
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+  location.hash = roomId;
+
+  logDiag("JoinRoom: roomId=" + roomId);
+
+  const roomRef = doc(db,"rooms", roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()) throw new Error("Room not found");
+
+  await requestFreshOffer(roomRef);
+  if(myAttempt !== joinAttemptB) return;
+
+  setStatus(callStatus, "Connecting… (requested fresh offer)");
+
+  unsubRoomB = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== joinAttemptB) return;
+    const d = s.data();
+    if(!d?.offer || !d.session) return;
+
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+    logDiag("New offer/session detected: " + session);
+
+    try{
+      await ensurePeer();
+
+      const caller = collection(roomRef,"callerCandidates");
+      const callee = collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
+      if(myAttempt !== joinAttemptB) return;
+
+      pc.onicecandidate = (e)=>{
+        if(e.candidate){
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+        }
+      };
+
+      await pc.setRemoteDescription(d.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+
+      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
+      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      logDiag("Answer written to room doc.");
+
+      unsubCallerB = onSnapshot(caller, (ss)=>{
+        if(myAttempt !== joinAttemptB) return;
+        ss.docChanges().forEach(ch=>{
+          if(ch.type !== "added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
+        });
+      });
+
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
+
+        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
+        logDiag("Watchdog: requesting fresh offer again.");
+        try{
+          lastAnsweredSessionB = null;
+          await requestFreshOffer(roomRef);
+        }catch(e){ showError(e); }
+      }, 10000);
+
+      pc.onconnectionstatechange = async ()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        if(pc.connectionState === "connected"){ clearBRetry(); }
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
+          setStatus(callStatus, "Connection lost — requesting new offer…");
+          logDiag("Connection lost => requesting fresh offer.");
+          try{
+            lastAnsweredSessionB = null;
+            await requestFreshOffer(roomRef);
+          }catch(e){ showError(e); }
+        }
+      };
+
+    }catch(e){
+      lastAnsweredSessionB = null;
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(callStatus, "Join failed — requesting new offer…");
+      try{ await requestFreshOffer(roomRef); }catch(err){ showError(err); }
+    }
+  });
+}
+
+// ==================== INVITE LINK MANAGEMENT ====================
+async function copyTextRobust(text){
+  if(navigator.clipboard && window.isSecureContext){
+    try{ await navigator.clipboard.writeText(text); return true; }catch{}
+  }
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
+copyLinkBtn.onclick = async ()=>{
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) return;
+  const invite = `${location.origin}${location.pathname}#${roomId}`;
+  const ok = await copyTextRobust(invite);
+  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
+  logDiag("Copy invite clicked.");
+};
+
+// ==================== AUDIO MANAGEMENT ====================
+let audioCtx = null;
+let ringOsc = null;
+let ringGain = null;
+let ringTimer = null;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+async function unlockAudio(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") await ctx.resume();
+  }catch{}
+}
+window.addEventListener("click", ()=>{ unlockAudio(); }, { once:false, passive:true });
+
+function startRingtone(){
+  stopRingtone();
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.10;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    let on = true;
+    ringTimer = setInterval(()=>{
+      if(!ringGain) return;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
+      on = !on;
+    }, 450);
+
+    logDiag("Ringtone started.");
+  }catch(e){
+    logDiag("Ringtone failed: " + (e?.message || e));
+  }
+}
+function stopRingtone(){
+  if(ringTimer){ clearInterval(ringTimer); ringTimer=null; }
+  try{ if(ringOsc){ ringOsc.stop(); } }catch{}
+  try{ if(ringOsc){ ringOsc.disconnect(); } }catch{}
+  try{ if(ringGain){ ringGain.disconnect(); } }catch{}
+  ringOsc = null;
+  ringGain = null;
+}
+
+// ==================== RINGBACK TONE MANAGEMENT ====================
+let ringbackTimer = null;
+
+function stopRingback(){
+  if(ringbackTimer){
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+}
+
+function playRingbackBeepOnce(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = 0.04;
+    osc.type = "sine";
+    osc.frequency.value = 440;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    osc.onended = ()=>{
+      try{ osc.disconnect(); }catch{}
+      try{ gain.disconnect(); }catch{}
+    };
+  }catch{}
+}
+
+function startRingback(){
+  stopRingback();
+
+  try{ unlockAudio(); }catch{}
+
+  const cycleMs = 2500;
+
+  playRingbackBeepOnce();
+  setTimeout(()=> playRingbackBeepOnce(), 250);
+
+  ringbackTimer = setInterval(()=>{
+    playRingbackBeepOnce();
+    setTimeout(()=> playRingbackBeepOnce(), 250);
+  }, cycleMs);
+}
+
+// ==================== CALL MANAGEMENT (UID-BASED) ====================
+let currentIncomingCall = null;
+let activeCallId = null;
+let lastDismissedIncomingCallId = null;
+
+let unsubIncoming = null;
+let unsubCallDoc = null;
+
+function stopCallListeners(){
+  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  currentIncomingCall = null;
+  activeCallId = null;
+}
+
+function showIncomingUI(callId, data){
+  currentIncomingCall = { id: callId, data };
+  incomingText.textContent = `Call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
+
+  if (!data?.deliveredAt) {
+    updateDoc(doc(db,"calls", callId), {
+      deliveredAt: serverTimestamp(),
+      deliveredVia: "firestore",
+      deliveredAtMs: Date.now()
+    }).catch(()=>{});
+  }
+
+  webPageShowedNotification = true;
+  console.log('Web page showing incoming call UI, marking as delivered');
+
+  incomingOverlay.style.display = "flex";
+  startRingtone();
+}
+
+function stopIncomingUI(){
+  incomingOverlay.style.display = "none";
+  stopRingtone();
+  lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
+  currentIncomingCall = null;
+}
+
+async function listenIncomingCalls(){
+  if(!myUid) return;
+
+  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
+
+  const qy = query(
+    collection(db, "calls"),
+    where("toUid", "==", myUid),
+    where("status", "==", "ringing"),
+    orderBy("createdAt", "desc"),
+    limit(1)
+  );
+
+  unsubIncoming = onSnapshot(qy, (snap)=>{
+    if(snap.empty) return;
+    const d = snap.docs[0];
+    const data = d.data();
+
+    if (d.id === lastDismissedIncomingCallId) return;
+    if(currentIncomingCall?.id === d.id) return;
+
+    logDiag("Incoming call (Firestore): " + d.id);
+    showIncomingUI(d.id, data);
+  }, (err)=>{
+    logDiag("Incoming call listener error: " + (err?.message || err));
+  });
+}
+
+async function catchUpMissedRingingCall() {
+  try {
+    if (!myUid) return;
+
+    const qy = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "ringing"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+
+    const d = snap.docs[0];
+    const callId = d.id;
+    const call = d.data() || {};
+    if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+    if (currentIncomingCall?.id === callId) return;
+
+    const createdMs =
+      (call.createdAt && typeof call.createdAt.toMillis === "function")
+        ? call.createdAt.toMillis()
+        : Date.now();
+
+    roomIdInput.value = call.roomId || "";
+    currentIncomingCall = { id: callId, data: call };
+    incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
+    incomingOverlay.style.display = "flex";
+    startRingtone();
+
+    if ("Notification" in window && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+      if (reg) {
+        const fromName = call.fromName || "Unknown";
+        const note = String(call.note || "").trim();
+        const tsLocal = new Date(createdMs).toLocaleString();
+
+        const body =  `Call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
+
+        await reg.showNotification("Incoming call", {
+          body,
+          tag: `webrtc-call-${myUid}`,
+          renotify: true,
+          requireInteraction: true,
+          data: { callId, roomId: call.roomId || "", fromName, note }
+        });
+      }
+    }
+
+    logDiag("Catch-up: showed ringing call " + callId);
+  } catch (e) {
+    logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
+  }
+}
+
+async function catchUpMissedCallNotification() {
+  try {
+    if (!myUid) return;
+
+    const LS_LAST_MISSED = "webrtc_last_missed_call_id";
+    const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
+
+    async function showMissed(callId, call, whenMs) {
+      const fromName = call.fromName || "Unknown";
+      const note = String(call.note || "").trim();
+      const tsLocal = new Date(whenMs).toLocaleString();
+
+      setStatus(dirCallStatus, `Missed call from ${fromName}.`);
+      logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
+
+      if ("Notification" in window && Notification.permission === "granted") {
+        const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+        if (reg) {
+          const body = `Missed call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
+          await reg.showNotification("Missed call", {
+            body,
+            tag: `webrtc-missed-${myUid}`,
+            renotify: true,
+            requireInteraction: true,
+            data: { callId, roomId: call.roomId || "", fromName, note }
+          });
+        }
+      }
+
+      localStorage.setItem(LS_LAST_MISSED, callId);
+    }
+
+    {
+      const q1 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "missed"),
+        orderBy("missedAt", "desc"),
+        limit(1)
+      );
+
+      const s1 = await getDocs(q1);
+      if (!s1.empty) {
+        const d = s1.docs[0];
+        const callId = d.id;
+        const call = d.data() || {};
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const missedMs =
+            (call.missedAt && typeof call.missedAt.toMillis === "function")
+              ? call.missedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, missedMs);
+          return;
+        }
+      }
+    }
+
+    {
+      const q2 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "ended"),
+        orderBy("endedAt", "desc"),
+        limit(5)
+      );
+
+      const s2 = await getDocs(q2);
+      if (s2.empty) return;
+
+      for (const docSnap of s2.docs) {
+        const callId = docSnap.id;
+        const call = docSnap.data() || {};
+
+        const hadAccept = !!call.acceptedAt;
+        const hadDecline = !!call.declinedAt;
+        if (hadAccept || hadDecline) continue;
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const endedMs =
+            (call.endedAt && typeof call.endedAt.toMillis === "function")
+              ? call.endedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, endedMs);
+          return;
+        }
+      }
+    }
+
+  } catch (e) {
+    logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
+  }
+}
+
+function cleanupCallUI(){
+  hangupBtn.disabled = true;
+  activeCallId = null;
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  pinnedRoomId = null;
+}
+
+function listenActiveCall(callId){
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+
+  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
+    if(!s.exists()) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.status === "ended"){
+      stopRingback();
+      setStatus(dirCallStatus, "Ended.");
+      logDiag("Call ended (remote).");
+      cleanupCallUI();
+      stopAll();
+      return;
+    }
+
+    if(d.status === "accepted"){
+      stopRingback();
+      setStatus(dirCallStatus, "Answered. Connecting…");
+      return;
+    }
+    if(d.status === "declined"){
+      stopRingback();
+      setStatus(dirCallStatus, "Declined.");
+      logDiag("Call declined.");
+      cleanupCallUI();
+      return;
+    }
+    if(d.status === "missed"){
+      stopRingback();
+      setStatus(dirCallStatus, "Missed.");
+      logDiag("Call missed.");
+      cleanupCallUI();
+      return;
+    }
+
+    if (d.deliveredAt) {
+      setStatus(dirCallStatus, "Delivered (callee page open).");
+      return;
+    }
+
+    const stage = d.push?.stage || "";
+    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
+    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
+    if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
+
+    setStatus(dirCallStatus, "Ringing…");
+  });
+}
+
+async function hangup(){
+  stopRingback();
+  if (activeCallId) {
+    try{
+      const callRef = doc(db, "calls", activeCallId);
+      const snap = await getDoc(callRef);
+
+      if (snap.exists()) {
+        const call = snap.data() || {};
+        if (call.status === "ringing") {
+          await updateDoc(callRef, {
+            status: "missed",
+            missedAt: serverTimestamp(),
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          await updateDoc(callRef, {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    }catch(e){
+      showError(e);
+    }
+  }
+
+  stopAll();
+  cleanupCallUI();
+  setStatus(dirCallStatus, "Ended.");
+}
+
+answerBtn.onclick = async ()=>{
+  try{
+    const call = currentIncomingCall;
+    stopIncomingUI();
+
+    if(!call){
+      setStatus(dirCallStatus, "No call context. Please wait for the caller again.");
+      return;
+    }
+
+    const { id, data } = call;
+
+    await updateDoc(doc(db,"calls", id), {
+      status: "accepted",
+      acceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
+
+    activeCallId = id;
+    hangupBtn.disabled = false;
+    listenActiveCall(id);
+
+    roomIdInput.value = data.roomId;
+
+    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
+
+    await joinRoom();
+
+    try { await listenIncomingCalls(); } catch {}
+  }catch(e){
+    showError(e);
+  }
+};
+
+declineBtn.onclick = async ()=>{
+  try{
+    const call = currentIncomingCall;
+    stopIncomingUI();
+
+    if(!call) return;
+
+    const { id } = call;
+    await updateDoc(doc(db,"calls", id), {
+      status: "declined",
+      declinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
+
+    setStatus(dirCallStatus, "Declined incoming call.");
+    try { await listenIncomingCalls(); } catch {}
+  }catch(e){
+    showError(e);
+  }
+};
+
+// ==================== USER DIRECTORY MANAGEMENT ====================
+let myDisplayName = "";
+let allUsersCache = [];
+
+function defaultNameFromEmail(email){
+  const e = String(email || "").trim();
+  if(!e) return "";
+  return e.split("@")[0].slice(0, 24);
+}
+
+async function ensureMyUserProfile(user){
+  const ref = doc(db, "users", user.uid);
+  const snap = await getDoc(ref);
+
+  const existing = snap.exists() ? (snap.data() || {}) : {};
+  const name = existing.displayName || defaultNameFromEmail(user.email);
+
+  await setDoc(ref, {
+    uid: user.uid,
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  myDisplayName = name;
+  myNameInput.value = name || "";
+  myNameStatus.textContent = name ? `Saved: ${name}` : "Not set.";
+}
+
+async function saveMyName(){
+  if(!requireAuthOrPrompt()) return;
+
+  const name = String(myNameInput.value || "").trim();
+  if(!name) throw new Error("Name cannot be empty.");
+  if(name.length > 40) throw new Error("Name is too long (max 40).");
+
+  await setDoc(doc(db, "users", myUid), {
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge:true });
+
+  myDisplayName = name;
+  myNameStatus.textContent = `Saved: ${name}`;
+  logDiag("Saved displayName=" + name);
+}
+
+function chunk(arr, n){
+  const out = [];
+  for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i, i+n));
+  return out;
+}
+
+function renderUsersList(filterText=""){
+  const q = String(filterText || "").trim().toLowerCase();
+  const rows = allUsersCache
+    .filter(u => u.uid !== myUid)
+    .filter(u => !q || String(u.displayName||"").toLowerCase().includes(q))
+    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
+
+  usersList.innerHTML = "";
+
+  if(rows.length === 0){
+    usersList.innerHTML = `<div class="small" style="color:#777">No users found.</div>`;
+    return;
+  }
+
+  for(const u of rows){
+    const div = document.createElement("div");
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.justifyContent = "space-between";
+    div.style.gap = "10px";
+    div.style.border = "1px solid #eee";
+    div.style.borderRadius = "10px";
+    div.style.padding = "10px";
+
+    const left = document.createElement("div");
+    left.innerHTML = `<b>${u.displayName || "(no name)"}</b>`;
+
+    const btn = document.createElement("button");
+    btn.textContent = "Call";
+    btn.disabled = !isAuthed;
+    btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
+
+    div.appendChild(left);
+    div.appendChild(btn);
+    usersList.appendChild(div);
+  }
+}
+
+async function loadAllAllowedUsers(){
+  if(!requireAuthOrPrompt()) return;
+
+  const alSnap = await getDocs(
+    query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
+  );
+  const uids = alSnap.docs.map(d => d.id).filter(Boolean);
+
+  const users = [];
+  for(const group of chunk(uids, 10)){
+    const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
+    usSnap.forEach(docu => {
+      const d = docu.data() || {};
+      users.push({ uid: docu.id, displayName: d.displayName || "" });
+    });
+  }
+
+  allUsersCache = users;
+  renderUsersList(userSearchInput.value);
+  logDiag("Loaded users directory: " + users.length);
+}
+
+async function startCallToUid(toUid, toName=""){
+  logDiag("startCallToUid(): ENTER toUid=" + toUid);
+
+  if(!requireAuthOrPrompt()) return;
+  if(!toUid) throw new Error("Missing toUid.");
+  if(toUid === myUid) throw new Error("You can't call yourself.");
+
+  setStatus(dirCallStatus, "Creating room…");
+  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
+  if(!created?.roomId) throw new Error("Room creation failed.");
+
+  pinnedRoomId = created.roomId;
+
+  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
+
+  const callRef = await addDoc(collection(db,"calls"), {
+    fromUid: myUid,
+    toUid,
+    fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+    toName: toName || "",
+    roomId: created.roomId,
+    note,
+    status: "ringing",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    acceptedAt: null,
+    declinedAt: null,
+    endedAt: null
+  });
+
+  activeCallId = callRef.id;
+  try {
+    const messagePayload = {
+      toUid,
+      callId: callRef.id,
+      fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+      note: note,
+      timestamp: new Date().toLocaleString(),
+      sentAtMs: Date.now(),
+    };
+    await sendIncomingCallNotification(messagePayload);
+  } catch (e) {
+    console.error("Error sending incoming call push notification:", e);
+  }
+
+  hangupBtn.disabled = false;
+  listenActiveCall(activeCallId);
+  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
+  startRingback();
+  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+  sendIncomingCallNotification({
+    callId: callRef.id,
+    fromName: myDisplayName,
+    toUid: toUid,
+    note: note,
+    roomId: created.roomId,
+  });
+
+  async function sendIncomingCallNotification(message) {
+    try {
+      const response = await fetch("/easosunov/sendIncomingPush", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(message),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to send incoming call push notification");
+      }
+
+      const data = await response.json();
+      console.log("Incoming call push notification sent:", data);
+    } catch (error) {
+      console.error("Error sending incoming call notification:", error);
+    }
+  }
+}
+
 // ==================== PUSH NOTIFICATION MANAGEMENT ====================
+let messaging = null;
+let swReg = null;
+let lastPushUid = null;
+
+async function rotateFcmTokenIfUserChanged(){
+  try{
+    if(!("Notification" in window)) return;
+    if(!("serviceWorker" in navigator)) return;
+    if(Notification.permission !== "granted") return;
+
+    if(lastPushUid && myUid && lastPushUid !== myUid){
+      logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
+
+      if(!messaging){
+        messaging = getMessaging(app);
+      }
+
+      await deleteToken(messaging);
+      logDiag("Push: deleteToken() success");
+    }
+
+    lastPushUid = myUid || null;
+  }catch(e){
+    logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
+  }
+}
+
 const LS_PUSH_UID = "webrtc_push_uid";
 const LS_PUSH_TID = "webrtc_push_tokenId";
 
@@ -337,29 +1821,6 @@ async function revokePushForCurrentDevice(){
   clearPushBinding();
 }
 
-async function rotateFcmTokenIfUserChanged(){
-  try{
-    if(!("Notification" in window)) return;
-    if(!("serviceWorker" in navigator)) return;
-    if(Notification.permission !== "granted") return;
-
-    if(lastPushUid && myUid && lastPushUid !== myUid){
-      logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
-
-      if(!messaging){
-        messaging = getMessaging(app);
-      }
-
-      await deleteToken(messaging);
-      logDiag("Push: deleteToken() success");
-    }
-
-    lastPushUid = myUid || null;
-  }catch(e){
-    logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
-  }
-}
-
 function base64UrlToUint8Array(base64Url) {
   const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
   const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -390,35 +1851,32 @@ async function enablePush(){
     await revokePushForCurrentDevice();
   }
   
-  if (!("Notification" in window)) { 
-    setStatus(window.pushStatus, "Push: not supported in this browser."); 
-    return; 
-  }
-  
-  if (!("serviceWorker" in navigator)) { 
-    setStatus(window.pushStatus, "Push: service worker not supported."); 
-    return; 
-  }
-  
-  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { 
-    setStatus(window.pushStatus, "Push: VAPID key not configured."); 
-    return; 
-  }
+  if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
+  if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
+  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
 
   try {
-    // Ensure service worker is registered
-    await ensureServiceWorkerInstalled();
-    
+    const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+    swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
+
+    const resp = await fetch(swUrl.toString(), { cache: "no-store" });
+    const ct = resp.headers.get("content-type") || "";
+    const txt = await resp.text();
+    logDiag("SW prefetch url=" + swUrl.toString());
+    logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
+    logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
+    if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
+
     swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
-    if (!swReg) throw new Error("Service worker not installed");
+    if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
+
+    await navigator.serviceWorker.ready;
+    try { await swReg.update(); } catch {}
 
     messaging = getMessaging(app);
 
     const perm = await Notification.requestPermission();
-    if (perm !== "granted"){ 
-      setStatus(window.pushStatus, "Push: permission not granted."); 
-      return; 
-    }
+    if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
 
     const check = validateVapid(VAPID);
     logDiag("VAPID check: " + check.ok + " - " + check.why);
@@ -429,10 +1887,7 @@ async function enablePush(){
       serviceWorkerRegistration: swReg
     });
 
-    if(!token){ 
-      setStatus(window.pushStatus, "Push: no token returned."); 
-      return; 
-    }
+    if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
 
     const tokenId = token.slice(0, 32);
 
@@ -440,19 +1895,17 @@ async function enablePush(){
       token,
       createdAt: Date.now(),
       ua: navigator.userAgent,
-      enabled: true,
-      platform: navigator.platform
+      enabled: true
     }, { merge:true });
     
     savePushBinding(myUid, tokenId);
 
-    setStatus(window.pushStatus, "✅ Push: enabled.");
+    setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored (users/{uid}/fcmTokens).");
 
-    // Listen for foreground messages
     onMessage(messaging, async (payload)=>{
       try{
-        logDiag("FCM foreground message received: " + JSON.stringify(payload));
+        logDiag("FCM foreground message: " + JSON.stringify(payload));
         const data = payload?.data || {};
 
         if(!isAuthed || !myUid) {
@@ -474,15 +1927,14 @@ async function enablePush(){
             return;
           }
 
-          if (call.roomId) window.roomIdInput.value = call.roomId;
+          if (call.roomId) roomIdInput.value = call.roomId;
           currentIncomingCall = { id: data.callId, data: call };
 
-          // Fix: Format notification text properly
-          const fromName = call.fromName || "Unknown";
-          const toName = call.toName || "you";
-          window.incomingText.textContent = `Call from ${fromName} to ${toName}…`;
+          incomingText.textContent =
+            payload?.notification?.body ||
+            (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
 
-          window.incomingOverlay.style.display = "flex";
+          incomingOverlay.style.display = "flex";
           startRingtone();
           return;
         }
@@ -494,7 +1946,7 @@ async function enablePush(){
     });
 
   } catch (e) {
-    setStatus(window.pushStatus, "❌ Push: failed (see diagnostics).");
+    setStatus(pushStatus, "Push: failed (see diagnostics).");
     try { logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
     logDiag("Push enable failed: " + (e?.message || e));
     showError(e);
@@ -504,15 +1956,8 @@ async function enablePush(){
 let autoPushClickArmed = false;
 
 function autoEnablePushOnLogin(){
-  if (!("Notification" in window)) { 
-    setStatus(window.pushStatus, "Push: not supported in this browser."); 
-    return; 
-  }
-  
-  if (!("serviceWorker" in navigator)) { 
-    setStatus(window.pushStatus, "Push: service worker not supported."); 
-    return; 
-  }
+  if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
+  if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
 
   const perm = Notification.permission;
 
@@ -523,12 +1968,12 @@ function autoEnablePushOnLogin(){
   }
 
   if (perm === "denied") {
-    setStatus(window.pushStatus, "Push: blocked in browser settings (Notifications = Block).");
+    setStatus(pushStatus, "Push: blocked in browser settings (Notifications = Block).");
     logDiag("Auto-push: permission denied");
     return;
   }
 
-  setStatus(window.pushStatus, "Push: click anywhere once to enable notifications.");
+  setStatus(pushStatus, "Push: click anywhere once to enable notifications.");
   if (autoPushClickArmed) return;
   autoPushClickArmed = true;
 
@@ -541,1712 +1986,153 @@ function autoEnablePushOnLogin(){
   window.addEventListener("click", handler, { once:true, capture:true });
 }
 
-// ==================== BACKGROUND SERVICE FUNCTIONS ====================
-async function checkBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/status', { 
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    return { isRunning: false, uid: null };
-  }
-}
-
-async function startBackgroundService() {
-  if (!isAuthed || !myUid) {
-    alert('Please sign in first');
-    return;
-  }
-  
-  try {
-    window.bgStatus.textContent = 'Connecting to background service...';
-    
-    const response = await fetch('http://localhost:3000/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: myUid
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      window.bgStatus.textContent = '✅ Background service active';
-      window.startBgBtn.disabled = true;
-      window.stopBgBtn.disabled = false;
-      logDiag('Background service started for UID: ' + myUid);
-    } else {
-      throw new Error(data.error || 'Failed to start');
-    }
-  } catch (error) {
-    window.bgStatus.textContent = '❌ Failed to connect';
-    logDiag('Background service error: ' + error.message);
-    
-    if (error.message.includes('fetch') || error.message.includes('network')) {
-      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
-    }
-  }
-}
-
-async function stopBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      window.bgStatus.textContent = 'Background service stopped';
-      window.startBgBtn.disabled = false;
-      window.stopBgBtn.disabled = true;
-      logDiag('Background service stopped');
-    }
-  } catch (error) {
-    logDiag('Error stopping background service: ' + error.message);
-  }
-}
-
-async function updateServiceStatus() {
-  if (isAuthed) {
-    window.startBgBtn.disabled = false;
-    
-    try {
-      const status = await checkBackgroundService();
-      if (status.isRunning && status.uid === myUid) {
-        window.bgStatus.textContent = '✅ Background service active';
-        window.startBgBtn.disabled = true;
-        window.stopBgBtn.disabled = false;
-      } else {
-        window.bgStatus.textContent = 'Background service ready';
-        window.stopBgBtn.disabled = true;
-      }
-    } catch (error) {
-      window.bgStatus.textContent = 'Background app not detected';
-      window.stopBgBtn.disabled = true;
-    }
-  } else {
-    window.startBgBtn.disabled = true;
-    window.stopBgBtn.disabled = true;
-    window.bgStatus.textContent = 'Sign in required';
-  }
-}
-
-// ==================== MEDIA FUNCTIONS ====================
-const VIDEO_PROFILES = {
-  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
-  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
-  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
-};
-
-let selectedVideoQuality = "medium";
-
-async function startMedia() {
-  if (!requireAuthOrPrompt()) {
-    logDiag("Cannot start media: not authenticated");
-    return;
-  }
-
-  if (localStream) {
-    logDiag("Media already started");
-    return;
-  }
-
-  hideErrorBox();
-  setStatus(window.mediaStatus, "Requesting camera/mic…");
-  logDiag("Starting media with getUserMedia...");
-
-  const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
-
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: profile.constraints,
-      audio: true
-    });
-
-    if (window.localVideo) {
-      window.localVideo.srcObject = localStream;
-      
-      window.localVideo.onloadedmetadata = async () => {
-        try {
-          await window.localVideo.play();
-          setStatus(window.mediaStatus, "✅ Camera/mic started.");
-          logDiag("Local video playing successfully");
-        } catch (e) {
-          logDiag("Video play error: " + e.message);
-          setStatus(window.mediaStatus, "Camera/mic started (playback issue).");
-        }
-      };
-    }
-
-    // Enable WebRTC buttons
-    if (window.startBtn) window.startBtn.disabled = true;
-    if (window.createBtn) window.createBtn.disabled = false;
-    if (window.joinBtn) window.joinBtn.disabled = false;
-
-    // Load ICE servers
-    await loadIceServers();
-
-    logDiag("Media started successfully with " + selectedVideoQuality + " quality");
-
-  } catch (e) {
-    const errorMsg = "Failed to start media: " + e.name + " - " + e.message;
-    setStatus(window.mediaStatus, errorMsg);
-    logDiag("getUserMedia error: " + e.message);
-    
-    // Reset state on error
-    localStream = null;
-    if (window.startBtn) window.startBtn.disabled = false;
-    if (window.createBtn) window.createBtn.disabled = true;
-    if (window.joinBtn) window.joinBtn.disabled = true;
-    
-    throw e;
-  }
-}
-
-async function loadIceServers() {
-  logDiag("Fetching ICE servers…");
-  try {
-    const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
-    if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
-    const data = await r.json();
-    rtcConfig = { iceServers: data.iceServers };
-    logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
-  } catch (e) {
-    logDiag("ICE server load failed, using fallback: " + e.message);
-    rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
-  }
-}
-
-async function applyVideoQualityToCurrentStream(quality) {
-  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
-  const vTrack = localStream?.getVideoTracks?.()[0];
-  if (!vTrack) return;
-  
-  try {
-    await vTrack.applyConstraints(profile.constraints);
-    const s = vTrack.getSettings ? vTrack.getSettings() : {};
-    logDiag(`Video quality applied: ${quality} (${s.width}x${s.height} @ ${s.frameRate}fps)`);
-  } catch (e) {
-    logDiag("applyConstraints error: " + e.message);
-  }
-}
-
-function updateVideoQualityUi(){
-  if (window.videoQualitySelect) {
-    window.videoQualitySelect.value = selectedVideoQuality;
-  }
-  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
-  if (window.videoQualityStatus) {
-    window.videoQualityStatus.textContent = `Video: ${label}.`;
-  }
-}
-
-// ==================== WEBRTC PEER CONNECTION FUNCTIONS ====================
-function closePeer(){
-  if(pc){
-    pc.onicecandidate = null;
-    pc.ontrack = null;
-    pc.onconnectionstatechange = null;
-    pc.oniceconnectionstatechange = null;
-    try{ pc.close(); }catch{}
-    pc = null;
-  }
-  if (window.remoteVideo) window.remoteVideo.srcObject = null;
-  connectionEstablished = false;
-  currentCallType = null;
-}
-
-async function ensurePeer() {
-  closePeer();
-
-  if (!rtcConfig || !rtcConfig.iceServers || rtcConfig.iceServers.length === 0) {
-    await loadIceServers();
-  }
-
-  pc = new RTCPeerConnection(rtcConfig);
-  logDiag("Created RTCPeerConnection with ICE servers");
-
-  const rs = new MediaStream();
-  if (window.remoteVideo) {
-    window.remoteVideo.srcObject = rs;
-  }
-
-  pc.ontrack = (e) => {
-    if (e.streams[0]) {
-      e.streams[0].getTracks().forEach(t => rs.addTrack(t));
-      if (window.remoteVideo) {
-        window.remoteVideo.muted = false;
-        window.remoteVideo.play().catch(e => {
-          logDiag("Remote video play error: " + e.message);
-        });
-      }
-      logDiag(`Received remote track: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
-    }
-  };
-
-  pc.onconnectionstatechange = () => { 
-    if (pc) {
-      const state = pc.connectionState;
-      logDiag("Peer connection state: " + state);
-      
-      // Update status based on connection state
-      if (state === "connected") {
-        connectionEstablished = true;
-        if (currentCallType === 'incoming') {
-          setStatus(window.dirCallStatus, "✅ Connected (incoming call)");
-        } else if (currentCallType === 'outgoing') {
-          setStatus(window.dirCallStatus, "✅ Connected (outgoing call)");
-        } else {
-          setStatus(window.dirCallStatus, "✅ Connected");
-        }
-        setStatus(window.callStatus, "✅ Connected");
-      } else if (state === "disconnected" || state === "failed" || state === "closed") {
-        connectionEstablished = false;
-        if (window.callStatus) {
-          setStatus(window.callStatus, `Connection: ${state}`);
-        }
-      } else {
-        if (window.callStatus) {
-          setStatus(window.callStatus, `Connection: ${state}`);
-        }
-      }
-    }
-  };
-  
-  pc.oniceconnectionstatechange = () => { 
-    if (pc) {
-      logDiag("ICE connection state: " + pc.iceConnectionState);
-    }
-  };
-
-  if (!localStream) throw new Error("Local media not started.");
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  
-  logDiag("Local tracks added to peer connection");
-}
-
-// ==================== AUDIO FUNCTIONS ====================
-function ensureAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  return audioCtx;
-}
-
-async function unlockAudio() {
-  try {
-    const ctx = ensureAudio();
-    if (ctx.state !== "running") await ctx.resume();
-    logDiag("Audio context unlocked");
-  } catch (e) {
-    logDiag("Audio unlock error: " + e.message);
-  }
-}
-
-function startRingtone() {
-  stopRingtone();
-  
-  try {
-    const ctx = ensureAudio();
-    if (ctx.state !== "running") ctx.resume().catch(() => {});
-    
-    ringGain = ctx.createGain();
-    ringGain.gain.value = 0.10;
-    ringGain.connect(ctx.destination);
-
-    ringOsc = ctx.createOscillator();
-    ringOsc.type = "sine";
-    ringOsc.frequency.value = 880;
-    ringOsc.connect(ringGain);
-    ringOsc.start();
-
-    let on = true;
-    ringTimer = setInterval(() => {
-      if (!ringGain) return;
-      ringGain.gain.value = on ? 0.10 : 0.0001;
-      on = !on;
-    }, 450);
-
-    logDiag("Ringtone started.");
-  } catch (e) {
-    logDiag("Ringtone failed: " + e.message);
-  }
-}
-
-function stopRingtone() {
-  if (ringTimer) {
-    clearInterval(ringTimer);
-    ringTimer = null;
-  }
-  
-  try { if (ringOsc) ringOsc.stop(); } catch {}
-  try { if (ringOsc) ringOsc.disconnect(); } catch {}
-  try { if (ringGain) ringGain.disconnect(); } catch {}
-  
-  ringOsc = null;
-  ringGain = null;
-}
-
-function playRingbackBeepOnce(){
+// ==================== BUTTON EVENT HANDLERS ====================
+startBtn.onclick = async ()=>{
   try{
-    const ctx = ensureAudio();
-    if(ctx.state !== "running") ctx.resume().catch(()=>{});
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    gain.gain.value = 0.04;
-    osc.type = "sine";
-    osc.frequency.value = 440;
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    osc.start(now);
-    osc.stop(now + 0.18);
-
-    osc.onended = ()=>{
-      try{ osc.disconnect(); }catch{}
-      try{ gain.disconnect(); }catch{}
-    };
-  }catch{}
-}
-
-function startRingback() {
-  stopRingback();
-
-  try {
-    unlockAudio();
-    
-    // Play more frequent ringback tones
-    playRingbackBeepOnce();
-    
-    ringbackTimer = setInterval(() => {
-      playRingbackBeepOnce();
-      setTimeout(() => playRingbackBeepOnce(), 250);
-      setTimeout(() => playRingbackBeepOnce(), 500);
-    }, 2000); // Repeat every 2 seconds
-    
-  } catch (e) {
-    console.warn("Could not start ringback:", e);
-  }
-}
-
-function stopRingback(){
-  if(ringbackTimer){
-    clearInterval(ringbackTimer);
-    ringbackTimer = null;
-  }
-}
-
-// ==================== FIRESTORE HELPER FUNCTIONS ====================
-async function clearSub(col){
-  const s = await getDocs(col);
-  if(s.empty) return;
-  const b = writeBatch(db);
-  s.forEach(d=>b.delete(d.ref));
-  await b.commit();
-  logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
-}
-
-function stopListeners(){
-  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
-  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
-  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
-  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
-}
-
-function stopCallListeners(){
-  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
-  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
-  currentIncomingCall = null;
-  activeCallId = null;
-}
-
-// ==================== CALL MANAGEMENT ====================
-function showIncomingUI(callId, data){
-  currentIncomingCall = { id: callId, data };
-  
-  // FIX: Properly format the notification text
-  const fromName = data.fromName || "unknown";
-  const toName = data.toName || "you";
-  const callText = `Call from ${fromName} to ${toName}…`;
-  
-  if (window.incomingText) {
-    window.incomingText.textContent = callText;
-  }
-
-  if (window.incomingOverlay) {
-    window.incomingOverlay.style.display = "flex";
-  }
-  startRingtone();
-  
-  logDiag(`Showing incoming call UI: ${callText}`);
-  
-  // Mark as delivered
-  updateDoc(doc(db,"calls", callId), {
-    deliveredAt: serverTimestamp(),
-    deliveredVia: "web_page",
-    deliveredAtMs: Date.now()
-  }).catch(()=>{
-    logDiag("Failed to update delivered status");
-  });
-}
-
-function stopIncomingUI(){
-  if (window.incomingOverlay) {
-    window.incomingOverlay.style.display = "none";
-  }
-  stopRingtone();
-  lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
-  currentIncomingCall = null;
-}
-
-async function listenIncomingCalls(){
-  if(!myUid) return;
-
-  if(unsubIncoming){ 
-    unsubIncoming(); 
-    unsubIncoming = null;
-  }
-
-  logDiag("Setting up incoming call listener for UID: " + myUid);
-
-  const qy = query(
-    collection(db, "calls"),
-    where("toUid", "==", myUid),
-    where("status", "==", "ringing"),
-    orderBy("createdAt", "desc"),
-    limit(1)
-  );
-
-  unsubIncoming = onSnapshot(qy, (snap)=>{
-    if(snap.empty) {
-      logDiag("No incoming calls found");
-      return;
-    }
-    
-    const doc = snap.docs[0];
-    const data = doc.data();
-    const callId = doc.id;
-
-    if (callId === lastDismissedIncomingCallId) {
-      logDiag(`Ignoring dismissed call: ${callId}`);
-      return;
-    }
-    
-    if(currentIncomingCall?.id === callId) {
-      logDiag(`Already showing this call: ${callId}`);
-      return;
-    }
-
-    logDiag("Incoming call detected: " + callId + " from " + data.fromName);
-    showIncomingUI(callId, data);
-  }, (err)=>{
-    logDiag("Incoming call listener error: " + (err?.message || err));
-  });
-}
-
-async function catchUpMissedRingingCall() {
-  try {
-    if (!myUid) return;
-
-    const qy = query(
-      collection(db, "calls"),
-      where("toUid", "==", myUid),
-      where("status", "==", "ringing"),
-      orderBy("createdAt", "desc"),
-      limit(1)
-    );
-
-    const snap = await getDocs(qy);
-    if (snap.empty) return;
-
-    const d = snap.docs[0];
-    const callId = d.id;
-    const call = d.data() || {};
-    
-    if (currentIncomingCall?.id === callId) return;
-
-    if (call.roomId) window.roomIdInput.value = call.roomId;
-    currentIncomingCall = { id: callId, data: call };
-    
-    // FIX: Properly format the text
-    const fromName = call.fromName || "unknown";
-    const toName = call.toName || "you";
-    window.incomingText.textContent = `Call from ${fromName} to ${toName}…`;
-    
-    window.incomingOverlay.style.display = "flex";
-    startRingtone();
-
-    logDiag("Catch-up: showed ringing call " + callId);
-  } catch (e) {
-    logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
-  }
-}
-
-async function catchUpMissedCallNotification() {
-  try {
-    if (!myUid) return;
-
-    const LS_LAST_MISSED = "webrtc_last_missed_call_id";
-    const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
-
-    async function showMissed(callId, call, whenMs) {
-      const fromName = call.fromName || "Unknown";
-      const toName = call.toName || "you";
-      const note = String(call.note || "").trim();
-      const tsLocal = new Date(whenMs).toLocaleString();
-
-      setStatus(window.dirCallStatus, `Missed call from ${fromName}.`);
-      logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
-
-      if ("Notification" in window && Notification.permission === "granted") {
-        const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
-        if (reg) {
-          const body = `Missed call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
-          await reg.showNotification("Missed call", {
-            body,
-            tag: `webrtc-missed-${myUid}`,
-            renotify: true,
-            requireInteraction: false,
-            data: { callId, roomId: call.roomId || "", fromName, note }
-          });
-        }
-      }
-
-      localStorage.setItem(LS_LAST_MISSED, callId);
-    }
-
-    // Check for missed calls
-    const q1 = query(
-      collection(db, "calls"),
-      where("toUid", "==", myUid),
-      where("status", "==", "missed"),
-      orderBy("missedAt", "desc"),
-      limit(1)
-    );
-
-    const s1 = await getDocs(q1);
-    if (!s1.empty) {
-      const d = s1.docs[0];
-      const callId = d.id;
-      const call = d.data() || {};
-
-      if (callId && callId !== lastId &&
-          currentIncomingCall?.id !== callId) {
-
-        const missedMs =
-          (call.missedAt && typeof call.missedAt.toMillis === "function")
-            ? call.missedAt.toMillis()
-            : Date.now();
-
-        await showMissed(callId, call, missedMs);
-        return;
-      }
-    }
-
-  } catch (e) {
-    logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
-  }
-}
-
-function listenActiveCall(callId){
-  if(unsubCallDoc){ 
-    unsubCallDoc(); 
-    unsubCallDoc = null;
-  }
-
-  logDiag("Listening to active call: " + callId);
-
-  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (snapshot)=>{
-    if(!snapshot.exists()) {
-      logDiag("Call document no longer exists");
-      return;
-    }
-    
-    const data = snapshot.data();
-    if(!data) return;
-
-    logDiag(`Call ${callId} status update: ${data.status}`);
-
-    if(data.status === "ended"){
-      stopRingback();
-      setStatus(window.dirCallStatus, "Call ended.");
-      logDiag("Call ended (remote).");
-      cleanupCallUI();
-      stopAll();
-      return;
-    }
-
-    if(data.status === "accepted"){
-      stopRingback();
-      setStatus(window.dirCallStatus, "✅ Call answered. Connecting…");
-      logDiag("Call accepted by remote party");
-      return;
-    }
-    
-    if(data.status === "declined"){
-      stopRingback();
-      setStatus(window.dirCallStatus, "❌ Call declined.");
-      logDiag("Call declined by remote party.");
-      cleanupCallUI();
-      return;
-    }
-    
-    if(data.status === "missed"){
-      stopRingback();
-      setStatus(window.dirCallStatus, "Missed call.");
-      logDiag("Call missed.");
-      cleanupCallUI();
-      return;
-    }
-
-    setStatus(window.dirCallStatus, "Ringing…");
-  }, (error) => {
-    logDiag("Active call listener error: " + error.message);
-  });
-}
-
-function cleanupCallUI(){
-  if (window.hangupBtn) window.hangupBtn.disabled = true;
-  activeCallId = null;
-  if(unsubCallDoc){ 
-    unsubCallDoc(); 
-    unsubCallDoc = null;
-  }
-}
-
-async function hangup(){
-  logDiag("Hanging up call");
-  stopRingback();
-  
-  if (activeCallId) {
-    try{
-      const callRef = doc(db, "calls", activeCallId);
-      const snap = await getDoc(callRef);
-
-      if (snap.exists()) {
-        const call = snap.data() || {};
-        if (call.status === "ringing") {
-          await updateDoc(callRef, {
-            status: "missed",
-            missedAt: serverTimestamp(),
-            endedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-          logDiag("Marked call as missed");
-        } else {
-          await updateDoc(callRef, {
-            status: "ended",
-            endedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-          logDiag("Marked call as ended");
-        }
-      }
-    }catch(e){
-      logDiag("Error updating call status: " + e.message);
-      showError(e);
-    }
-  }
-
-  stopAll();
-  cleanupCallUI();
-  setStatus(window.dirCallStatus, "Call ended.");
-}
-
-// ==================== USER DIRECTORY MANAGEMENT ====================
-function defaultNameFromEmail(email){
-  const e = String(email || "").trim();
-  if(!e) return "";
-  return e.split("@")[0].slice(0, 24);
-}
-
-async function ensureMyUserProfile(user){
-  const ref = doc(db, "users", user.uid);
-  const snap = await getDoc(ref);
-
-  const existing = snap.exists() ? (snap.data() || {}) : {};
-  const name = existing.displayName || defaultNameFromEmail(user.email);
-
-  await setDoc(ref, {
-    uid: user.uid,
-    displayName: name,
-    email: user.email,
-    lastSeen: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }, { merge: true });
-
-  myDisplayName = name;
-  if (window.myNameInput) window.myNameInput.value = name || "";
-  if (window.myNameStatus) window.myNameStatus.textContent = name ? `✅ Saved: ${name}` : "Not set.";
-  
-  logDiag("User profile ensured: " + name);
-}
-
-async function saveMyName(){
-  if(!requireAuthOrPrompt()) return;
-
-  const name = String(window.myNameInput?.value || "").trim();
-  if(!name) throw new Error("Name cannot be empty.");
-  if(name.length > 40) throw new Error("Name is too long (max 40).");
-
-  await setDoc(doc(db, "users", myUid), {
-    displayName: name,
-    updatedAt: serverTimestamp()
-  }, { merge:true });
-
-  myDisplayName = name;
-  if (window.myNameStatus) window.myNameStatus.textContent = `✅ Saved: ${name}`;
-  logDiag("Display name saved: " + name);
-}
-
-function chunk(arr, n){
-  const out = [];
-  for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i, i+n));
-  return out;
-}
-
-async function loadAllAllowedUsers(){
-  if(!requireAuthOrPrompt()) {
-    logDiag("Cannot load users: not authenticated");
-    return;
-  }
-
-  logDiag("Loading allowed users...");
-
-  try {
-    const alSnap = await getDocs(
-      query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
-    );
-    const uids = alSnap.docs.map(d => d.id).filter(Boolean);
-    
-    logDiag(`Found ${uids.length} allowed users`);
-
-    const users = [];
-    for(const group of chunk(uids, 10)){
-      const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
-      usSnap.forEach(docu => {
-        const data = docu.data() || {};
-        users.push({ 
-          uid: docu.id, 
-          displayName: data.displayName || data.email || "(no name)",
-          email: data.email || ""
-        });
-      });
-    }
-
-    allUsersCache = users;
-    renderUsersList(window.userSearchInput ? window.userSearchInput.value : "");
-    logDiag(`Loaded ${users.length} users into directory`);
-  } catch (e) {
-    logDiag("Error loading users: " + e.message);
+    hideErrorBox();
+    await startMedia();
+  }catch(e){
+    const name = String(e?.name || "");
+    if(name === "NotAllowedError" || name === "NotFoundError") return;
     showError(e);
   }
-}
+};
 
-function renderUsersList(filterText=""){
-  if (!window.usersList) return;
-  
-  const queryText = String(filterText || "").trim().toLowerCase();
-  const rows = allUsersCache
-    .filter(u => u.uid !== myUid)
-    .filter(u => !queryText || 
-      String(u.displayName||"").toLowerCase().includes(queryText) ||
-      String(u.email||"").toLowerCase().includes(queryText))
-    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
+createBtn.onclick = ()=> createRoom({updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}).catch(showError);
+joinBtn.onclick   = ()=> joinRoom().catch(showError);
 
-  window.usersList.innerHTML = "";
+roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
+refreshCopyInviteState();
 
-  if(rows.length === 0){
-    window.usersList.innerHTML = `<div class="small" style="color:#777; padding: 10px;">
-      ${allUsersCache.length === 0 ? "No users found" : "No matching users found"}
-    </div>`;
-    return;
-  }
+testSoundBtn.onclick = async ()=>{
+  await unlockAudio();
+  startRingtone();
+  setTimeout(()=>stopRingtone(), 1800);
+};
 
-  rows.forEach(user => {
-    const div = document.createElement("div");
-    div.className = "user-item";
-    div.style.display = "flex";
-    div.style.alignItems = "center";
-    div.style.justifyContent = "space-between";
-    div.style.gap = "10px";
-    div.style.border = "1px solid #e0e0e0";
-    div.style.borderRadius = "8px";
-    div.style.padding = "12px";
-    div.style.marginBottom = "8px";
-    div.style.backgroundColor = "#f9f9f9";
-
-    const left = document.createElement("div");
-    left.innerHTML = `<b>${user.displayName || "(no name)"}</b>`;
-
-    const btn = document.createElement("button");
-    btn.textContent = "Call";
-    btn.className = "call-btn";
-    btn.disabled = !isAuthed;
-    btn.onclick = () => startCallToUid(user.uid, user.displayName).catch(showError);
-
-    div.appendChild(left);
-    div.appendChild(btn);
-    window.usersList.appendChild(div);
-  });
-}
-
-async function sendIncomingCallNotification(message) {
-  try {
-    logDiag("Attempting to send push notification via Firebase");
-    
-    // Instead of calling a non-existent endpoint, rely on Firebase Cloud Functions
-    // which should be triggered by the Firestore document creation
-    logDiag("Push notification should be triggered by Cloud Function on call creation");
-    
-    // The notification will be sent by the Cloud Function when a call document is created
-    // with status: "ringing" and toUid field set
-    
-    return true;
-  } catch (error) {
-    logDiag("Error in notification handling: " + error.message);
-    return false;
-  }
-}
-
-async function startCallToUid(toUid, toName=""){
-  logDiag("Starting call to UID: " + toUid);
-
-  if(!requireAuthOrPrompt()) return;
-  if(!toUid) throw new Error("Missing toUid.");
-  if(toUid === myUid) throw new Error("You can't call yourself.");
-  
-// Play ringback tone immediately
-  startRingback();
-  
-  // Set call type for status tracking
-  currentCallType = 'outgoing';
-  
-  setStatus(window.dirCallStatus, "Creating room…");
-  const created = await createRoom();
-  if(!created?.roomId) throw new Error("Room creation failed.");
-
-  const note = String(window.callNoteInput?.value || "").trim().slice(0, 140);
-
-  // FIX: Ensure toName is properly set
-  const callToName = toName || "user";
-  
-  const callRef = await addDoc(collection(db,"calls"), {
-    fromUid: myUid,
-    toUid,
-    fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value) || "(unknown)",
-    toName: callToName, // Use properly formatted toName
-    roomId: created.roomId,
-    note,
-    status: "ringing",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-    acceptedAt: null,
-    declinedAt: null,
-    endedAt: null,
-    // Add push notification tracking
-    push: {
-      sentAt: null,
-      stage: "pending"
-    }
-  });
-
-  activeCallId = callRef.id;
-  
-  // Send push notification with properly formatted message
-    // Push notification will be sent by Firebase Cloud Function
-  // when it detects a new call document with status: "ringing"
-  await updateDoc(doc(db, "calls", callRef.id), {
-    "push.sentAt": serverTimestamp(),
-    "push.stage": "pending",
-    "push.attemptedAt": Date.now()
-  });
-  
-  logDiag("Call created. Push notification will be sent via Cloud Function.");
-
-  if (window.hangupBtn) window.hangupBtn.disabled = false;
-  listenActiveCall(activeCallId);
-  setStatus(window.dirCallStatus, `📞 Calling ${callToName}…`);
-  startRingback();
-  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
-}
-
-// ==================== SYSTEM CLEANUP FUNCTIONS ====================
-function stopAll(){
-  logDiag("Stopping all...");
-  
-  stopListeners();
-  closePeer();
-  stopCallListeners();
-  stopIncomingUI();
-  stopRingback();
-
-  if(localStream){
-    localStream.getTracks().forEach(t=>t.stop());
-    localStream = null;
-  }
-  
-  if (window.localVideo) window.localVideo.srcObject = null;
-
-  if (window.startBtn) window.startBtn.disabled = !isAuthed;
-  if (window.createBtn) window.createBtn.disabled = true;
-  if (window.joinBtn) window.joinBtn.disabled = true;
-
-  setStatus(window.mediaStatus, "Not started.");
-  setStatus(window.callStatus, "No room yet.");
-
-  refreshCopyInviteState();
-
-  if (window.hangupBtn) window.hangupBtn.disabled = true;
-  
-  // Only set to "Idle" if not connected
-  if (!connectionEstablished) {
-    setStatus(window.dirCallStatus, "Idle.");
-  }
-
-  logDiag("All stopped and cleaned up");
-}
-
-// ==================== BUTTON HANDLERS ====================
-async function copyTextRobust(text){
-  if(navigator.clipboard && window.isSecureContext){
-    try{ 
-      await navigator.clipboard.writeText(text); 
-      logDiag("Copied to clipboard: " + text.substring(0, 50) + "...");
-      return true; 
-    }catch(e){
-      logDiag("Clipboard write failed: " + e.message);
-    }
-  }
-  
-  // Fallback
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    document.execCommand('copy');
-    logDiag("Copied using execCommand");
-    return true;
-  } catch (e) {
-    logDiag("execCommand failed: " + e.message);
-    window.prompt("Copy this invite link:", text);
-    return false;
-  } finally {
-    document.body.removeChild(textarea);
-  }
-}
-
-function refreshCopyInviteState(){
-  if (!window.copyLinkBtn || !window.roomIdInput) return;
-  
-  const hasRoomId = !!window.roomIdInput.value.trim();
-  const canCopy = isAuthed && hasRoomId;
-  
-  window.copyLinkBtn.disabled = !canCopy;
-  
-  logDiag(`Copy invite state: auth=${isAuthed}, roomId=${hasRoomId}, disabled=${window.copyLinkBtn.disabled}`);
-}
-
-// ==================== ROOM CREATION AND JOINING ====================
-async function createRoom(){
-  if(!requireAuthOrPrompt()) {
-    logDiag("Cannot create room: not authenticated");
-    return null;
-  }
-
-  stopListeners();
-  await startMedia();
-
-  const roomRef = doc(collection(db, "rooms"));
-  if (window.roomIdInput) window.roomIdInput.value = roomRef.id;
-  
-  // Update URL hash
-  location.hash = roomRef.id;
-  refreshCopyInviteState();
-  logDiag("CreateRoom: roomId=" + roomRef.id);
-
-  const caller = collection(roomRef,"callerCandidates");
-  const callee = collection(roomRef,"calleeCandidates");
-  
-  await clearSub(caller);
-  await clearSub(callee);
-
-  await ensurePeer();
-
-  const session = 1;
-
-  pc.onicecandidate = (e)=>{
-    if(e.candidate){
-      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{
-        logDiag("Failed to add ICE candidate to Firestore");
-      });
-    }
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  
-  logDiag("Created local offer, setting up Firestore");
-
-  await setDoc(roomRef, {
-    session,
-    offer: { type: offer.type, sdp: offer.sdp },
-    answer: null,
-    updatedAt: Date.now(),
-    createdBy: myUid,
-    createdByName: myDisplayName || "Unknown"
-  }, { merge:true });
-
-  setStatus(window.callStatus, `✅ Room created (session ${session}). Waiting for peer...`);
-  logDiag(`Room written to Firestore. session=${session}`);
-
-  // Listen for answer
-  unsubRoomA = onSnapshot(roomRef, async (snapshot)=>{
-    const data = snapshot.data();
-    if(!data) return;
-
-    logDiag("Room snapshot update: " + JSON.stringify(data).substring(0, 200));
-
-    if(data.answer && data.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
-      try{
-        logDiag("Received answer from peer, setting remote description");
-        await pc.setRemoteDescription(data.answer);
-        setStatus(window.callStatus, `✅ Connected (session ${session}).`);
-        logDiag("Successfully applied remote answer.");
-      }catch(e){
-        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
-        setStatus(window.callStatus, "Answer failed — restarting session…");
-        showError(e);
-      }
-    }
-  }, (error) => {
-    logDiag("Room listener error: " + error.message);
-  });
-
-  // Listen for callee ICE candidates
-  unsubCalleeA = onSnapshot(callee, (snapshot)=>{
-    snapshot.docChanges().forEach(change=>{
-      if(change.type !== "added" || !pc) return;
-      const candidate = change.doc.data();
-      if(candidate.session !== session) return;
-      try{ 
-        pc.addIceCandidate(candidate);
-        logDiag("Added callee ICE candidate");
-      }catch(e){
-        logDiag("Failed to add callee ICE candidate: " + e.message);
-      }
-    });
-  }, (error) => {
-    logDiag("Callee candidate listener error: " + error.message);
-  });
-
-  return { roomId: roomRef.id, roomRef };
-}
-
-async function joinRoom(){
-  if(!requireAuthOrPrompt()) {
-    logDiag("Cannot join room: not authenticated");
-    return;
-  }
-
-  const roomId = window.roomIdInput ? window.roomIdInput.value.trim() : "";
-  if(!roomId) {
-    setStatus(window.callStatus, "Please enter a Room ID");
-    throw new Error("Room ID is empty.");
-  }
-  
-  logDiag("Attempting to join room: " + roomId);
-
-  await startMedia();
-  
-  // Update URL hash
-  location.hash = roomId;
-
-  const roomRef = doc(db,"rooms", roomId);
-  const snap = await getDoc(roomRef);
-  if(!snap.exists()) {
-    setStatus(window.callStatus, "Room not found");
-    throw new Error("Room not found");
-  }
-
-  stopListeners();
-
-  // Set call type for status tracking
-  currentCallType = 'incoming';
-  
-  setStatus(window.callStatus, "Connecting to room…");
-  logDiag("Found room, setting up listeners");
-
-  let lastProcessedSession = 0;
-
-  unsubRoomB = onSnapshot(roomRef, async (snapshot)=>{
-    const data = snapshot.data();
-    if(!data?.offer || !data.session) {
-      logDiag("No offer found in room data");
-      return;
-    }
-
-    const session = data.session;
-    if(session <= lastProcessedSession) {
-      logDiag(`Ignoring old session ${session}, already processed ${lastProcessedSession}`);
-      return;
-    }
-    
-    lastProcessedSession = session;
-    logDiag("New offer/session detected: " + session);
-
-    try{
-      await ensurePeer();
-
-      const caller = collection(roomRef,"callerCandidates");
-      const callee = collection(roomRef,"calleeCandidates");
-
-      await clearSub(callee);
-
-      pc.onicecandidate = (e)=>{
-        if(e.candidate){
-          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{
-            logDiag("Failed to add ICE candidate");
-          });
-        }
-      };
-
-      logDiag("Setting remote description from offer");
-      await pc.setRemoteDescription(data.offer);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      
-      logDiag("Created answer, writing to Firestore");
-
-      await updateDoc(roomRef, { 
-        answer: answer, 
-        session, 
-        answeredAt: Date.now(),
-        answeredBy: myUid,
-        answeredByName: myDisplayName || "Unknown"
-      });
-      
-      setStatus(window.callStatus, `✅ Joined room. Waiting for connection... (session ${session})`);
-      logDiag("Answer written to room doc.");
-
-      // Listen for caller ICE candidates
-      unsubCallerB = onSnapshot(caller, (candidateSnapshot)=>{
-        candidateSnapshot.docChanges().forEach(change=>{
-          if(change.type !== "added" || !pc) return;
-          const candidate = change.doc.data();
-          if(candidate.session !== session) return;
-          try{ 
-            pc.addIceCandidate(candidate);
-            logDiag("Added caller ICE candidate");
-          }catch(e){
-            logDiag("Failed to add caller ICE candidate: " + e.message);
-          }
-        });
-      }, (error) => {
-        logDiag("Caller candidate listener error: " + error.message);
-      });
-
-    }catch(e){
-      logDiag("Join flow error: " + (e?.message || e));
-      setStatus(window.callStatus, "Join failed: " + e.message);
-      showError(e);
-    }
-  }, (error) => {
-    logDiag("Room join listener error: " + error.message);
-    setStatus(window.callStatus, "Connection error");
-  });
-}
-
-// ==================== ALLOWLIST ENFORCEMENT ====================
-async function enforceAllowlist(user){
-  const uid = user.uid;
-  logDiag("Checking allowlist for UID: " + uid);
-
+resetPushBtn.onclick = async ()=>{
   try{
-    const ref = doc(db, "allowlistUids", uid);
-    const snap = await getDoc(ref);
-
-    if(!snap.exists()){
-      if (window.loginStatus) window.loginStatus.textContent = "❌ Not approved yet. Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist missing for UID: " + uid);
-    }
-
-    const enabled = snap.data()?.enabled === true;
-    if(!enabled){
-      if (window.loginStatus) window.loginStatus.textContent = "❌ Not approved yet (enabled=false). Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist disabled for UID: " + uid);
-    }
-
-    logDiag("Allowlist check passed");
-    return true;
+    setStatus(pushStatus, "Push: resetting…");
+    await revokePushForCurrentDevice();
+    await enablePush();
+    setStatus(pushStatus, "Push: enabled (reset).");
   }catch(e){
-    if(String(e?.code || "").includes("permission-denied")){
-      if (window.loginStatus) window.loginStatus.textContent = "Allowlist check blocked by Firestore rules (permission-denied).";
-    }
-    throw e;
+    showError(e);
   }
-}
+};
+ 
+hangupBtn.onclick = ()=> hangup().catch(showError);
 
-// ==================== AUTHENTICATION FUNCTIONS ====================
-function requireAuthOrPrompt(){
-  if (isAuthed) return true;
-  
-  if (window.loginOverlay) window.loginOverlay.style.display = "flex";
-  if (window.appRoot) window.appRoot.classList.add("locked");
-  if (window.loginStatus) window.loginStatus.textContent = "Please sign in first.";
-  
-  logDiag("Authentication required");
-  return false;
-}
+saveNameBtn.onclick = ()=> saveMyName().catch(showError);
+refreshUsersBtn.onclick = ()=> loadAllAllowedUsers().catch(showError);
+myNameInput.addEventListener("input", ()=>{
+  saveNameBtn.disabled = !isAuthed || !String(myNameInput.value||"").trim();
+});
+userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
-// ==================== SETUP EVENT LISTENERS ====================
-function setupEventListeners() {
-  // Login/Logout
-  if (window.loginBtn) {
-    window.loginBtn.onclick = async () => {
-      hideErrorBox();
-      if (window.loginStatus) window.loginStatus.textContent = "Signing in…";
-      
-      try {
-        const email = window.emailInput.value.trim();
-        const password = window.passInput.value;
-        
-        if (!email || !password) {
-          throw new Error("Please enter email and password");
-        }
-        
-        logDiag("Attempting login with email: " + email);
-        await signInWithEmailAndPassword(auth, email, password);
-        
-      } catch (e) {
-        const errorMsg = `Login failed: ${e?.code || "unknown"} - ${e?.message || ""}`;
-        if (window.loginStatus) window.loginStatus.textContent = errorMsg;
-        logDiag(`Login error: ${e?.code} - ${e?.message}`);
-        showError(e);
-      }
-    };
-  }
+// ==================== BACKGROUND SERVICE EVENT HANDLERS ====================
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
 
-  if (window.logoutBtn) {
-    window.logoutBtn.onclick = async () => {
-      try{
-        logDiag("Logging out...");
-        stopAll();
-        await revokePushForCurrentDevice();
-        await signOut(auth);
-      }catch(e){
-        showError(e);
-      }
-    };
-  }
-
-  // Media and WebRTC
-  if (window.startBtn) window.startBtn.onclick = async () => {
-    try{
-      hideErrorBox();
-      await startMedia();
-    }catch(e){
-      showError(e);
-    }
-  };
-  
-  if (window.createBtn) window.createBtn.onclick = () => createRoom().catch(showError);
-  if (window.joinBtn) window.joinBtn.onclick = () => joinRoom().catch(showError);
-  
-  // Invite link
-  if (window.copyLinkBtn) window.copyLinkBtn.onclick = async () => {
-    const roomId = window.roomIdInput?.value.trim();
-    if (!roomId) {
-      setStatus(window.callStatus, "No room ID to copy");
-      return;
-    }
-    
-    const inviteUrl = `${window.location.origin}${window.location.pathname}#${roomId}`;
-    const success = await copyTextRobust(inviteUrl);
-    
-    if (success) {
-      setStatus(window.callStatus, "✅ Invite link copied!");
-      setTimeout(() => {
-        setStatus(window.callStatus, `Room: ${roomId}`);
-      }, 2000);
-    } else {
-      setStatus(window.callStatus, "⚠️ Could not copy automatically");
-    }
-  };
-  
-  // Room ID input
-  if (window.roomIdInput) {
-    window.roomIdInput.addEventListener("input", () => refreshCopyInviteState());
-  }
-  
-  // Audio test
-  if (window.testSoundBtn) {
-    window.testSoundBtn.onclick = async () => {
-      await unlockAudio();
-      startRingtone();
-      setTimeout(() => stopRingtone(), 1800);
-    };
-  }
-  
-  // Video quality
-  if (window.videoQualitySelect) {
-    window.videoQualitySelect.addEventListener("change", () => {
-      const v = String(window.videoQualitySelect.value || "medium");
-      selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
-      updateVideoQualityUi();
-      
-      if (localStream) {
-        applyVideoQualityToCurrentStream(selectedVideoQuality).catch(e => {
-          logDiag("Failed to apply video quality: " + e.message);
-        });
-      }
-    });
-  }
-  
-  // Hangup
-  if (window.hangupBtn) window.hangupBtn.onclick = () => hangup().catch(showError);
-  
-  // User directory
-  if (window.saveNameBtn) window.saveNameBtn.onclick = () => saveMyName().catch(showError);
-  if (window.refreshUsersBtn) window.refreshUsersBtn.onclick = () => loadAllAllowedUsers().catch(showError);
-  
-  if (window.myNameInput) window.myNameInput.addEventListener("input", () => {
-    if (window.saveNameBtn) window.saveNameBtn.disabled = !isAuthed || !String(window.myNameInput.value||"").trim();
-  });
-  
-  if (window.userSearchInput) {
-    window.userSearchInput.addEventListener("input", () => renderUsersList(window.userSearchInput.value));
-  }
-  
-  // Incoming call buttons
-  if (window.answerBtn) {
-    window.answerBtn.onclick = async ()=>{
-      try{
-        const call = currentIncomingCall;
-        stopIncomingUI();
-
-        if(!call){
-          setStatus(window.dirCallStatus, "No call context. Please wait for the caller again.");
-          return;
-        }
-
-        const { id, data } = call;
-
-        await updateDoc(doc(db,"calls", id), {
-          status: "accepted",
-          acceptedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          deliveredAt: serverTimestamp(),
-          deliveredVia: "web_page"
-        });
-
-        activeCallId = id;
-        if (window.hangupBtn) window.hangupBtn.disabled = false;
-        listenActiveCall(id);
-
-        if (window.roomIdInput && data.roomId) {
-          window.roomIdInput.value = data.roomId;
-        }
-
-        setStatus(window.dirCallStatus, `✅ Answered ${data.fromName || ""}. Joining room…`);
-
-        await joinRoom();
-
-        try { await listenIncomingCalls(); } catch {}
-      }catch(e){
-        showError(e);
-      }
-    };
-  }
-
-  if (window.declineBtn) {
-    window.declineBtn.onclick = async ()=>{
-      try{
-        const call = currentIncomingCall;
-        stopIncomingUI();
-
-        if(!call) return;
-
-        const { id } = call;
-        await updateDoc(doc(db,"calls", id), {
-          status: "declined",
-          declinedAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-
-        setStatus(window.dirCallStatus, "❌ Declined incoming call.");
-        try { await listenIncomingCalls(); } catch {}
-      }catch(e){
-        showError(e);
-      }
-    };
-  }
-  
-  // Push notification buttons
-  if (window.resetPushBtn) {
-    window.resetPushBtn.onclick = async ()=>{
-      try{
-        setStatus(window.pushStatus, "Push: resetting…");
-        await revokePushForCurrentDevice();
-        await enablePush();
-        setStatus(window.pushStatus, "Push: enabled (reset).");
-      }catch(e){
-        showError(e);
-      }
-    };
-  }
-  
-  // Background service buttons
-  if (window.startBgBtn) {
-    window.startBgBtn.onclick = startBackgroundService;
-  }
-  
-  if (window.stopBgBtn) {
-    window.stopBgBtn.onclick = stopBackgroundService;
-  }
-}
-
-// ==================== DIAGNOSTICS ====================
-function initializeDiagnostics(){
-  if (window.diagBtn && window.diagBox && window.copyDiagBtn && window.clearDiagBtn) {
-    window.diagBtn.onclick = () => {
-      diagVisible = !diagVisible;
-      window.diagBox.style.display = diagVisible ? "block" : "none";
-      window.diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
-      if (diagVisible) {
-        window.diagBox.textContent = diagLog.join("\n");
-        window.diagBox.scrollTop = window.diagBox.scrollHeight;
-      }
-    };
-    
-    window.clearDiagBtn.onclick = () => {
-      diagLog.length = 0;
-      if (diagVisible) window.diagBox.textContent = "";
-      window.copyDiagBtn.disabled = true;
-      window.clearDiagBtn.disabled = true;
-      logDiag("Diagnostics cleared.");
-    };
-    
-    window.copyDiagBtn.onclick = async () => {
-      const text = diagLog.join("\n");
-      if (!text) return;
-      try{
-        await navigator.clipboard.writeText(text);
-        logDiag("Copied diagnostics to clipboard.");
-      }catch{
-        window.prompt("Copy diagnostics:", text);
-      }
-    };
-    
-    window.copyDiagBtn.disabled = diagLog.length === 0;
-    window.clearDiagBtn.disabled = diagLog.length === 0;
-  }
-}
+downloadBgLink.onclick = (e) => {
+  console.log('Downloading background app...');
+};
 
 // ==================== AUTH STATE LISTENER ====================
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
   myUid = user?.uid || null;
-  logDiag(isAuthed ? "✅ Auth: signed in as " + user.email : "Auth: signed out");
+  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
-    try{ 
-      await enforceAllowlist(user); 
-    } catch(e){
+    try{ await enforceAllowlist(user); }
+    catch(e){
       showError(e);
-      if (window.loginOverlay) window.loginOverlay.style.display = "flex";
-      if (window.appRoot) window.appRoot.classList.add("locked");
-      if (window.logoutBtn) window.logoutBtn.style.display = "none";
-      if (window.startBtn) window.startBtn.disabled = true;
+      loginOverlay.style.display = "flex";
+      appRoot.classList.add("locked");
+      logoutBtn.style.display = "none";
+      startBtn.disabled = true;
       return;
     }
 
-    if (window.loginOverlay) window.loginOverlay.style.display = "none";
-    if (window.appRoot) window.appRoot.classList.remove("locked");
-    if (window.logoutBtn) window.logoutBtn.style.display = "inline-block";
-    if (window.loginStatus) window.loginStatus.textContent = "✅ Signed in.";
+    setDeviceOwner(user.uid);
+    broadcastNewOwner(user.uid);
 
-    if (window.startBtn) window.startBtn.disabled = false;
-    setStatus(window.mediaStatus, "Ready. Click Start to enable camera/mic.");
+    loginOverlay.style.display = "none";
+    appRoot.classList.remove("locked");
+    logoutBtn.style.display = "inline-block";
+    loginStatus.textContent = "Signed in.";
 
-    if (window.videoQualitySelect) window.videoQualitySelect.disabled = false;
+    startBtn.disabled = false;
+    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
+
+    videoQualitySelect.disabled = false;
     updateVideoQualityUi();
 
-    if (window.testSoundBtn) window.testSoundBtn.disabled = false;
-    if (window.saveNameBtn) window.saveNameBtn.disabled = !String(window.myNameInput?.value||"").trim();
-    if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = false;
-    if (window.hangupBtn) window.hangupBtn.disabled = true;
-    if (window.resetPushBtn) window.resetPushBtn.disabled = false;
+    testSoundBtn.disabled = false;
+    resetPushBtn.disabled = false;
+
+    await rotateFcmTokenIfUserChanged();
+    autoEnablePushOnLogin();
+
+    saveNameBtn.disabled = !String(myNameInput.value||"").trim();
+    refreshUsersBtn.disabled = false;
+
+    hangupBtn.disabled = true;
 
     refreshCopyInviteState();
 
-    // Process push notifications
-    await rotateFcmTokenIfUserChanged();
-    autoEnablePushOnLogin();
-    
-    // Process any pending notifications from URL
+    try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+    await catchUpMissedRingingCall();
+    await catchUpMissedCallNotification();
+    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
+    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
+
     await processPendingNotifications();
 
-    try{ 
-      await ensureMyUserProfile(user); 
-    } catch(e){ 
-      logDiag("ensureMyUserProfile failed: " + (e?.message || e)); 
-    }
-    
-    try{ 
-      await loadAllAllowedUsers(); 
-    } catch(e){ 
-      logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); 
-    }
-    
-    try{ 
-      await listenIncomingCalls(); 
-    } catch(e){ 
-      logDiag("Incoming listener failed: " + (e?.message || e)); 
-    }
-    
-    try {
-      await catchUpMissedRingingCall();
-      await catchUpMissedCallNotification();
-    } catch (e) {
-      logDiag("Catch-up failed: " + e.message);
+    if (pendingIncomingCallWhileLoggedOut?.id) {
+      const callId = pendingIncomingCallWhileLoggedOut.id;
+      updateDoc(doc(db,"calls", callId), {
+        deliveredAt: serverTimestamp(),
+        deliveredVia: "push_open"
+      }).catch(()=>{});
     }
 
-    // Update background service status
     updateServiceStatus();
-    // Check status every 30 seconds
     setInterval(updateServiceStatus, 30000);
 
+    window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
+
   } else {
-    if (window.loginOverlay) window.loginOverlay.style.display = "flex";
-    if (window.appRoot) window.appRoot.classList.add("locked");
-    if (window.logoutBtn) window.logoutBtn.style.display = "none";
+    loginOverlay.style.display = "flex";
+    appRoot.classList.add("locked");
+    logoutBtn.style.display = "none";
     stopAll();
 
-    if (window.videoQualitySelect) window.videoQualitySelect.disabled = true;
-    if (window.testSoundBtn) window.testSoundBtn.disabled = true;
-    if (window.saveNameBtn) window.saveNameBtn.disabled = true;
-    if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = true;
-    if (window.resetPushBtn) window.resetPushBtn.disabled = true;
+    if(videoQualitySelect) videoQualitySelect.disabled = true;
 
-    setStatus(window.dirCallStatus, "Idle.");
-    if (window.myNameStatus) window.myNameStatus.textContent = "Not set.";
-    if (window.pushStatus) window.pushStatus.textContent = "Push: not enabled.";
+    testSoundBtn.disabled = true;
+    resetPushBtn.disabled = true;
 
-    window.bgStatus.textContent = 'Sign in required';
-    window.startBgBtn.disabled = true;
-    window.stopBgBtn.disabled = true;
+    saveNameBtn.disabled = true;
+    refreshUsersBtn.disabled = true;
 
-    if (window.usersList) window.usersList.innerHTML = "";
+    setStatus(pushStatus, "Push: not enabled.");
+    setStatus(dirCallStatus, "Idle.");
+    myNameStatus.textContent = "Not set.";
+
+    bgStatus.textContent = 'Sign in required';
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+
+    usersList.innerHTML = "";
     allUsersCache = [];
     myDisplayName = "";
   }
 });
 
-// ==================== INITIALIZATION ====================
-// Initialize when DOM is ready
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    logDiag("DOM loaded, initializing...");
-    initializeDomElements();
-    updateVideoQualityUi();
-    
-    // Register service worker early
-    ensureServiceWorkerInstalled().then(() => {
-      logDiag("Service worker registration attempted");
-    });
-
-// Send UID to Service Worker after registration
-if (navigator.serviceWorker.controller) {
-  navigator.serviceWorker.controller.postMessage({
-    type: 'SET_UID',
-    uid: myUid
-  });
-}
-    
-  });
-} else {
-  logDiag("DOM already loaded, initializing...");
-  initializeDomElements();
-  updateVideoQualityUi();
-  
-  // Register service worker early
-  ensureServiceWorkerInstalled().then(() => {
-    logDiag("Service worker registration attempted");
-  });
-}
-
-// Unlock audio on first click
-window.addEventListener("click", () => {
-  unlockAudio().catch(() => {});
-  logDiag("Page clicked, audio unlocked");
-}, { once: true });
-
-// Handle beforeunload
+// ==================== WINDOW EVENT LISTENERS ====================
 window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
-  try{ stopRingback(); }catch{}
-  logDiag("Page unloading...");
 });
-
-// Add this after the existing functions in main.js
-
-// --- Background notification support ---
-
-
-// Call this in the auth state change handler when user logs in
-
-
-
-// Test background notification function
-async function testBackgroundNotification() {
-  if (!requireAuthOrPrompt()) return;
-  
-  try {
-    const registration = await navigator.serviceWorker.ready;
-    
-    const messageChannel = new MessageChannel();
-    
-    registration.active.postMessage({
-      type: 'TEST_NOTIFICATION',
-      uid: myUid
-    }, [messageChannel.port2]);
-    
-    messageChannel.port1.onmessage = (event) => {
-      if (event.data.type === 'TEST_SUCCESS') {
-        alert("✅ Background notification test passed!");
-      } else {
-        alert("❌ Test failed: " + (event.data.error || "Unknown error"));
-      }
-    };
-    
-    setTimeout(() => {
-      messageChannel.port1.close();
-    }, 5000);
-    
-  } catch (error) {
-    alert("Test failed: " + error.message);
-  }
-}
-
-// Add a test button to HTML:
-// <button onclick="testBackgroundNotification()">Test Background Notification</button>
-
-
-console.log("WebRTC app initialization complete");
-console.log("Firebase app:", app.name);
-console.log("Ready for login...");
