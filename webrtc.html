@@ -2132,30 +2132,51 @@ async function loadAllAllowedUsers(){
 
 
 /* ================== RECENT CALLS LIST ================== */
- async function loadRecentCalls() {
+async function loadRecentCalls() {
   if (!requireAuthOrPrompt()) return;
   
   try {
-    // Get calls where user is either sender OR receiver using OR query
-    const callsQuery = query(
+    // Get incoming calls
+    const q1 = query(
       collection(db, "calls"),
-      or(
-        where("toUid", "==", myUid),
-        where("fromUid", "==", myUid)
-      ),
-      orderBy("createdAt", "desc"),
-      limit(30)
+      where("toUid", "==", myUid)
     );
     
-    const snap = await getDocs(callsQuery);
+    // Get outgoing calls  
+    const q2 = query(
+      collection(db, "calls"),
+      where("fromUid", "==", myUid)
+    );
     
-    const calls = [];
-    snap.forEach(doc => {
-      calls.push({ id: doc.id, ...doc.data() });
+    const [snap1, snap2] = await Promise.all([
+      getDocs(q1),
+      getDocs(q2)
+    ]);
+    
+    // Combine with deduplication using a Map
+    const callsMap = new Map();
+    
+    // Process incoming calls
+    snap1.docs.forEach(doc => {
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
     });
     
+    // Process outgoing calls (will overwrite duplicates with same ID)
+    snap2.docs.forEach(doc => {
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
+    });
+    
+    // Convert to array, sort by timestamp (most recent first), limit to 30
+    const calls = Array.from(callsMap.values())
+      .sort((a, b) => {
+        const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0;
+        const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0;
+        return bTime - aTime; // Descending order
+      })
+      .slice(0, 30);
+    
     renderCallsList(calls);
-    logDiag(`Loaded ${calls.length} recent calls`);
+    logDiag(`Loaded ${calls.length} recent calls (deduplicated)`);
     
   } catch (error) {
     logDiag("Error loading recent calls: " + error.message);
