@@ -2136,10 +2136,6 @@ async function loadRecentCalls() {
   if (!requireAuthOrPrompt()) return;
   
   try {
-    // Simple query without orderBy to avoid index requirement
-    // Get all calls where user is either recipient OR caller
-    const allCalls = [];
-    
     // Get incoming calls
     const q1 = query(
       collection(db, "calls"),
@@ -2157,30 +2153,32 @@ async function loadRecentCalls() {
       getDocs(q2)
     ]);
     
-    // Combine all calls
+    // Combine with deduplication using a Map
+    const callsMap = new Map();
+    
     snap1.docs.forEach(doc => {
-      allCalls.push({ id: doc.id, ...doc.data() });
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
     });
     
     snap2.docs.forEach(doc => {
-      allCalls.push({ id: doc.id, ...doc.data() });
+      callsMap.set(doc.id, { id: doc.id, ...doc.data() });
     });
     
-    // Sort manually by timestamp (most recent first) and limit to 30
-    const sortedCalls = allCalls
+    // Convert to array, sort by timestamp (most recent first), limit to 30
+    const sortedCalls = Array.from(callsMap.values())
       .sort((a, b) => {
         const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0;
         const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0;
-        return bTime - aTime;
+        return bTime - aTime; // Descending order
       })
       .slice(0, 30);
     
     renderCallsList(sortedCalls);
-    logDiag(`Loaded ${sortedCalls.length} recent calls from ${allCalls.length} total`);
+    logDiag(`Loaded ${sortedCalls.length} recent calls (deduplicated)`);
     
   } catch (error) {
     logDiag("Error loading recent calls: " + error.message);
-    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error loading calls: ${error.message}</div>`;
+    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error: ${error.message}</div>`;
   }
 }
 
