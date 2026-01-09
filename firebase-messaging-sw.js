@@ -1,4 +1,4 @@
-/* firebase-messaging-sw.js - Simplified reliable version */
+/* firebase-messaging-sw.js - Android Ringtone Version */
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-app-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-messaging-compat.js");
 importScripts("https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore-compat.js");
@@ -18,13 +18,17 @@ const firestore = firebase.firestore();
 
 // Android detection
 const isAndroid = /Android/.test(navigator.userAgent);
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 
-// Message channel for communication
-const messageChannel = new BroadcastChannel('sw_firestore_channel');
+// Audio context for playing ringtone (limited in Service Worker)
+let audioContext = null;
+let ringtoneSource = null;
+let ringtoneTimer = null;
+let ringtoneTimeout = null;
+const RINGTONE_DURATION = 60000; // Ring for 60 seconds
 
 // Current user state
 let currentUid = null;
-let unsubscribeCallListener = null;
 
 // --- Handle messages from web page ---
 self.addEventListener('message', (event) => {
@@ -33,24 +37,134 @@ self.addEventListener('message', (event) => {
   if (data.type === 'SET_UID') {
     currentUid = data.uid;
     console.log('[SW] UID set:', currentUid);
-    
-    // Send acknowledgment
-    event.ports?.[0]?.postMessage({ 
-      type: 'UID_ACK', 
-      uid: data.uid,
-      timestamp: Date.now() 
-    });
   }
   
-  if (data.type === 'CLEAR_UID') {
-    currentUid = null;
-    console.log('[SW] UID cleared');
-    if (unsubscribeCallListener) {
-      unsubscribeCallListener();
-      unsubscribeCallListener = null;
-    }
+  if (data.type === 'STOP_RINGTONE') {
+    stopRingtone();
   }
 });
+
+// --- Audio functions for ringtone ---
+async function playRingtone() {
+  try {
+    console.log('[SW] Attempting to play ringtone...');
+    
+    // Stop any existing ringtone first
+    stopRingtone();
+    
+    // Note: Service Workers have limited audio capabilities
+    // We'll try to play a simple tone as a fallback
+    
+    // Create a simple beep pattern (beep every 2 seconds)
+    let beepCount = 0;
+    const maxBeeps = Math.floor(RINGTONE_DURATION / 2000);
+    
+    ringtoneTimer = setInterval(() => {
+      // Create a simple notification to trigger sound
+      // This is a workaround since Service Workers can't play audio directly
+      self.registration.showNotification('📞 Ringing...', {
+        body: 'Incoming call',
+        tag: 'ringtone-beep-' + Date.now(),
+        silent: false,
+        requireInteraction: false,
+        vibrate: [200, 100, 200],
+        // Close immediately to not show visually
+      }).then(notification => {
+        // Close immediately - we just want the sound
+        setTimeout(() => notification.close(), 100);
+      });
+      
+      beepCount++;
+      if (beepCount >= maxBeeps) {
+        stopRingtone();
+      }
+    }, 2000);
+    
+    console.log('[SW] Ringtone pattern started');
+    
+    // Auto-stop after duration
+    ringtoneTimeout = setTimeout(() => {
+      stopRingtone();
+    }, RINGTONE_DURATION);
+    
+  } catch (error) {
+    console.error('[SW] Error playing ringtone:', error);
+  }
+}
+
+function stopRingtone() {
+  if (ringtoneTimer) {
+    clearInterval(ringtoneTimer);
+    ringtoneTimer = null;
+  }
+  
+  if (ringtoneTimeout) {
+    clearTimeout(ringtoneTimeout);
+    ringtoneTimeout = null;
+  }
+  
+  console.log('[SW] Ringtone stopped');
+}
+
+// --- Create Android notification with sound priority ---
+function createAndroidNotification(title, body, data) {
+  // For Android, we need to create a high-priority notification
+  // that triggers the default ringtone
+  
+  const notificationData = {
+    callId: data.callId,
+    toUid: data.toUid,
+    roomId: data.roomId,
+    fromName: data.fromName,
+    note: data.note,
+    sentAtMs: data.sentAtMs,
+    source: 'android_ringtone',
+    launchUrl: data.launchUrl
+  };
+  
+  return {
+    title: title,
+    body: body,
+    icon: '/easosunov/icons/RTC192.png',
+    badge: '/easosunov/icons/RTC96.png',
+    tag: `call-${data.callId}`,
+    renotify: true,
+    requireInteraction: true, // Critical for Android to keep showing
+    silent: false, // MUST be false for sound
+    timestamp: Date.now(),
+    data: notificationData,
+    actions: [
+      {
+        action: 'answer',
+        title: '📞 Answer',
+        icon: '/easosunov/icons/answer.png'
+      },
+      {
+        action: 'decline',
+        title: '❌ Decline',
+        icon: '/easosunov/icons/decline.png'
+      }
+    ],
+    // Android-specific options
+    vibrate: [1000, 500, 1000, 500, 2000, 500, 1000], // Long distinctive pattern
+    // Add sound configuration
+    sound: 'default', // Use default notification sound
+    // Priority settings for Android
+    priority: 2, // High priority (Android)
+    // Android notification channel settings
+    android: {
+      channelId: 'incoming_calls_channel',
+      priority: 'high',
+      visibility: 'public',
+      sound: 'default',
+      vibrate: 'default',
+      lights: ['#4CAF50', 1000, 1000],
+      // Make it sticky/ongoing
+      ongoing: true,
+      autoCancel: false
+    }
+  };
+}
 
 // --- Handle FCM background messages ---
 messaging.onBackgroundMessage(async (payload) => {
@@ -59,48 +173,17 @@ messaging.onBackgroundMessage(async (payload) => {
   try {
     const data = payload?.data || {};
     
-    if (data.callId && data.toUid === currentUid) {
+    if (data.callId) {
       await showCallNotification(data);
-    } else {
-      console.log('[SW] Ignoring FCM message - no callId or UID mismatch');
+      
+      // Start ringtone for Android
+      if (isAndroid) {
+        await playRingtone();
+      }
     }
   } catch (error) {
     console.error('[SW] Error in onBackgroundMessage:', error);
   }
-});
-
-// --- Handle push events (direct from FCM) ---
-self.addEventListener("push", (event) => {
-  console.log('[SW] Push event received');
-  
-  event.waitUntil((async () => {
-    if (!event.data) {
-      console.log('[SW] Push event has no data');
-      return;
-    }
-    
-    let payload;
-    try {
-      payload = event.data.json();
-    } catch (jsonError) {
-      try {
-        const text = await event.data.text();
-        payload = text ? JSON.parse(text) : null;
-      } catch (textError) {
-        console.error('[SW] Failed to parse push data:', textError);
-        return;
-      }
-    }
-    
-    if (!payload) return;
-    
-    const data = payload?.data || {};
-    
-    // Show notification for call
-    if (data.callId) {
-      await showCallNotification(data);
-    }
-  })());
 });
 
 // --- Show call notification ---
@@ -126,45 +209,66 @@ async function showCallNotification(data) {
     note,
     sentAtMs: data.sentAtMs || Date.now(),
     source: 'fcm_push',
-    launchUrl: `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}&fromName=${encodeURIComponent(fromName)}`
+    launchUrl: `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}&fromName=${encodeURIComponent(fromName)}&note=${encodeURIComponent(note)}`
   };
   
-  // Create notification options
-  const notificationOptions = {
-    body: body,
-    icon: '/easosunov/icons/RTC192.png',
-    badge: '/easosunov/icons/RTC96.png',
-    tag: `call-${callId}`,
-    renotify: true,
-    requireInteraction: true, // Don't auto-dismiss
-    timestamp: Date.now(),
-    data: notificationData,
-    actions: [
-      {
-        action: 'answer',
-        title: 'Answer',
-        icon: '/easosunov/icons/answer.png'
-      },
-      {
-        action: 'decline',
-        title: 'Decline',
-        icon: '/easosunov/icons/decline.png'
-      }
-    ],
-    silent: false, // Ensure sound plays
-    vibrate: [500, 250, 500, 250, 1000] // Distinctive vibration
-  };
+  // Create notification options based on platform
+  let notificationOptions;
   
-  // Add Android-specific options
   if (isAndroid) {
-    // Android requires specific format for persistent notifications
-    notificationOptions.data.android = {
-      channelId: 'incoming_calls',
-      priority: 'high',
-      visibility: 'public',
-      ongoing: true, // Persistent notification
-      autoCancel: false,
-      fullScreenIntent: true
+    notificationOptions = createAndroidNotification(title, body, notificationData);
+  } else if (isIOS) {
+    // iOS specific options
+    notificationOptions = {
+      title: title,
+      body: body,
+      icon: '/easosunov/icons/RTC192.png',
+      badge: '/easosunov/icons/RTC96.png',
+      tag: `call-${callId}`,
+      renotify: true,
+      requireInteraction: true,
+      silent: false,
+      timestamp: Date.now(),
+      data: notificationData,
+      actions: [
+        {
+          action: 'answer',
+          title: 'Answer',
+          icon: '/easosunov/icons/answer.png'
+        },
+        {
+          action: 'decline',
+          title: 'Decline',
+          icon: '/easosunov/icons/decline.png'
+        }
+      ],
+      sound: 'default'
+    };
+  } else {
+    // Desktop/other platforms
+    notificationOptions = {
+      title: title,
+      body: body,
+      icon: '/easosunov/icons/RTC192.png',
+      badge: '/easosunov/icons/RTC96.png',
+      tag: `call-${callId}`,
+      renotify: true,
+      requireInteraction: true,
+      silent: false,
+      timestamp: Date.now(),
+      data: notificationData,
+      actions: [
+        {
+          action: 'answer',
+          title: 'Answer',
+          icon: '/easosunov/icons/answer.png'
+        },
+        {
+          action: 'decline',
+          title: 'Decline',
+          icon: '/easosunov/icons/decline.png'
+        }
+      ]
     };
   }
   
@@ -179,18 +283,21 @@ async function showCallNotification(data) {
     await self.registration.showNotification(title, notificationOptions);
     console.log('[SW] Notification shown for call:', callId);
     
-    // Mark as delivered in Firestore if we have access
-    if (callId && currentUid) {
-      try {
-        await firestore.collection('calls').doc(callId).update({
-          deliveredAt: firebase.firestore.FieldValue.serverTimestamp(),
-          deliveredVia: 'fcm_push',
-          deliveredAtMs: Date.now()
-        });
-        console.log('[SW] Marked as delivered:', callId);
-      } catch (firestoreError) {
-        console.log('[SW] Could not update Firestore (normal if no permission):', firestoreError);
-      }
+    // For Android, start periodic re-notification to keep sound playing
+    if (isAndroid) {
+      // Re-show notification every 15 seconds to keep it fresh and playing sound
+      const renotificationInterval = setInterval(async () => {
+        try {
+          await self.registration.showNotification(title + ' 📞', notificationOptions);
+        } catch (e) {
+          clearInterval(renotificationInterval);
+        }
+      }, 15000);
+      
+      // Stop after 60 seconds
+      setTimeout(() => {
+        clearInterval(renotificationInterval);
+      }, RINGTONE_DURATION);
     }
     
   } catch (error) {
@@ -203,6 +310,7 @@ self.addEventListener("notificationclick", (event) => {
   console.log('[SW] Notification clicked:', event.notification?.data);
   
   event.notification.close();
+  stopRingtone(); // Stop ringtone when notification is clicked
   
   const data = event.notification?.data || {};
   const action = event.action;
@@ -228,7 +336,6 @@ function handleAnswerAction(data) {
 }
 
 function handleDeclineAction(data) {
-  // Mark as declined in Firestore if possible
   if (data.callId) {
     firestore.collection('calls').doc(data.callId).update({
       status: 'declined',
@@ -236,13 +343,6 @@ function handleDeclineAction(data) {
       declinedVia: 'notification'
     }).catch(console.error);
   }
-  
-  // Show confirmation
-  self.registration.showNotification('Call Declined', {
-    body: `You declined call from ${data.fromName || 'unknown'}`,
-    icon: '/easosunov/icons/RTC192.png',
-    tag: `declined-${Date.now()}`
-  });
 }
 
 function handleDefaultClick(data) {
@@ -270,7 +370,6 @@ async function openOrFocusWindow(url) {
     includeUncontrolled: true
   });
   
-  // Look for existing window
   for (const client of clients) {
     if (client.url.includes('/easosunov/')) {
       await client.focus();
@@ -283,7 +382,6 @@ async function openOrFocusWindow(url) {
     }
   }
   
-  // Open new window if none exists
   await self.clients.openWindow(url);
 }
 
@@ -292,7 +390,6 @@ self.addEventListener('install', (event) => {
   console.log('[SW] Installing service worker');
   self.skipWaiting();
   
-  // Cache important resources
   event.waitUntil(
     caches.open('webrtc-v1').then(cache => {
       return cache.addAll([
@@ -310,4 +407,4 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-console.log('[SW] Service Worker loaded');
+console.log('[SW] Android Ringtone Service Worker loaded');
