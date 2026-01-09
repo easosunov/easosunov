@@ -12,7 +12,7 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-08-push-fixed");
+console.log("APP VERSION:", "2026-01-08-status-fix");
 
 // ==================== NOTIFICATION HANDLING ====================
 let webPageShowedNotification = false;
@@ -107,6 +107,10 @@ let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 let currentIncomingCall = null;
 let activeCallId = null;
 let lastDismissedIncomingCallId = null;
+
+// Connection tracking
+let connectionEstablished = false;
+let currentCallType = null; // 'incoming' or 'outgoing'
 
 // Firestore listeners
 let unsubRoomA = null, unsubCalleeA = null;
@@ -469,9 +473,10 @@ async function enablePush(){
           if (call.roomId) window.roomIdInput.value = call.roomId;
           currentIncomingCall = { id: data.callId, data: call };
 
-          window.incomingText.textContent =
-            payload?.notification?.body ||
-            (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
+          // Fix: Format notification text properly
+          const fromName = call.fromName || "Unknown";
+          const toName = call.toName || "you";
+          window.incomingText.textContent = `Call from ${fromName} to ${toName}…`;
 
           window.incomingOverlay.style.display = "flex";
           startRingtone();
@@ -749,6 +754,8 @@ function closePeer(){
     pc = null;
   }
   if (window.remoteVideo) window.remoteVideo.srcObject = null;
+  connectionEstablished = false;
+  currentCallType = null;
 }
 
 async function ensurePeer() {
@@ -783,8 +790,27 @@ async function ensurePeer() {
     if (pc) {
       const state = pc.connectionState;
       logDiag("Peer connection state: " + state);
-      if (window.callStatus) {
-        setStatus(window.callStatus, `Connection: ${state}`);
+      
+      // Update status based on connection state
+      if (state === "connected") {
+        connectionEstablished = true;
+        if (currentCallType === 'incoming') {
+          setStatus(window.dirCallStatus, "✅ Connected (incoming call)");
+        } else if (currentCallType === 'outgoing') {
+          setStatus(window.dirCallStatus, "✅ Connected (outgoing call)");
+        } else {
+          setStatus(window.dirCallStatus, "✅ Connected");
+        }
+        setStatus(window.callStatus, "✅ Connected");
+      } else if (state === "disconnected" || state === "failed" || state === "closed") {
+        connectionEstablished = false;
+        if (window.callStatus) {
+          setStatus(window.callStatus, `Connection: ${state}`);
+        }
+      } else {
+        if (window.callStatus) {
+          setStatus(window.callStatus, `Connection: ${state}`);
+        }
       }
     }
   };
@@ -939,8 +965,14 @@ function stopCallListeners(){
 // ==================== CALL MANAGEMENT ====================
 function showIncomingUI(callId, data){
   currentIncomingCall = { id: callId, data };
+  
+  // FIX: Properly format the notification text
+  const fromName = data.fromName || "unknown";
+  const toName = data.toName || "you";
+  const callText = `Call from ${fromName} to ${toName}…`;
+  
   if (window.incomingText) {
-    window.incomingText.textContent = `Call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
+    window.incomingText.textContent = callText;
   }
 
   if (window.incomingOverlay) {
@@ -948,7 +980,16 @@ function showIncomingUI(callId, data){
   }
   startRingtone();
   
-  logDiag(`Showing incoming call UI for ${callId} from ${data.fromName}`);
+  logDiag(`Showing incoming call UI: ${callText}`);
+  
+  // Mark as delivered
+  updateDoc(doc(db,"calls", callId), {
+    deliveredAt: serverTimestamp(),
+    deliveredVia: "web_page",
+    deliveredAtMs: Date.now()
+  }).catch(()=>{
+    logDiag("Failed to update delivered status");
+  });
 }
 
 function stopIncomingUI(){
@@ -1028,7 +1069,12 @@ async function catchUpMissedRingingCall() {
 
     if (call.roomId) window.roomIdInput.value = call.roomId;
     currentIncomingCall = { id: callId, data: call };
-    window.incomingText.textContent = `Call from ${call.fromName || "unknown"} to ${call.toName || "you"}…`;
+    
+    // FIX: Properly format the text
+    const fromName = call.fromName || "unknown";
+    const toName = call.toName || "you";
+    window.incomingText.textContent = `Call from ${fromName} to ${toName}…`;
+    
     window.incomingOverlay.style.display = "flex";
     startRingtone();
 
@@ -1047,6 +1093,7 @@ async function catchUpMissedCallNotification() {
 
     async function showMissed(callId, call, whenMs) {
       const fromName = call.fromName || "Unknown";
+      const toName = call.toName || "you";
       const note = String(call.note || "").trim();
       const tsLocal = new Date(whenMs).toLocaleString();
 
@@ -1056,7 +1103,7 @@ async function catchUpMissedCallNotification() {
       if ("Notification" in window && Notification.permission === "granted") {
         const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
         if (reg) {
-          const body = `Missed call from ${fromName} to ${call.toName || "you"}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
+          const body = `Missed call from ${fromName} to ${toName}` + (note ? ` — ${note}` : "") + ` — ${tsLocal}`;
           await reg.showNotification("Missed call", {
             body,
             tag: `webrtc-missed-${myUid}`,
@@ -1375,17 +1422,23 @@ async function startCallToUid(toUid, toName=""){
   if(!toUid) throw new Error("Missing toUid.");
   if(toUid === myUid) throw new Error("You can't call yourself.");
 
+  // Set call type for status tracking
+  currentCallType = 'outgoing';
+  
   setStatus(window.dirCallStatus, "Creating room…");
   const created = await createRoom();
   if(!created?.roomId) throw new Error("Room creation failed.");
 
   const note = String(window.callNoteInput?.value || "").trim().slice(0, 140);
 
+  // FIX: Ensure toName is properly set
+  const callToName = toName || "user";
+  
   const callRef = await addDoc(collection(db,"calls"), {
     fromUid: myUid,
     toUid,
     fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value) || "(unknown)",
-    toName: toName || "",
+    toName: callToName, // Use properly formatted toName
     roomId: created.roomId,
     note,
     status: "ringing",
@@ -1403,17 +1456,20 @@ async function startCallToUid(toUid, toName=""){
 
   activeCallId = callRef.id;
   
-  // Send push notification
+  // Send push notification with properly formatted message
   try {
-    await sendIncomingCallNotification({
+    const notificationMessage = {
       toUid: toUid,
       callId: callRef.id,
       fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value),
+      toName: callToName, // Include toName in notification
       note: note,
       roomId: created.roomId,
       timestamp: new Date().toLocaleString(),
       sentAtMs: Date.now(),
-    });
+    };
+    
+    await sendIncomingCallNotification(notificationMessage);
     
     // Update call document with push status
     await updateDoc(doc(db, "calls", callRef.id), {
@@ -1431,7 +1487,7 @@ async function startCallToUid(toUid, toName=""){
 
   if (window.hangupBtn) window.hangupBtn.disabled = false;
   listenActiveCall(activeCallId);
-  setStatus(window.dirCallStatus, `📞 Calling ${toName || "user"}…`);
+  setStatus(window.dirCallStatus, `📞 Calling ${callToName}…`);
   startRingback();
   logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
 }
@@ -1463,7 +1519,11 @@ function stopAll(){
   refreshCopyInviteState();
 
   if (window.hangupBtn) window.hangupBtn.disabled = true;
-  setStatus(window.dirCallStatus, "Idle.");
+  
+  // Only set to "Idle" if not connected
+  if (!connectionEstablished) {
+    setStatus(window.dirCallStatus, "Idle.");
+  }
 
   logDiag("All stopped and cleaned up");
 }
@@ -1633,6 +1693,9 @@ async function joinRoom(){
 
   stopListeners();
 
+  // Set call type for status tracking
+  currentCallType = 'incoming';
+  
   setStatus(window.callStatus, "Connecting to room…");
   logDiag("Found room, setting up listeners");
 
