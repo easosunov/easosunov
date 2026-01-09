@@ -514,6 +514,7 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
 let myUid = null;
+let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
 
 const setStatus = (el,msg)=> el.textContent = msg;
@@ -1200,6 +1201,7 @@ function requireAuthOrPrompt(){
 loginBtn.onclick = async () => {
   hideErrorBox();
   loginStatus.textContent = "Signing in…";
+  wasManualLogin = true;  // <-- Add this line
   try {
     await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
     loginStatus.textContent = "Signed in. Checking allowlist…";
@@ -3124,19 +3126,15 @@ onAuthStateChanged(auth, async (user)=>{
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
 
-    // DO NOT hide login overlay automatically - only hide it after explicit login
-    // Keep login overlay visible if user wasn't just authenticated via the login form
-    if (emailInput.value.trim() && passInput.value) {
-      // User just logged in via form - hide login overlay
+    // Hide login overlay if this was a manual login
+    if (wasManualLogin) {
       loginOverlay.style.display = "none";
       appRoot.classList.remove("locked");
+      wasManualLogin = false;
     } else {
-      // User was auto-authenticated (e.g., from previous session)
-      // Keep login overlay visible to force re-authentication
-      loginOverlay.style.display = "flex";
-      appRoot.classList.add("locked");
-      loginStatus.textContent = "Session expired. Please sign in again.";
-      return;
+      // Auto-authenticated - still allow access
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
     }
     
     logoutBtn.style.display = "inline-block";
