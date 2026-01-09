@@ -12,7 +12,7 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-08-restored");
+console.log("APP VERSION:", "2026-01-08-fixed-complete");
 
 // ==================== STATE VARIABLES ====================
 let isAuthed = false;
@@ -39,7 +39,7 @@ let unsubRoomB = null, unsubCallerB = null;
 let unsubIncoming = null;
 let unsubCallDoc = null;
 
-// ==================== SIMPLE LOGGING ====================
+// ==================== ENHANCED LOGGING SYSTEM ====================
 const diagLog = [];
 let diagVisible = false;
 
@@ -48,49 +48,103 @@ function logDiag(msg){
   diagLog.push(line);
   console.log(line);
   
-  if (diagVisible && diagBox) {
-    diagBox.textContent = diagLog.join("\n");
-    diagBox.scrollTop = diagBox.scrollHeight;
+  // Update diagnostics box if visible
+  if (diagVisible && window.diagBox) {
+    window.diagBox.textContent = diagLog.join("\n");
+    window.diagBox.scrollTop = window.diagBox.scrollHeight;
   }
+  
+  // Update button states
+  if (window.copyDiagBtn) window.copyDiagBtn.disabled = diagLog.length === 0;
+  if (window.clearDiagBtn) window.clearDiagBtn.disabled = diagLog.length === 0;
 }
 
 // ==================== DOM ELEMENT REFERENCES ====================
-let errorBox, loginOverlay, loginBtn, logoutBtn, loginStatus, emailInput, passInput, appRoot;
-let localVideo, remoteVideo, startBtn, createBtn, joinBtn, copyLinkBtn, roomIdInput, mediaStatus, callStatus;
-let diagBtn, diagBox, copyDiagBtn, clearDiagBtn;
-let incomingOverlay, incomingText, answerBtn, declineBtn;
-let myNameInput, saveNameBtn, refreshUsersBtn, myNameStatus, userSearchInput, usersList, dirCallStatus;
-let pushStatus, testSoundBtn, hangupBtn, resetPushBtn, callNoteInput;
-let videoQualitySelect, videoQualityStatus;
+// We'll use window object to make elements globally accessible
+function initializeDomElements() {
+  window.errorBox = document.getElementById("errorBox");
+  window.loginOverlay = document.getElementById("loginOverlay");
+  window.loginBtn = document.getElementById("loginBtn");
+  window.logoutBtn = document.getElementById("logoutBtn");
+  window.loginStatus = document.getElementById("loginStatus");
+  window.emailInput = document.getElementById("emailInput");
+  window.passInput = document.getElementById("passInput");
+  window.appRoot = document.getElementById("app");
 
-// ==================== VIDEO QUALITY PROFILES ====================
-const VIDEO_PROFILES = {
-  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
-  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
-  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
-};
-
-let selectedVideoQuality = "medium";
+  window.localVideo = document.getElementById("localVideo");
+  window.remoteVideo = document.getElementById("remoteVideo");
+  window.startBtn = document.getElementById("startBtn");
+  window.createBtn = document.getElementById("createBtn");
+  window.joinBtn = document.getElementById("joinBtn");
+  window.copyLinkBtn = document.getElementById("copyLinkBtn");
+  window.roomIdInput = document.getElementById("roomId");
+  window.mediaStatus = document.getElementById("mediaStatus");
+  window.callStatus = document.getElementById("callStatus");
+  
+  window.diagBtn = document.getElementById("diagBtn");
+  window.diagBox = document.getElementById("diagBox");
+  window.copyDiagBtn = document.getElementById("copyDiagBtn");
+  window.clearDiagBtn = document.getElementById("clearDiagBtn");
+  
+  window.incomingOverlay = document.getElementById("incomingOverlay");
+  window.incomingText = document.getElementById("incomingText");
+  window.answerBtn = document.getElementById("answerBtn");
+  window.declineBtn = document.getElementById("declineBtn");
+  
+  window.myNameInput = document.getElementById("myNameInput");
+  window.saveNameBtn = document.getElementById("saveNameBtn");
+  window.refreshUsersBtn = document.getElementById("refreshUsersBtn");
+  window.myNameStatus = document.getElementById("myNameStatus");
+  window.userSearchInput = document.getElementById("userSearchInput");
+  window.usersList = document.getElementById("usersList");
+  window.dirCallStatus = document.getElementById("dirCallStatus");
+  
+  window.pushStatus = document.getElementById("pushStatus");
+  window.testSoundBtn = document.getElementById("testSoundBtn");
+  window.hangupBtn = document.getElementById("hangupBtn");
+  window.resetPushBtn = document.getElementById("resetPushBtn");
+  window.callNoteInput = document.getElementById("callNoteInput");
+  
+  window.videoQualitySelect = document.getElementById("videoQualitySelect");
+  window.videoQualityStatus = document.getElementById("videoQualityStatus");
+  
+  window.startBgBtn = document.getElementById('startBgBtn');
+  window.stopBgBtn = document.getElementById('stopBgBtn');
+  window.bgStatus = document.getElementById('bgStatus');
+  
+  setupEventListeners();
+  initializeDiagnostics();
+}
 
 // ==================== UTILITY FUNCTIONS ====================
-const setStatus = (el, msg) => {
-  if (el) el.textContent = msg;
-};
+function setStatus(el, msg) {
+  if (el && el.textContent !== undefined) {
+    el.textContent = msg;
+  }
+}
 
 function showError(e){
   const code = e?.code ? `\ncode: ${e.code}` : "";
   const msg  = e?.message ? `\nmessage: ${e.message}` : "";
-  if (errorBox) {
-    errorBox.style.display = "block";
-    errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
+  const errorMsg = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
+  
+  if (window.errorBox) {
+    window.errorBox.style.display = "block";
+    window.errorBox.textContent = errorMsg;
   }
+  
   logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
+  
+  // Also show in call status if available
+  if (window.callStatus) {
+    setStatus(window.callStatus, "Error: " + (e?.message || "Unknown error"));
+  }
 }
 
 function hideErrorBox(){
-  if (errorBox) {
-    errorBox.style.display = "none";
-    errorBox.textContent = "";
+  if (window.errorBox) {
+    window.errorBox.style.display = "none";
+    window.errorBox.textContent = "";
   }
 }
 
@@ -118,8 +172,19 @@ const auth = getAuth(app);
 })();
 
 // ==================== MEDIA FUNCTIONS ====================
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+let selectedVideoQuality = "medium";
+
 async function startMedia() {
-  if (!requireAuthOrPrompt()) return;
+  if (!requireAuthOrPrompt()) {
+    logDiag("Cannot start media: not authenticated");
+    return;
+  }
 
   if (localStream) {
     logDiag("Media already started");
@@ -127,7 +192,8 @@ async function startMedia() {
   }
 
   hideErrorBox();
-  setStatus(mediaStatus, "Requesting camera/mic…");
+  setStatus(window.mediaStatus, "Requesting camera/mic…");
+  logDiag("Starting media with getUserMedia...");
 
   const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
 
@@ -137,46 +203,48 @@ async function startMedia() {
       audio: true
     });
 
-    if (localVideo) {
-      localVideo.srcObject = localStream;
+    if (window.localVideo) {
+      window.localVideo.srcObject = localStream;
       
-      localVideo.onloadedmetadata = async () => {
+      window.localVideo.onloadedmetadata = async () => {
         try {
-          await localVideo.play();
-          setStatus(mediaStatus, "Camera/mic started.");
-          logDiag("Local video playing.");
+          await window.localVideo.play();
+          setStatus(window.mediaStatus, "✅ Camera/mic started.");
+          logDiag("Local video playing successfully");
         } catch (e) {
           logDiag("Video play error: " + e.message);
+          setStatus(window.mediaStatus, "Camera/mic started (playback issue).");
         }
       };
     }
 
-    // Enable buttons
-    if (startBtn) startBtn.disabled = true;
-    if (createBtn) createBtn.disabled = false;
-    if (joinBtn) joinBtn.disabled = false;
+    // Enable WebRTC buttons
+    if (window.startBtn) window.startBtn.disabled = true;
+    if (window.createBtn) window.createBtn.disabled = false;
+    if (window.joinBtn) window.joinBtn.disabled = false;
 
     // Load ICE servers
     await loadIceServers();
 
-    logDiag("Media started successfully");
+    logDiag("Media started successfully with " + selectedVideoQuality + " quality");
 
   } catch (e) {
-    setStatus(mediaStatus, "Failed to start media: " + e.name);
+    const errorMsg = "Failed to start media: " + e.name + " - " + e.message;
+    setStatus(window.mediaStatus, errorMsg);
     logDiag("getUserMedia error: " + e.message);
     
     // Reset state on error
     localStream = null;
-    if (startBtn) startBtn.disabled = false;
-    if (createBtn) createBtn.disabled = true;
-    if (joinBtn) joinBtn.disabled = true;
+    if (window.startBtn) window.startBtn.disabled = false;
+    if (window.createBtn) window.createBtn.disabled = true;
+    if (window.joinBtn) window.joinBtn.disabled = true;
     
     throw e;
   }
 }
 
 async function loadIceServers() {
-  logDiag("Fetching ICE servers …");
+  logDiag("Fetching ICE servers…");
   try {
     const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
     if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
@@ -204,26 +272,26 @@ async function applyVideoQualityToCurrentStream(quality) {
 }
 
 function updateVideoQualityUi(){
-  if (videoQualitySelect) {
-    videoQualitySelect.value = selectedVideoQuality;
+  if (window.videoQualitySelect) {
+    window.videoQualitySelect.value = selectedVideoQuality;
   }
   const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
-  if (videoQualityStatus) {
-    videoQualityStatus.textContent = `Video: ${label}.`;
+  if (window.videoQualityStatus) {
+    window.videoQualityStatus.textContent = `Video: ${label}.`;
   }
 }
 
 // ==================== WEBRTC PEER CONNECTION FUNCTIONS ====================
 function closePeer(){
   if(pc){
-    pc.onicecandidate=null;
-    pc.ontrack=null;
-    pc.onconnectionstatechange=null;
-    pc.oniceconnectionstatechange=null;
+    pc.onicecandidate = null;
+    pc.ontrack = null;
+    pc.onconnectionstatechange = null;
+    pc.oniceconnectionstatechange = null;
     try{ pc.close(); }catch{}
-    pc=null;
+    pc = null;
   }
-  if (remoteVideo) remoteVideo.srcObject = null;
+  if (window.remoteVideo) window.remoteVideo.srcObject = null;
 }
 
 async function ensurePeer() {
@@ -237,38 +305,43 @@ async function ensurePeer() {
   logDiag("Created RTCPeerConnection with ICE servers");
 
   const rs = new MediaStream();
-  if (remoteVideo) {
-    remoteVideo.srcObject = rs;
+  if (window.remoteVideo) {
+    window.remoteVideo.srcObject = rs;
   }
 
   pc.ontrack = (e) => {
     if (e.streams[0]) {
       e.streams[0].getTracks().forEach(t => rs.addTrack(t));
-      if (remoteVideo) {
-        remoteVideo.muted = false;
-        remoteVideo.play().catch(() => {});
+      if (window.remoteVideo) {
+        window.remoteVideo.muted = false;
+        window.remoteVideo.play().catch(e => {
+          logDiag("Remote video play error: " + e.message);
+        });
       }
-      logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+      logDiag(`Received remote track: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
     }
   };
 
   pc.onconnectionstatechange = () => { 
     if (pc) {
-      logDiag("pc.connectionState=" + pc.connectionState);
-      if (callStatus) {
-        setStatus(callStatus, `Connection: ${pc.connectionState}`);
+      const state = pc.connectionState;
+      logDiag("Peer connection state: " + state);
+      if (window.callStatus) {
+        setStatus(window.callStatus, `Connection: ${state}`);
       }
     }
   };
   
   pc.oniceconnectionstatechange = () => { 
     if (pc) {
-      logDiag("pc.iceConnectionState=" + pc.iceConnectionState);
+      logDiag("ICE connection state: " + pc.iceConnectionState);
     }
   };
 
   if (!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  
+  logDiag("Local tracks added to peer connection");
 }
 
 // ==================== AUDIO FUNCTIONS ====================
@@ -283,6 +356,7 @@ async function unlockAudio() {
   try {
     const ctx = ensureAudio();
     if (ctx.state !== "running") await ctx.resume();
+    logDiag("Audio context unlocked");
   } catch (e) {
     logDiag("Audio unlock error: " + e.message);
   }
@@ -332,53 +406,23 @@ function stopRingtone() {
   ringGain = null;
 }
 
-function playRingbackBeepOnce(){
-  try{
-    const ctx = ensureAudio();
-    if(ctx.state !== "running") ctx.resume().catch(()=>{});
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    gain.gain.value = 0.04;
-    osc.type = "sine";
-    osc.frequency.value = 440;
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    osc.start(now);
-    osc.stop(now + 0.18);
-
-    osc.onended = ()=>{
-      try{ osc.disconnect(); }catch{}
-      try{ gain.disconnect(); }catch{}
-    };
-  }catch{}
-}
-
-function startRingback(){
+function startRingback() {
   stopRingback();
-
-  try{ unlockAudio(); }catch{}
-
-  const cycleMs = 2500;
-
-  playRingbackBeepOnce();
-  setTimeout(()=> playRingbackBeepOnce(), 250);
-
-  ringbackTimer = setInterval(()=>{
-    playRingbackBeepOnce();
-    setTimeout(()=> playRingbackBeepOnce(), 250);
-  }, cycleMs);
+  logDiag("Ringback started");
+  
+  // Simple beep pattern for ringback
+  ringbackTimer = setInterval(() => {
+    startRingtone();
+    setTimeout(() => stopRingtone(), 500);
+  }, 2000);
 }
 
-function stopRingback(){
-  if(ringbackTimer){
+function stopRingback() {
+  if (ringbackTimer) {
     clearInterval(ringbackTimer);
     ringbackTimer = null;
   }
+  stopRingtone();
 }
 
 // ==================== FIRESTORE HELPER FUNCTIONS ====================
@@ -407,13 +451,16 @@ function stopCallListeners(){
 
 // ==================== ROOM CREATION (CALLER SIDE) ====================
 async function createRoom(){
-  if(!requireAuthOrPrompt()) return null;
+  if(!requireAuthOrPrompt()) {
+    logDiag("Cannot create room: not authenticated");
+    return null;
+  }
 
   stopListeners();
   await startMedia();
 
   const roomRef = doc(collection(db, "rooms"));
-  if (roomIdInput) roomIdInput.value = roomRef.id;
+  if (window.roomIdInput) window.roomIdInput.value = roomRef.id;
   
   // Update URL hash
   location.hash = roomRef.id;
@@ -432,48 +479,67 @@ async function createRoom(){
 
   pc.onicecandidate = (e)=>{
     if(e.candidate){
-      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{
+        logDiag("Failed to add ICE candidate to Firestore");
+      });
     }
   };
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
+  
+  logDiag("Created local offer, setting up Firestore");
 
   await setDoc(roomRef, {
     session,
     offer: { type: offer.type, sdp: offer.sdp },
     answer: null,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    createdBy: myUid,
+    createdByName: myDisplayName || "Unknown"
   }, { merge:true });
 
-  setStatus(callStatus, `Room created (session ${session}).`);
-  logDiag(`Room written. session=${session}`);
+  setStatus(window.callStatus, `✅ Room created (session ${session}). Waiting for peer...`);
+  logDiag(`Room written to Firestore. session=${session}`);
 
   // Listen for answer
-  unsubRoomA = onSnapshot(roomRef, async (s)=>{
-    const d = s.data();
-    if(!d) return;
+  unsubRoomA = onSnapshot(roomRef, async (snapshot)=>{
+    const data = snapshot.data();
+    if(!data) return;
 
-    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+    logDiag("Room snapshot update: " + JSON.stringify(data).substring(0, 200));
+
+    if(data.answer && data.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
       try{
-        await pc.setRemoteDescription(d.answer);
-        setStatus(callStatus, `Connected (session ${session}).`);
-        logDiag("Applied remote answer.");
+        logDiag("Received answer from peer, setting remote description");
+        await pc.setRemoteDescription(data.answer);
+        setStatus(window.callStatus, `✅ Connected (session ${session}).`);
+        logDiag("Successfully applied remote answer.");
       }catch(e){
         logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
-        setStatus(callStatus, "Answer failed — restarting session…");
+        setStatus(window.callStatus, "Answer failed — restarting session…");
+        showError(e);
       }
     }
+  }, (error) => {
+    logDiag("Room listener error: " + error.message);
   });
 
   // Listen for callee ICE candidates
-  unsubCalleeA = onSnapshot(callee, (ss)=>{
-    ss.docChanges().forEach(ch=>{
-      if(ch.type !== "added" || !pc) return;
-      const c = ch.doc.data();
-      if(c.session !== session) return;
-      try{ pc.addIceCandidate(c); }catch{}
+  unsubCalleeA = onSnapshot(callee, (snapshot)=>{
+    snapshot.docChanges().forEach(change=>{
+      if(change.type !== "added" || !pc) return;
+      const candidate = change.doc.data();
+      if(candidate.session !== session) return;
+      try{ 
+        pc.addIceCandidate(candidate);
+        logDiag("Added callee ICE candidate");
+      }catch(e){
+        logDiag("Failed to add callee ICE candidate: " + e.message);
+      }
     });
+  }, (error) => {
+    logDiag("Callee candidate listener error: " + error.message);
   });
 
   return { roomId: roomRef.id, roomRef };
@@ -481,30 +547,52 @@ async function createRoom(){
 
 // ==================== ROOM JOINING (CALLEE SIDE) ====================
 async function joinRoom(){
-  if(!requireAuthOrPrompt()) return;
+  if(!requireAuthOrPrompt()) {
+    logDiag("Cannot join room: not authenticated");
+    return;
+  }
+
+  const roomId = window.roomIdInput ? window.roomIdInput.value.trim() : "";
+  if(!roomId) {
+    setStatus(window.callStatus, "Please enter a Room ID");
+    throw new Error("Room ID is empty.");
+  }
+  
+  logDiag("Attempting to join room: " + roomId);
 
   await startMedia();
-
-  const roomId = roomIdInput ? roomIdInput.value.trim() : "";
-  if(!roomId) throw new Error("Room ID is empty.");
   
   // Update URL hash
   location.hash = roomId;
-  logDiag("JoinRoom: roomId=" + roomId);
 
   const roomRef = doc(db,"rooms", roomId);
   const snap = await getDoc(roomRef);
-  if(!snap.exists()) throw new Error("Room not found");
+  if(!snap.exists()) {
+    setStatus(window.callStatus, "Room not found");
+    throw new Error("Room not found");
+  }
 
   stopListeners();
 
-  setStatus(callStatus, "Connecting…");
+  setStatus(window.callStatus, "Connecting to room…");
+  logDiag("Found room, setting up listeners");
 
-  unsubRoomB = onSnapshot(roomRef, async (s)=>{
-    const d = s.data();
-    if(!d?.offer || !d.session) return;
+  let lastProcessedSession = 0;
 
-    const session = d.session;
+  unsubRoomB = onSnapshot(roomRef, async (snapshot)=>{
+    const data = snapshot.data();
+    if(!data?.offer || !data.session) {
+      logDiag("No offer found in room data");
+      return;
+    }
+
+    const session = data.session;
+    if(session <= lastProcessedSession) {
+      logDiag(`Ignoring old session ${session}, already processed ${lastProcessedSession}`);
+      return;
+    }
+    
+    lastProcessedSession = session;
     logDiag("New offer/session detected: " + session);
 
     try{
@@ -517,54 +605,76 @@ async function joinRoom(){
 
       pc.onicecandidate = (e)=>{
         if(e.candidate){
-          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{
+            logDiag("Failed to add ICE candidate");
+          });
         }
       };
 
-      await pc.setRemoteDescription(d.offer);
-      const ans = await pc.createAnswer();
-      await pc.setLocalDescription(ans);
+      logDiag("Setting remote description from offer");
+      await pc.setRemoteDescription(data.offer);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      logDiag("Created answer, writing to Firestore");
 
-      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
-      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      await updateDoc(roomRef, { 
+        answer: answer, 
+        session, 
+        answeredAt: Date.now(),
+        answeredBy: myUid,
+        answeredByName: myDisplayName || "Unknown"
+      });
+      
+      setStatus(window.callStatus, `✅ Joined room. Waiting for connection... (session ${session})`);
       logDiag("Answer written to room doc.");
 
       // Listen for caller ICE candidates
-      unsubCallerB = onSnapshot(caller, (ss)=>{
-        ss.docChanges().forEach(ch=>{
-          if(ch.type !== "added" || !pc) return;
-          const c = ch.doc.data();
-          if(c.session !== session) return;
-          try{ pc.addIceCandidate(c); }catch{}
+      unsubCallerB = onSnapshot(caller, (candidateSnapshot)=>{
+        candidateSnapshot.docChanges().forEach(change=>{
+          if(change.type !== "added" || !pc) return;
+          const candidate = change.doc.data();
+          if(candidate.session !== session) return;
+          try{ 
+            pc.addIceCandidate(candidate);
+            logDiag("Added caller ICE candidate");
+          }catch(e){
+            logDiag("Failed to add caller ICE candidate: " + e.message);
+          }
         });
+      }, (error) => {
+        logDiag("Caller candidate listener error: " + error.message);
       });
 
     }catch(e){
       logDiag("Join flow error: " + (e?.message || e));
-      setStatus(callStatus, "Join failed.");
+      setStatus(window.callStatus, "Join failed: " + e.message);
       showError(e);
     }
+  }, (error) => {
+    logDiag("Room join listener error: " + error.message);
+    setStatus(window.callStatus, "Connection error");
   });
 }
 
 // ==================== CALL MANAGEMENT ====================
 function showIncomingUI(callId, data){
   currentIncomingCall = { id: callId, data };
-  if (incomingText) {
-    incomingText.textContent = `Call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
+  if (window.incomingText) {
+    window.incomingText.textContent = `Call from ${data.fromName || "unknown"} to ${data.toName || "you"}…`;
   }
 
-  if (incomingOverlay) {
-    incomingOverlay.style.display = "flex";
+  if (window.incomingOverlay) {
+    window.incomingOverlay.style.display = "flex";
   }
   startRingtone();
   
-  logDiag(`Showing incoming call UI for ${callId}`);
+  logDiag(`Showing incoming call UI for ${callId} from ${data.fromName}`);
 }
 
 function stopIncomingUI(){
-  if (incomingOverlay) {
-    incomingOverlay.style.display = "none";
+  if (window.incomingOverlay) {
+    window.incomingOverlay.style.display = "none";
   }
   stopRingtone();
   lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
@@ -574,7 +684,12 @@ function stopIncomingUI(){
 async function listenIncomingCalls(){
   if(!myUid) return;
 
-  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
+  if(unsubIncoming){ 
+    unsubIncoming(); 
+    unsubIncoming = null;
+  }
+
+  logDiag("Setting up incoming call listener for UID: " + myUid);
 
   const qy = query(
     collection(db, "calls"),
@@ -585,69 +700,102 @@ async function listenIncomingCalls(){
   );
 
   unsubIncoming = onSnapshot(qy, (snap)=>{
-    if(snap.empty) return;
-    const d = snap.docs[0];
-    const data = d.data();
+    if(snap.empty) {
+      logDiag("No incoming calls found");
+      return;
+    }
+    
+    const doc = snap.docs[0];
+    const data = doc.data();
+    const callId = doc.id;
 
-    if (d.id === lastDismissedIncomingCallId) return;
-    if(currentIncomingCall?.id === d.id) return;
+    if (callId === lastDismissedIncomingCallId) {
+      logDiag(`Ignoring dismissed call: ${callId}`);
+      return;
+    }
+    
+    if(currentIncomingCall?.id === callId) {
+      logDiag(`Already showing this call: ${callId}`);
+      return;
+    }
 
-    logDiag("Incoming call (Firestore): " + d.id);
-    showIncomingUI(d.id, data);
+    logDiag("Incoming call detected: " + callId + " from " + data.fromName);
+    showIncomingUI(callId, data);
   }, (err)=>{
     logDiag("Incoming call listener error: " + (err?.message || err));
   });
 }
 
 function listenActiveCall(callId){
-  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  if(unsubCallDoc){ 
+    unsubCallDoc(); 
+    unsubCallDoc = null;
+  }
 
-  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
-    if(!s.exists()) return;
-    const d = s.data();
-    if(!d) return;
+  logDiag("Listening to active call: " + callId);
 
-    if(d.status === "ended"){
+  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (snapshot)=>{
+    if(!snapshot.exists()) {
+      logDiag("Call document no longer exists");
+      return;
+    }
+    
+    const data = snapshot.data();
+    if(!data) return;
+
+    logDiag(`Call ${callId} status update: ${data.status}`);
+
+    if(data.status === "ended"){
       stopRingback();
-      setStatus(dirCallStatus, "Ended.");
+      setStatus(window.dirCallStatus, "Call ended.");
       logDiag("Call ended (remote).");
       cleanupCallUI();
       stopAll();
       return;
     }
 
-    if(d.status === "accepted"){
+    if(data.status === "accepted"){
       stopRingback();
-      setStatus(dirCallStatus, "Answered. Connecting…");
+      setStatus(window.dirCallStatus, "✅ Call answered. Connecting…");
+      logDiag("Call accepted by remote party");
       return;
     }
-    if(d.status === "declined"){
+    
+    if(data.status === "declined"){
       stopRingback();
-      setStatus(dirCallStatus, "Declined.");
-      logDiag("Call declined.");
+      setStatus(window.dirCallStatus, "❌ Call declined.");
+      logDiag("Call declined by remote party.");
       cleanupCallUI();
       return;
     }
-    if(d.status === "missed"){
+    
+    if(data.status === "missed"){
       stopRingback();
-      setStatus(dirCallStatus, "Missed.");
+      setStatus(window.dirCallStatus, "Missed call.");
       logDiag("Call missed.");
       cleanupCallUI();
       return;
     }
 
-    setStatus(dirCallStatus, "Ringing…");
+    setStatus(window.dirCallStatus, "Ringing…");
+  }, (error) => {
+    logDiag("Active call listener error: " + error.message);
   });
 }
 
 function cleanupCallUI(){
-  if (hangupBtn) hangupBtn.disabled = true;
+  if (window.hangupBtn) window.hangupBtn.disabled = true;
   activeCallId = null;
-  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  if(unsubCallDoc){ 
+    unsubCallDoc(); 
+    unsubCallDoc = null;
+  }
 }
 
 async function hangup(){
+  logDiag("Hanging up call");
   stopRingback();
+  
   if (activeCallId) {
     try{
       const callRef = doc(db, "calls", activeCallId);
@@ -662,22 +810,25 @@ async function hangup(){
             endedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
+          logDiag("Marked call as missed");
         } else {
           await updateDoc(callRef, {
             status: "ended",
             endedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
+          logDiag("Marked call as ended");
         }
       }
     }catch(e){
+      logDiag("Error updating call status: " + e.message);
       showError(e);
     }
   }
 
   stopAll();
   cleanupCallUI();
-  setStatus(dirCallStatus, "Ended.");
+  setStatus(window.dirCallStatus, "Call ended.");
 }
 
 // ==================== USER DIRECTORY MANAGEMENT ====================
@@ -697,18 +848,22 @@ async function ensureMyUserProfile(user){
   await setDoc(ref, {
     uid: user.uid,
     displayName: name,
+    email: user.email,
+    lastSeen: serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
 
   myDisplayName = name;
-  if (myNameInput) myNameInput.value = name || "";
-  if (myNameStatus) myNameStatus.textContent = name ? `Saved: ${name}` : "Not set.";
+  if (window.myNameInput) window.myNameInput.value = name || "";
+  if (window.myNameStatus) window.myNameStatus.textContent = name ? `✅ Saved: ${name}` : "Not set.";
+  
+  logDiag("User profile ensured: " + name);
 }
 
 async function saveMyName(){
   if(!requireAuthOrPrompt()) return;
 
-  const name = String(myNameInput?.value || "").trim();
+  const name = String(window.myNameInput?.value || "").trim();
   if(!name) throw new Error("Name cannot be empty.");
   if(name.length > 40) throw new Error("Name is too long (max 40).");
 
@@ -718,8 +873,8 @@ async function saveMyName(){
   }, { merge:true });
 
   myDisplayName = name;
-  if (myNameStatus) myNameStatus.textContent = `Saved: ${name}`;
-  logDiag("Saved displayName=" + name);
+  if (window.myNameStatus) window.myNameStatus.textContent = `✅ Saved: ${name}`;
+  logDiag("Display name saved: " + name);
 }
 
 function chunk(arr, n){
@@ -728,89 +883,105 @@ function chunk(arr, n){
   return out;
 }
 
-function renderUsersList(filterText=""){
-  if (!usersList) return;
-  
-  const q = String(filterText || "").trim().toLowerCase();
-  const rows = allUsersCache
-    .filter(u => u.uid !== myUid)
-    .filter(u => !q || String(u.displayName||"").toLowerCase().includes(q))
-    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
-
-  usersList.innerHTML = "";
-
-  if(rows.length === 0){
-    usersList.innerHTML = `<div class="small" style="color:#777">No users found.</div>`;
+async function loadAllAllowedUsers(){
+  if(!requireAuthOrPrompt()) {
+    logDiag("Cannot load users: not authenticated");
     return;
   }
 
-  for(const u of rows){
+  logDiag("Loading allowed users...");
+
+  try {
+    const alSnap = await getDocs(
+      query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
+    );
+    const uids = alSnap.docs.map(d => d.id).filter(Boolean);
+    
+    logDiag(`Found ${uids.length} allowed users`);
+
+    const users = [];
+    for(const group of chunk(uids, 10)){
+      const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
+      usSnap.forEach(docu => {
+        const data = docu.data() || {};
+        users.push({ uid: docu.id, displayName: data.displayName || data.email || "(no name)" });
+      });
+    }
+
+    allUsersCache = users;
+    renderUsersList(window.userSearchInput ? window.userSearchInput.value : "");
+    logDiag(`Loaded ${users.length} users into directory`);
+  } catch (e) {
+    logDiag("Error loading users: " + e.message);
+    showError(e);
+  }
+}
+
+function renderUsersList(filterText=""){
+  if (!window.usersList) return;
+  
+  const queryText = String(filterText || "").trim().toLowerCase();
+  const rows = allUsersCache
+    .filter(u => u.uid !== myUid)
+    .filter(u => !queryText || 
+      String(u.displayName||"").toLowerCase().includes(queryText) ||
+      String(u.email||"").toLowerCase().includes(queryText))
+    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
+
+  window.usersList.innerHTML = "";
+
+  if(rows.length === 0){
+    window.usersList.innerHTML = `<div class="small" style="color:#777; padding: 10px;">
+      ${allUsersCache.length === 0 ? "No users found" : "No matching users found"}
+    </div>`;
+    return;
+  }
+
+  rows.forEach(user => {
     const div = document.createElement("div");
+    div.className = "user-item";
     div.style.display = "flex";
     div.style.alignItems = "center";
     div.style.justifyContent = "space-between";
     div.style.gap = "10px";
-    div.style.border = "1px solid #eee";
-    div.style.borderRadius = "10px";
-    div.style.padding = "10px";
+    div.style.border = "1px solid #e0e0e0";
+    div.style.borderRadius = "8px";
+    div.style.padding = "12px";
+    div.style.marginBottom = "8px";
+    div.style.backgroundColor = "#f9f9f9";
 
     const left = document.createElement("div");
-    left.innerHTML = `<b>${u.displayName || "(no name)"}</b>`;
+    left.innerHTML = `<b>${user.displayName || "(no name)"}</b>`;
 
     const btn = document.createElement("button");
     btn.textContent = "Call";
+    btn.className = "call-btn";
     btn.disabled = !isAuthed;
-    btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
+    btn.onclick = () => startCallToUid(user.uid, user.displayName).catch(showError);
 
     div.appendChild(left);
     div.appendChild(btn);
-    usersList.appendChild(div);
-  }
-}
-
-async function loadAllAllowedUsers(){
-  if(!requireAuthOrPrompt()) return;
-
-  const alSnap = await getDocs(
-    query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
-  );
-  const uids = alSnap.docs.map(d => d.id).filter(Boolean);
-
-  const users = [];
-  for(const group of chunk(uids, 10)){
-    const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
-    usSnap.forEach(docu => {
-      const d = docu.data() || {};
-      users.push({ uid: docu.id, displayName: d.displayName || "" });
-    });
-  }
-
-  allUsersCache = users;
-  if (userSearchInput) {
-    renderUsersList(userSearchInput.value);
-  } else {
-    renderUsersList("");
-  }
-  logDiag("Loaded users directory: " + users.length);
+    window.usersList.appendChild(div);
+  });
 }
 
 async function startCallToUid(toUid, toName=""){
-  logDiag("startCallToUid(): ENTER toUid=" + toUid);
+  logDiag("Starting call to UID: " + toUid);
 
   if(!requireAuthOrPrompt()) return;
   if(!toUid) throw new Error("Missing toUid.");
   if(toUid === myUid) throw new Error("You can't call yourself.");
 
-  setStatus(dirCallStatus, "Creating room…");
+  setStatus(window.dirCallStatus, "Creating room…");
   const created = await createRoom();
   if(!created?.roomId) throw new Error("Room creation failed.");
 
-  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
+  const note = String(window.callNoteInput?.value || "").trim().slice(0, 140);
 
   const callRef = await addDoc(collection(db,"calls"), {
     fromUid: myUid,
     toUid,
-    fromName: myDisplayName || defaultNameFromEmail(emailInput?.value) || "(unknown)",
+    fromName: myDisplayName || defaultNameFromEmail(window.emailInput?.value) || "(unknown)",
     toName: toName || "",
     roomId: created.roomId,
     note,
@@ -824,15 +995,17 @@ async function startCallToUid(toUid, toName=""){
 
   activeCallId = callRef.id;
   
-  if (hangupBtn) hangupBtn.disabled = false;
+  if (window.hangupBtn) window.hangupBtn.disabled = false;
   listenActiveCall(activeCallId);
-  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
+  setStatus(window.dirCallStatus, `📞 Calling ${toName || "user"}…`);
   startRingback();
   logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
 }
 
 // ==================== SYSTEM CLEANUP FUNCTIONS ====================
 function stopAll(){
+  logDiag("Stopping all...");
+  
   stopListeners();
   closePeer();
   stopCallListeners();
@@ -841,23 +1014,24 @@ function stopAll(){
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
-    localStream=null;
+    localStream = null;
   }
-  if (localVideo) localVideo.srcObject=null;
+  
+  if (window.localVideo) window.localVideo.srcObject = null;
 
-  if (startBtn) startBtn.disabled = !isAuthed;
-  if (createBtn) createBtn.disabled = true;
-  if (joinBtn) joinBtn.disabled = true;
+  if (window.startBtn) window.startBtn.disabled = !isAuthed;
+  if (window.createBtn) window.createBtn.disabled = true;
+  if (window.joinBtn) window.joinBtn.disabled = true;
 
-  setStatus(mediaStatus, "Not started.");
-  setStatus(callStatus, "No room yet.");
+  setStatus(window.mediaStatus, "Not started.");
+  setStatus(window.callStatus, "No room yet.");
 
   refreshCopyInviteState();
 
-  if (hangupBtn) hangupBtn.disabled = true;
-  setStatus(dirCallStatus, "Idle.");
+  if (window.hangupBtn) window.hangupBtn.disabled = true;
+  setStatus(window.dirCallStatus, "Idle.");
 
-  logDiag("All stopped");
+  logDiag("All stopped and cleaned up");
 }
 
 // ==================== BUTTON HANDLERS ====================
@@ -865,52 +1039,69 @@ async function copyTextRobust(text){
   if(navigator.clipboard && window.isSecureContext){
     try{ 
       await navigator.clipboard.writeText(text); 
+      logDiag("Copied to clipboard: " + text.substring(0, 50) + "...");
       return true; 
     }catch(e){
       logDiag("Clipboard write failed: " + e.message);
     }
   }
-  window.prompt("Copy this invite link:", text);
-  return false;
+  
+  // Fallback
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    logDiag("Copied using execCommand");
+    return true;
+  } catch (e) {
+    logDiag("execCommand failed: " + e.message);
+    window.prompt("Copy this invite link:", text);
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function refreshCopyInviteState(){
-  if (!copyLinkBtn || !roomIdInput) return;
+  if (!window.copyLinkBtn || !window.roomIdInput) return;
   
-  const hasRoomId = !!roomIdInput.value.trim();
+  const hasRoomId = !!window.roomIdInput.value.trim();
   const canCopy = isAuthed && hasRoomId;
   
-  copyLinkBtn.disabled = !canCopy;
+  window.copyLinkBtn.disabled = !canCopy;
   
-  logDiag(`refreshCopyInviteState: auth=${isAuthed}, hasRoomId=${hasRoomId}, disabled=${copyLinkBtn.disabled}`);
+  logDiag(`Copy invite state: auth=${isAuthed}, roomId=${hasRoomId}, disabled=${window.copyLinkBtn.disabled}`);
 }
 
 // ==================== ALLOWLIST ENFORCEMENT ====================
 async function enforceAllowlist(user){
   const uid = user.uid;
-  logDiag("Allowlist check uid=" + uid);
+  logDiag("Checking allowlist for UID: " + uid);
 
   try{
     const ref = doc(db, "allowlistUids", uid);
     const snap = await getDoc(ref);
 
     if(!snap.exists()){
-      if (loginStatus) loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      if (window.loginStatus) window.loginStatus.textContent = "❌ Not approved yet. Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist missing for UID: " + uid);
     }
 
     const enabled = snap.data()?.enabled === true;
     if(!enabled){
-      if (loginStatus) loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      if (window.loginStatus) window.loginStatus.textContent = "❌ Not approved yet (enabled=false). Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist disabled for UID: " + uid);
     }
 
+    logDiag("Allowlist check passed");
     return true;
   }catch(e){
     if(String(e?.code || "").includes("permission-denied")){
-      if (loginStatus) loginStatus.textContent = "Allowlist check blocked by Firestore rules (permission-denied).";
+      if (window.loginStatus) window.loginStatus.textContent = "Allowlist check blocked by Firestore rules (permission-denied).";
     }
     throw e;
   }
@@ -919,92 +1110,47 @@ async function enforceAllowlist(user){
 // ==================== AUTHENTICATION FUNCTIONS ====================
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
-  if (loginOverlay) loginOverlay.style.display = "flex";
-  if (appRoot) appRoot.classList.add("locked");
-  if (loginStatus) loginStatus.textContent = "Please sign in first.";
+  
+  if (window.loginOverlay) window.loginOverlay.style.display = "flex";
+  if (window.appRoot) window.appRoot.classList.add("locked");
+  if (window.loginStatus) window.loginStatus.textContent = "Please sign in first.";
+  
+  logDiag("Authentication required");
   return false;
 }
 
-// ==================== INITIALIZE DOM ELEMENTS ====================
-function initializeDomElements() {
-  // Get all DOM elements
-  errorBox = document.getElementById("errorBox");
-  loginOverlay = document.getElementById("loginOverlay");
-  loginBtn = document.getElementById("loginBtn");
-  logoutBtn = document.getElementById("logoutBtn");
-  loginStatus = document.getElementById("loginStatus");
-  emailInput = document.getElementById("emailInput");
-  passInput = document.getElementById("passInput");
-  appRoot = document.getElementById("app");
-
-  localVideo = document.getElementById("localVideo");
-  remoteVideo = document.getElementById("remoteVideo");
-  startBtn = document.getElementById("startBtn");
-  createBtn = document.getElementById("createBtn");
-  joinBtn = document.getElementById("joinBtn");
-  copyLinkBtn = document.getElementById("copyLinkBtn");
-  roomIdInput = document.getElementById("roomId");
-  mediaStatus = document.getElementById("mediaStatus");
-  callStatus = document.getElementById("callStatus");
-  
-  diagBtn = document.getElementById("diagBtn");
-  diagBox = document.getElementById("diagBox");
-  copyDiagBtn = document.getElementById("copyDiagBtn");
-  clearDiagBtn = document.getElementById("clearDiagBtn");
-  
-  incomingOverlay = document.getElementById("incomingOverlay");
-  incomingText = document.getElementById("incomingText");
-  answerBtn = document.getElementById("answerBtn");
-  declineBtn = document.getElementById("declineBtn");
-  
-  myNameInput = document.getElementById("myNameInput");
-  saveNameBtn = document.getElementById("saveNameBtn");
-  refreshUsersBtn = document.getElementById("refreshUsersBtn");
-  myNameStatus = document.getElementById("myNameStatus");
-  userSearchInput = document.getElementById("userSearchInput");
-  usersList = document.getElementById("usersList");
-  dirCallStatus = document.getElementById("dirCallStatus");
-  
-  pushStatus = document.getElementById("pushStatus");
-  testSoundBtn = document.getElementById("testSoundBtn");
-  hangupBtn = document.getElementById("hangupBtn");
-  resetPushBtn = document.getElementById("resetPushBtn");
-  callNoteInput = document.getElementById("callNoteInput");
-  
-  videoQualitySelect = document.getElementById("videoQualitySelect");
-  videoQualityStatus = document.getElementById("videoQualityStatus");
-
-  setupEventListeners();
-}
-
+// ==================== SETUP EVENT LISTENERS ====================
 function setupEventListeners() {
   // Login/Logout
-  if (loginBtn) {
-    loginBtn.onclick = async () => {
+  if (window.loginBtn) {
+    window.loginBtn.onclick = async () => {
       hideErrorBox();
-      if (loginStatus) loginStatus.textContent = "Signing in…";
+      if (window.loginStatus) window.loginStatus.textContent = "Signing in…";
       
       try {
-        const email = emailInput.value.trim();
-        const password = passInput.value;
+        const email = window.emailInput.value.trim();
+        const password = window.passInput.value;
         
         if (!email || !password) {
           throw new Error("Please enter email and password");
         }
         
+        logDiag("Attempting login with email: " + email);
         await signInWithEmailAndPassword(auth, email, password);
         
       } catch (e) {
-        if (loginStatus) loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+        const errorMsg = `Login failed: ${e?.code || "unknown"} - ${e?.message || ""}`;
+        if (window.loginStatus) window.loginStatus.textContent = errorMsg;
         logDiag(`Login error: ${e?.code} - ${e?.message}`);
         showError(e);
       }
     };
   }
 
-  if (logoutBtn) {
-    logoutBtn.onclick = async () => {
+  if (window.logoutBtn) {
+    window.logoutBtn.onclick = async () => {
       try{
+        logDiag("Logging out...");
         stopAll();
         await signOut(auth);
       }catch(e){
@@ -1014,7 +1160,7 @@ function setupEventListeners() {
   }
 
   // Media and WebRTC
-  if (startBtn) startBtn.onclick = async () => {
+  if (window.startBtn) window.startBtn.onclick = async () => {
     try{
       hideErrorBox();
       await startMedia();
@@ -1023,14 +1169,14 @@ function setupEventListeners() {
     }
   };
   
-  if (createBtn) createBtn.onclick = () => createRoom().catch(showError);
-  if (joinBtn) joinBtn.onclick = () => joinRoom().catch(showError);
+  if (window.createBtn) window.createBtn.onclick = () => createRoom().catch(showError);
+  if (window.joinBtn) window.joinBtn.onclick = () => joinRoom().catch(showError);
   
   // Invite link
-  if (copyLinkBtn) copyLinkBtn.onclick = async () => {
-    const roomId = roomIdInput?.value.trim();
+  if (window.copyLinkBtn) window.copyLinkBtn.onclick = async () => {
+    const roomId = window.roomIdInput?.value.trim();
     if (!roomId) {
-      setStatus(callStatus, "No room ID to copy");
+      setStatus(window.callStatus, "No room ID to copy");
       return;
     }
     
@@ -1038,21 +1184,23 @@ function setupEventListeners() {
     const success = await copyTextRobust(inviteUrl);
     
     if (success) {
-      setStatus(callStatus, "✅ Invite link copied!");
-      logDiag(`Copied invite: ${inviteUrl}`);
+      setStatus(window.callStatus, "✅ Invite link copied!");
+      setTimeout(() => {
+        setStatus(window.callStatus, `Room: ${roomId}`);
+      }, 2000);
     } else {
-      setStatus(callStatus, "⚠️ Could not copy automatically");
+      setStatus(window.callStatus, "⚠️ Could not copy automatically");
     }
   };
   
   // Room ID input
-  if (roomIdInput) {
-    roomIdInput.addEventListener("input", () => refreshCopyInviteState());
+  if (window.roomIdInput) {
+    window.roomIdInput.addEventListener("input", () => refreshCopyInviteState());
   }
   
   // Audio test
-  if (testSoundBtn) {
-    testSoundBtn.onclick = async () => {
+  if (window.testSoundBtn) {
+    window.testSoundBtn.onclick = async () => {
       await unlockAudio();
       startRingtone();
       setTimeout(() => stopRingtone(), 1800);
@@ -1060,9 +1208,9 @@ function setupEventListeners() {
   }
   
   // Video quality
-  if (videoQualitySelect) {
-    videoQualitySelect.addEventListener("change", () => {
-      const v = String(videoQualitySelect.value || "medium");
+  if (window.videoQualitySelect) {
+    window.videoQualitySelect.addEventListener("change", () => {
+      const v = String(window.videoQualitySelect.value || "medium");
       selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
       updateVideoQualityUi();
       
@@ -1075,29 +1223,29 @@ function setupEventListeners() {
   }
   
   // Hangup
-  if (hangupBtn) hangupBtn.onclick = () => hangup().catch(showError);
+  if (window.hangupBtn) window.hangupBtn.onclick = () => hangup().catch(showError);
   
   // User directory
-  if (saveNameBtn) saveNameBtn.onclick = () => saveMyName().catch(showError);
-  if (refreshUsersBtn) refreshUsersBtn.onclick = () => loadAllAllowedUsers().catch(showError);
+  if (window.saveNameBtn) window.saveNameBtn.onclick = () => saveMyName().catch(showError);
+  if (window.refreshUsersBtn) window.refreshUsersBtn.onclick = () => loadAllAllowedUsers().catch(showError);
   
-  if (myNameInput) myNameInput.addEventListener("input", () => {
-    if (saveNameBtn) saveNameBtn.disabled = !isAuthed || !String(myNameInput.value||"").trim();
+  if (window.myNameInput) window.myNameInput.addEventListener("input", () => {
+    if (window.saveNameBtn) window.saveNameBtn.disabled = !isAuthed || !String(window.myNameInput.value||"").trim();
   });
   
-  if (userSearchInput) {
-    userSearchInput.addEventListener("input", () => renderUsersList(userSearchInput.value));
+  if (window.userSearchInput) {
+    window.userSearchInput.addEventListener("input", () => renderUsersList(window.userSearchInput.value));
   }
   
   // Incoming call buttons
-  if (answerBtn) {
-    answerBtn.onclick = async ()=>{
+  if (window.answerBtn) {
+    window.answerBtn.onclick = async ()=>{
       try{
         const call = currentIncomingCall;
         stopIncomingUI();
 
         if(!call){
-          setStatus(dirCallStatus, "No call context. Please wait for the caller again.");
+          setStatus(window.dirCallStatus, "No call context. Please wait for the caller again.");
           return;
         }
 
@@ -1110,14 +1258,14 @@ function setupEventListeners() {
         });
 
         activeCallId = id;
-        if (hangupBtn) hangupBtn.disabled = false;
+        if (window.hangupBtn) window.hangupBtn.disabled = false;
         listenActiveCall(id);
 
-        if (roomIdInput && data.roomId) {
-          roomIdInput.value = data.roomId;
+        if (window.roomIdInput && data.roomId) {
+          window.roomIdInput.value = data.roomId;
         }
 
-        setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
+        setStatus(window.dirCallStatus, `✅ Answered ${data.fromName || ""}. Joining room…`);
 
         await joinRoom();
 
@@ -1128,8 +1276,8 @@ function setupEventListeners() {
     };
   }
 
-  if (declineBtn) {
-    declineBtn.onclick = async ()=>{
+  if (window.declineBtn) {
+    window.declineBtn.onclick = async ()=>{
       try{
         const call = currentIncomingCall;
         stopIncomingUI();
@@ -1143,40 +1291,37 @@ function setupEventListeners() {
           updatedAt: serverTimestamp()
         });
 
-        setStatus(dirCallStatus, "Declined incoming call.");
+        setStatus(window.dirCallStatus, "❌ Declined incoming call.");
         try { await listenIncomingCalls(); } catch {}
       }catch(e){
         showError(e);
       }
     };
   }
-
-  // Initialize diagnostics
-  initializeDiagnostics();
 }
 
 // ==================== DIAGNOSTICS ====================
 function initializeDiagnostics(){
-  if (diagBtn && diagBox && copyDiagBtn && clearDiagBtn) {
-    diagBtn.onclick = () => {
+  if (window.diagBtn && window.diagBox && window.copyDiagBtn && window.clearDiagBtn) {
+    window.diagBtn.onclick = () => {
       diagVisible = !diagVisible;
-      diagBox.style.display = diagVisible ? "block" : "none";
-      diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+      window.diagBox.style.display = diagVisible ? "block" : "none";
+      window.diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
       if (diagVisible) {
-        diagBox.textContent = diagLog.join("\n");
-        diagBox.scrollTop = diagBox.scrollHeight;
+        window.diagBox.textContent = diagLog.join("\n");
+        window.diagBox.scrollTop = window.diagBox.scrollHeight;
       }
     };
     
-    clearDiagBtn.onclick = () => {
+    window.clearDiagBtn.onclick = () => {
       diagLog.length = 0;
-      if (diagVisible) diagBox.textContent = "";
-      copyDiagBtn.disabled = true;
-      clearDiagBtn.disabled = true;
+      if (diagVisible) window.diagBox.textContent = "";
+      window.copyDiagBtn.disabled = true;
+      window.clearDiagBtn.disabled = true;
       logDiag("Diagnostics cleared.");
     };
     
-    copyDiagBtn.onclick = async () => {
+    window.copyDiagBtn.onclick = async () => {
       const text = diagLog.join("\n");
       if (!text) return;
       try{
@@ -1187,8 +1332,8 @@ function initializeDiagnostics(){
       }
     };
     
-    copyDiagBtn.disabled = diagLog.length === 0;
-    clearDiagBtn.disabled = diagLog.length === 0;
+    window.copyDiagBtn.disabled = diagLog.length === 0;
+    window.clearDiagBtn.disabled = diagLog.length === 0;
   }
 }
 
@@ -1196,57 +1341,71 @@ function initializeDiagnostics(){
 onAuthStateChanged(auth, async (user)=>{
   isAuthed = !!user;
   myUid = user?.uid || null;
-  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
+  logDiag(isAuthed ? "✅ Auth: signed in as " + user.email : "Auth: signed out");
 
   if (isAuthed){
     try{ 
       await enforceAllowlist(user); 
     } catch(e){
       showError(e);
-      if (loginOverlay) loginOverlay.style.display = "flex";
-      if (appRoot) appRoot.classList.add("locked");
-      if (logoutBtn) logoutBtn.style.display = "none";
-      if (startBtn) startBtn.disabled = true;
+      if (window.loginOverlay) window.loginOverlay.style.display = "flex";
+      if (window.appRoot) window.appRoot.classList.add("locked");
+      if (window.logoutBtn) window.logoutBtn.style.display = "none";
+      if (window.startBtn) window.startBtn.disabled = true;
       return;
     }
 
-    if (loginOverlay) loginOverlay.style.display = "none";
-    if (appRoot) appRoot.classList.remove("locked");
-    if (logoutBtn) logoutBtn.style.display = "inline-block";
-    if (loginStatus) loginStatus.textContent = "Signed in.";
+    if (window.loginOverlay) window.loginOverlay.style.display = "none";
+    if (window.appRoot) window.appRoot.classList.remove("locked");
+    if (window.logoutBtn) window.logoutBtn.style.display = "inline-block";
+    if (window.loginStatus) window.loginStatus.textContent = "✅ Signed in.";
 
-    if (startBtn) startBtn.disabled = false;
-    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
+    if (window.startBtn) window.startBtn.disabled = false;
+    setStatus(window.mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    if (videoQualitySelect) videoQualitySelect.disabled = false;
+    if (window.videoQualitySelect) window.videoQualitySelect.disabled = false;
     updateVideoQualityUi();
 
-    if (testSoundBtn) testSoundBtn.disabled = false;
-    if (saveNameBtn) saveNameBtn.disabled = !String(myNameInput?.value||"").trim();
-    if (refreshUsersBtn) refreshUsersBtn.disabled = false;
-    if (hangupBtn) hangupBtn.disabled = true;
+    if (window.testSoundBtn) window.testSoundBtn.disabled = false;
+    if (window.saveNameBtn) window.saveNameBtn.disabled = !String(window.myNameInput?.value||"").trim();
+    if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = false;
+    if (window.hangupBtn) window.hangupBtn.disabled = true;
 
     refreshCopyInviteState();
 
-    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
-    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
-    try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+    try{ 
+      await ensureMyUserProfile(user); 
+    } catch(e){ 
+      logDiag("ensureMyUserProfile failed: " + (e?.message || e)); 
+    }
+    
+    try{ 
+      await loadAllAllowedUsers(); 
+    } catch(e){ 
+      logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); 
+    }
+    
+    try{ 
+      await listenIncomingCalls(); 
+    } catch(e){ 
+      logDiag("Incoming listener failed: " + (e?.message || e)); 
+    }
 
   } else {
-    if (loginOverlay) loginOverlay.style.display = "flex";
-    if (appRoot) appRoot.classList.add("locked");
-    if (logoutBtn) logoutBtn.style.display = "none";
+    if (window.loginOverlay) window.loginOverlay.style.display = "flex";
+    if (window.appRoot) window.appRoot.classList.add("locked");
+    if (window.logoutBtn) window.logoutBtn.style.display = "none";
     stopAll();
 
-    if (videoQualitySelect) videoQualitySelect.disabled = true;
-    if (testSoundBtn) testSoundBtn.disabled = true;
-    if (saveNameBtn) saveNameBtn.disabled = true;
-    if (refreshUsersBtn) refreshUsersBtn.disabled = true;
+    if (window.videoQualitySelect) window.videoQualitySelect.disabled = true;
+    if (window.testSoundBtn) window.testSoundBtn.disabled = true;
+    if (window.saveNameBtn) window.saveNameBtn.disabled = true;
+    if (window.refreshUsersBtn) window.refreshUsersBtn.disabled = true;
 
-    setStatus(dirCallStatus, "Idle.");
-    if (myNameStatus) myNameStatus.textContent = "Not set.";
+    setStatus(window.dirCallStatus, "Idle.");
+    if (window.myNameStatus) window.myNameStatus.textContent = "Not set.";
 
-    if (usersList) usersList.innerHTML = "";
+    if (window.usersList) window.usersList.innerHTML = "";
     allUsersCache = [];
     myDisplayName = "";
   }
@@ -1255,22 +1414,29 @@ onAuthStateChanged(auth, async (user)=>{
 // ==================== INITIALIZATION ====================
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeDomElements);
+  document.addEventListener('DOMContentLoaded', () => {
+    logDiag("DOM loaded, initializing...");
+    initializeDomElements();
+    updateVideoQualityUi();
+  });
 } else {
+  logDiag("DOM already loaded, initializing...");
   initializeDomElements();
+  updateVideoQualityUi();
 }
 
-// Initialize UI
-updateVideoQualityUi();
-
 // Unlock audio on first click
-window.addEventListener("click", unlockAudio, { once: true });
+window.addEventListener("click", () => {
+  unlockAudio().catch(() => {});
+  logDiag("Page clicked, audio unlocked");
+}, { once: true });
 
 // Handle beforeunload
 window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
   try{ stopRingback(); }catch{}
+  logDiag("Page unloading...");
 });
 
 console.log("WebRTC app initialization complete");
