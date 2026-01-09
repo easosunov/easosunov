@@ -2262,17 +2262,46 @@ function renderCallsList(calls) {
     const otherName = isIncoming ? call.fromName || 'Unknown' : call.toName || 'Unknown';
     const directionIcon = isIncoming ? '📥' : '📤';
     const directionText = isIncoming ? 'From' : 'To';
+    const note = call.note || '';
     
+    // Format the call entry
     html += `
-      <div class="call-item ${statusClass}">
-        <div>${directionIcon} ${directionText}: <b>${otherName}</b></div>
-        <div>Status: ${status}${call.note ? ` - "${call.note}"` : ''}</div>
-        <div class="call-item-time">${timeText}</div>
+      <div class="call-item ${statusClass}" style="min-height: ${note ? '60px' : 'auto'};">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${directionIcon} ${directionText}: ${otherName}
+            </div>
+            <div style="font-size: 10px; color: #666; margin-top: 2px;">
+              ${timeText}
+            </div>
+          </div>
+          <div style="font-size: 10px; background: ${getStatusColor(status)}; color: white; padding: 2px 6px; border-radius: 10px; white-space: nowrap;">
+            ${status}
+          </div>
+        </div>
+        ${note ? `
+        <div style="margin-top: 6px; padding: 4px 6px; background: rgba(0,0,0,0.03); border-radius: 4px; border-left: 2px solid #ddd; font-size: 10px; color: #555; white-space: pre-wrap; word-break: break-word;">
+          ${note}
+        </div>
+        ` : ''}
       </div>
     `;
   });
   
   callsList.innerHTML = html;
+}
+
+// Helper function to get status color
+function getStatusColor(status) {
+  switch(status) {
+    case 'ringing': return '#FFC107';
+    case 'accepted': return '#8BC34A';
+    case 'declined': return '#FF9800';
+    case 'missed': return '#f44336';
+    case 'ended': return '#9E9E9E';
+    default: return '#757575';
+  }
 }
 
  
