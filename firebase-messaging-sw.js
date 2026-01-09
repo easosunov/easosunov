@@ -37,21 +37,39 @@ function createAndroidNotificationPayload(title, body, data) {
     badge: '/easosunov/icons/RTC96.png',
     image: '/easosunov/icons/RTC512.png',
     timestamp: Date.now(),
-    vibrate: [200, 100, 200], // Android vibration pattern
-    requireInteraction: true,
+    vibrate: [200, 100, 200, 100, 200, 100, 400], // More distinctive pattern
+    requireInteraction: true, // Prevents auto-dismissal
     tag: `call-${data.callId || Date.now()}`,
     renotify: true,
-    silent: false,
+    silent: false, // Ensures sound plays
     data: {
       ...data,
       androidChannelId: 'incoming_calls',
       androidChannelName: 'Incoming Calls',
       androidChannelDescription: 'Incoming video call notifications',
-      androidPriority: 'high',
+      androidPriority: 'max', // Changed from 'high' to 'max'
       androidVisibility: 'public',
-      androidAutoCancel: false,
-      androidDefaults: ['sound', 'vibrate'],
-      androidLights: ['#4CAF50', 300, 1000]
+      androidAutoCancel: false, // Prevents auto-dismissal
+      androidDefaults: ['sound', 'vibrate', 'lights'], // Added 'lights'
+      androidLights: ['#4CAF50', 300, 1000],
+      // Add persistent notification settings
+      sticky: true,
+      ongoing: true, // Makes notification persistent (can't be swiped away)
+      // Sound configuration
+      sound: 'default',
+      // Extended Android options
+      androidNotification: {
+        channelId: 'incoming_calls',
+        sound: 'default',
+        priority: 'max',
+        visibility: 'public',
+        ongoing: true, // Persistent notification
+        autoCancel: false, // Won't auto-dismiss
+        showWhen: true,
+        localOnly: false,
+        category: 'call',
+        fullScreenIntent: true // Shows even on locked screen
+      }
     }
   };
 }
@@ -224,12 +242,39 @@ async function showCallNotification(data) {
     launchUrl: `/easosunov/webrtc.html?callId=${callId}&roomId=${roomId}`
   };
   
-  // Create notification options
+    // Create notification options
   let notificationOptions;
   
   if (isAndroid) {
-    // Android-specific options
+    // Android-specific options with enhanced persistence
     notificationOptions = createAndroidNotificationPayload(title, body, notificationData);
+    
+    // Add additional options for Android to ensure it doesn't disappear
+    notificationOptions = {
+      ...notificationOptions,
+      // Ensure it doesn't auto-dismiss
+      requireInteraction: true,
+      // Add actions
+      actions: [
+        {
+          action: 'answer',
+          title: 'Answer',
+          icon: '/easosunov/icons/answer.png'
+        },
+        {
+          action: 'decline',
+          title: 'Decline',
+          icon: '/easosunov/icons/decline.png'
+        }
+      ],
+      // Prevent auto-hide and ensure sound
+      silent: false,
+      badge: '/easosunov/icons/RTC96.png',
+      // Tag it for management
+      tag: `persistent-call-${callId}`,
+      // More distinctive vibration pattern
+      vibrate: [200, 100, 200, 100, 200, 100, 400]
+    };
   } else {
     // Standard options for other platforms
     notificationOptions = {
@@ -238,7 +283,7 @@ async function showCallNotification(data) {
       badge: '/easosunov/icons/RTC96.png',
       tag: `call-${callId}`,
       renotify: true,
-      requireInteraction: true,
+      requireInteraction: true, // Don't auto-dismiss
       timestamp: data.sentAtMs || Date.now(),
       data: notificationData,
       actions: [
@@ -252,7 +297,9 @@ async function showCallNotification(data) {
           title: 'Decline',
           icon: '/easosunov/icons/decline.png'
         }
-      ]
+      ],
+      // Ensure sound plays
+      silent: false
     };
   }
   
@@ -266,6 +313,32 @@ async function showCallNotification(data) {
     // Show the notification
     await self.registration.showNotification(title, notificationOptions);
     console.log('[SW] Notification shown:', callId);
+    
+    // For Android, set up a re-show mechanism to keep notification visible
+    if (isAndroid) {
+      // Check every 15 seconds if notification was dismissed and re-show if needed
+      const checkAndReshow = () => {
+        self.registration.getNotifications({ tag: notificationOptions.tag })
+          .then(notifications => {
+            if (notifications.length === 0 && data.callId) {
+              // Notification was dismissed, re-show it to keep it visible
+              console.log('[SW] Android notification dismissed, re-showing');
+              showCallNotification(data);
+            }
+          });
+      };
+      
+      // Start periodic checks (every 15 seconds for 2 minutes total)
+      let checkCount = 0;
+      const maxChecks = 8; // 15s × 8 = 120s (2 minutes)
+      const checkInterval = setInterval(() => {
+        checkAndReshow();
+        checkCount++;
+        if (checkCount >= maxChecks) {
+          clearInterval(checkInterval);
+        }
+      }, 15000);
+    }
     
     // Send analytics if available
     sendNotificationAnalytics('shown', callId);
