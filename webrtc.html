@@ -199,8 +199,8 @@ select{
 
     <!-- LEFT: Person A video + your controls/status -->
     <div class="card">
-      <b>Person A (You)</b>
-      <video id="localVideo" autoplay muted playsinline></video>
+  <b id="personATitle">Person A (You)</b>
+  <video id="localVideo" autoplay muted playsinline></video>
       <div class="small">Muted so you don't hear yourself.</div>
 <!-- Hang up button and call note moved to Person B section -->
      <!-- Recent calls list -->
@@ -218,8 +218,8 @@ select{
 
     <!-- RIGHT: Person B video + directory list -->
     <div class="card">
-      <b>Person B (Other)</b>
-      <video id="remoteVideo" autoplay playsinline></video>
+  <b id="personBTitle">Person B (Other)</b>
+  <video id="remoteVideo" autoplay playsinline></video>
       <div class="small">If audio doesn't play, click the video once.</div>
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 <!-- Hang up button and call note moved here -->
@@ -2043,6 +2043,11 @@ if (currentIncomingCall?.id === callId) return;
     incomingOverlay.style.display = "flex";
     startRingtone();
 
+// Update Person B title with caller's name for the UI
+if (call.fromName) {
+  updatePersonBTitle(call.fromName);
+}
+   
     // 4) Optional: also show a system notification (if permission granted)
     if ("Notification" in window && Notification.permission === "granted") {
       const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
@@ -2201,14 +2206,17 @@ function listenActiveCall(callId){
     if(!d) return;
 
     // If the other side ends the call, clean everything up locally
-    if(d.status === "ended"){
-      stopRingback();
-      setStatus(dirCallStatus, "Ended.");
-      logDiag("Call ended (remote).");
-      cleanupCallUI();
-      stopAll(); // full local cleanup
-      return;
-    }
+// If the other side ends the call, clean everything up locally
+if(d.status === "ended"){
+  stopRingback();
+  setStatus(dirCallStatus, "Ended.");
+  logDiag("Call ended (remote).");
+  cleanupCallUI();
+  stopAll(); // full local cleanup
+  // Reset Person B title
+  updatePersonBTitle('Other');
+  return;
+}
 
     // Optional: keep your existing status feedback
     if(d.status === "accepted"){
@@ -2247,6 +2255,9 @@ if(d.status === "missed"){
 
 async function hangup(){
  stopRingback();
+// Reset Person B title
+  updatePersonBTitle('Other');
+ 
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
     try{
@@ -2318,6 +2329,11 @@ answerBtn.onclick = async ()=>{
     roomIdInput.value = data.roomId;
 
     setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
+    
+    // Update Person B title with caller's name
+    if (data.fromName) {
+      updatePersonBTitle(data.fromName);
+    }
 
     await joinRoom();
 
@@ -2380,8 +2396,35 @@ async function ensureMyUserProfile(user){
   myDisplayName = name;
   myNameInput.value = name || "";
   myNameStatus.textContent = name ? `Saved: ${name}` : "Not set.";
+  
+  // Update Person A title with username
+  updatePersonATitle();
 }
 
+
+// Function to update Person A title with username
+function updatePersonATitle() {
+  const personATitle = document.getElementById('personATitle');
+  if (personATitle && myDisplayName) {
+    personATitle.textContent = `Person A (${myDisplayName})`;
+  } else if (personATitle) {
+    personATitle.textContent = 'Person A (You)';
+  }
+}
+
+// Function to update Person B title with username
+function updatePersonBTitle(username = 'Other') {
+  const personBTitle = document.getElementById('personBTitle');
+  if (personBTitle) {
+    if (username && username !== 'Other') {
+      personBTitle.textContent = `Person B (${username})`;
+    } else {
+      personBTitle.textContent = 'Person B (Other)';
+    }
+  }
+}
+
+ 
 async function saveMyName(){
   if(!requireAuthOrPrompt()) return;
 
@@ -2397,6 +2440,9 @@ async function saveMyName(){
   myDisplayName = name;
   myNameStatus.textContent = `Saved: ${name}`;
   logDiag("Saved displayName=" + name);
+  
+  // Update Person A title with new username
+  updatePersonATitle();
 }
 
 function chunk(arr, n){
@@ -2655,7 +2701,14 @@ async function startCallToUid(toUid, toName=""){
 
   const note = String(callNoteInput?.value || "").trim().slice(0, 140);
 
-const callRef = await addDoc(collection(db,"calls"), {
+  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
+
+  // Update Person B title with recipient's name
+  if (toName) {
+    updatePersonBTitle(toName);
+  }
+
+  const callRef = await addDoc(collection(db,"calls"), {
   fromUid: myUid,
   toUid,
   fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
