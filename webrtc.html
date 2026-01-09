@@ -1192,9 +1192,7 @@ if (originalStartMedia) {
  /* ================== AUTH GATE ================== */
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
-  loginOverlay.style.display = "flex";
-  appRoot.classList.add("locked");
-  loginStatus.textContent = "Please sign in first.";
+  // Don't show login overlay here - let the auth state handler manage it
   return false;
 }
 
