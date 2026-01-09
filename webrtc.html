@@ -2153,50 +2153,72 @@ async function loadRecentCalls() {
       getDocs(q2)
     ]);
     
-    // DEBUG: Log what we found
-    logDiag(`DEBUG: Found ${snap1.docs.length} incoming calls, ${snap2.docs.length} outgoing calls`);
-    
-    // Combine with deduplication using a Map
-    const callsMap = new Map();
+    // Combine all calls
+    const allCalls = [];
     
     // Process incoming calls
     snap1.docs.forEach(doc => {
       const data = doc.data();
-      callsMap.set(doc.id, { id: doc.id, ...data });
-      // DEBUG: Log each incoming call
-      logDiag(`DEBUG: Incoming call ${doc.id} - from: ${data.fromName}, status: ${data.status}, time: ${data.createdAt?.toMillis?.() || 'unknown'}`);
+      allCalls.push({ 
+        id: doc.id, 
+        ...data,
+        direction: 'incoming',
+        timestamp: data.createdAt?.toMillis?.() || data.createdAt?._seconds * 1000 || 0
+      });
     });
     
     // Process outgoing calls
     snap2.docs.forEach(doc => {
       const data = doc.data();
-      if (callsMap.has(doc.id)) {
-        logDiag(`DEBUG: Duplicate ID found: ${doc.id} (already in map)`);
-      }
-      callsMap.set(doc.id, { id: doc.id, ...data });
-      // DEBUG: Log each outgoing call
-      logDiag(`DEBUG: Outgoing call ${doc.id} - to: ${data.toName}, status: ${data.status}, time: ${data.createdAt?.toMillis?.() || 'unknown'}`);
+      allCalls.push({ 
+        id: doc.id, 
+        ...data,
+        direction: 'outgoing',
+        timestamp: data.createdAt?.toMillis?.() || data.createdAt?._seconds * 1000 || 0
+      });
     });
     
-    logDiag(`DEBUG: Map size after deduplication: ${callsMap.size}`);
+    logDiag(`DEBUG: Total calls before deduplication: ${allCalls.length}`);
     
-    // Convert to array, sort by timestamp (most recent first), limit to 30
-    const calls = Array.from(callsMap.values())
-      .sort((a, b) => {
-        const aTime = a.createdAt?.toMillis?.() || a.createdAt?._seconds * 1000 || 0;
-        const bTime = b.createdAt?.toMillis?.() || b.createdAt?._seconds * 1000 || 0;
-        return bTime - aTime; // Descending order
-      })
+    // Sort by timestamp (newest first) for processing
+    allCalls.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Deduplicate based on similar content and time
+    const deduplicated = [];
+    const seenKeys = new Set();
+    
+    // Time window for considering duplicates (5 minutes = 300000 ms)
+    const DUPLICATE_TIME_WINDOW = 5 * 60 * 1000;
+    
+    allCalls.forEach(call => {
+      // Create a unique key based on: other user + direction + status + time window
+      const otherUid = call.direction === 'incoming' ? call.fromUid : call.toUid;
+      const timeBucket = Math.floor(call.timestamp / DUPLICATE_TIME_WINDOW);
+      const key = `${otherUid}_${call.direction}_${call.status}_${timeBucket}`;
+      
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduplicated.push(call);
+      } else {
+        logDiag(`DEBUG: Skipping duplicate: ${call.id} (key: ${key})`);
+      }
+    });
+    
+    logDiag(`DEBUG: After content-based deduplication: ${deduplicated.length} calls`);
+    
+    // Take only the most recent 30 calls
+    const recentCalls = deduplicated
+      .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 30);
     
     // DEBUG: Log final list
-    logDiag(`DEBUG: Final calls list has ${calls.length} items`);
-    calls.forEach((call, index) => {
-      logDiag(`DEBUG: [${index}] ${call.id} - ${call.fromName} to ${call.toName} - ${call.status}`);
+    logDiag(`DEBUG: Final calls list has ${recentCalls.length} items`);
+    recentCalls.forEach((call, index) => {
+      logDiag(`DEBUG: [${index}] ${call.id} - ${call.fromName} to ${call.toName} - ${call.status} - ${new Date(call.timestamp).toLocaleString()}`);
     });
     
-    renderCallsList(calls);
-    logDiag(`Loaded ${calls.length} recent calls (deduplicated)`);
+    renderCallsList(recentCalls);
+    logDiag(`Loaded ${recentCalls.length} recent calls (content-deduplicated)`);
     
   } catch (error) {
     logDiag("Error loading recent calls: " + error.message);
