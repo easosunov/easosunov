@@ -2199,6 +2199,91 @@ window.addEventListener("beforeunload", ()=>{
   logDiag("Page unloading...");
 });
 
+// Add this after the existing functions in main.js
+
+// --- Background notification support ---
+async function setupBackgroundNotifications() {
+  if (!("serviceWorker" in navigator)) return;
+  
+  try {
+    // Register service worker
+    const registration = await navigator.serviceWorker.register(
+      "/easosunov/firebase-messaging-sw.js",
+      { scope: "/easosunov/", updateViaCache: "none" }
+    );
+    
+    console.log("Service Worker registered for background:", registration.scope);
+    
+    // Wait for service worker to be ready
+    await navigator.serviceWorker.ready;
+    
+    // Send UID to service worker
+    if (myUid && registration.active) {
+      registration.active.postMessage({
+        type: 'SET_UID',
+        uid: myUid
+      });
+      console.log("UID sent to service worker for background:", myUid);
+    }
+    
+    // Set up periodic sync for background checks (if supported)
+    if ('periodicSync' in registration) {
+      try {
+        await registration.periodicSync.register('check-calls', {
+          minInterval: 24 * 60 * 60 * 1000 // 24 hours
+        });
+        console.log("Periodic sync registered for background");
+      } catch (syncError) {
+        console.log("Periodic sync not supported:", syncError);
+      }
+    }
+    
+  } catch (error) {
+    console.error("Background notification setup failed:", error);
+  }
+}
+
+// Call this in the auth state change handler when user logs in
+// In the onAuthStateChanged function, add:
+if (isAuthed && myUid) {
+  setupBackgroundNotifications().catch(console.error);
+}
+
+// Test background notification function
+async function testBackgroundNotification() {
+  if (!requireAuthOrPrompt()) return;
+  
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    
+    const messageChannel = new MessageChannel();
+    
+    registration.active.postMessage({
+      type: 'TEST_NOTIFICATION',
+      uid: myUid
+    }, [messageChannel.port2]);
+    
+    messageChannel.port1.onmessage = (event) => {
+      if (event.data.type === 'TEST_SUCCESS') {
+        alert("✅ Background notification test passed!");
+      } else {
+        alert("❌ Test failed: " + (event.data.error || "Unknown error"));
+      }
+    };
+    
+    setTimeout(() => {
+      messageChannel.port1.close();
+    }, 5000);
+    
+  } catch (error) {
+    alert("Test failed: " + error.message);
+  }
+}
+
+// Add a test button to HTML:
+// <button onclick="testBackgroundNotification()">Test Background Notification</button>
+
+
 console.log("WebRTC app initialization complete");
 console.log("Firebase app:", app.name);
 console.log("Ready for login...");
