@@ -1,16 +1,15 @@
 {
-  "name": "WebRTC Video Communicator",
-  "short_name": "WebRTC Call",
-  "start_url": "/easosunov/webrtc.html",
+  "name": "WebRTC Communicator",
+  "short_name": "WebRTC",
+  "start_url": "/easosunov/webrtc.html?v=1",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4CAF50",
   "scope": "/easosunov/",
-  "description": "Video/Audio Communication with Push Notifications",
-  "categories": ["communication", "social", "utilities"],
-  "orientation": "any",
+  "description": "Video/Audio Communication",
+  "categories": ["communication"],
+  "orientation": "portrait",
   "lang": "en-US",
-  "dir": "ltr",
   
   "icons": [
     {
@@ -24,66 +23,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
-    },
-    {
-      "src": "icons/RTC144.png",
-      "sizes": "144x144",
-      "type": "image/png"
-    }
-  ],
-  
-  "screenshots": [
-    {
-      "src": "screenshots/phone-screenshot.png",
-      "sizes": "720x1280",
-      "type": "image/png",
-      "form_factor": "narrow"
-    }
-  ],
-  
-  "prefer_related_applications": false,
-  "related_applications": [],
-  
-  "shortcuts": [
-    {
-      "name": "Start Call",
-      "short_name": "Call",
-      "description": "Start a new video call",
-      "url": "/easosunov/webrtc.html?action=newcall",
-      "icons": [{ "src": "icons/call-shortcut.png", "sizes": "96x96" }]
-    },
-    {
-      "name": "View Contacts",
-      "short_name": "Contacts",
-      "description": "View available contacts",
-      "url": "/easosunov/webrtc.html?action=contacts",
-      "icons": [{ "src": "icons/contacts-shortcut.png", "sizes": "96x96" }]
-    }
-  ],
-  
-  // CRITICAL FOR ANDROID BACKGROUND NOTIFICATIONS:
-  "gcm_sender_id": "100169991412", // Your Firebase messagingSenderId
-  "gcm_user_visible_only": true,
-  
-  // Enhanced capabilities for Android
-  "permissions": [
-    "notifications",
-    "background",
-    "audio",
-    "video",
-    "microphone",
-    "camera"
-  ],
-  
-  // Android-specific
-  "android_package_name": "com.easosunov.webrtc",
-  "android_certificate_hash": "YOUR_APP_SIGNING_CERT_HASH", // Optional
-  
-  // Protocol handling (for incoming call URLs)
-  "protocol_handlers": [
-    {
-      "protocol": "web+easosunov",
-      "url": "/easosunov/webrtc.html?callId=%s"
     }
   ]
 }
