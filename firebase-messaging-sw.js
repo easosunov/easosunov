@@ -106,6 +106,58 @@ function stopRingtone() {
   console.log('[SW] Ringtone stopped');
 }
 
+
+// --- Android ringtone via separate page ---
+async function playAndroidRingtone(data) {
+  try {
+    console.log('[SW] Opening ringtone page for Android...');
+    
+    const url = `/easosunov/ringtone.html?action=play&duration=60000&callId=${data.callId}`;
+    
+    // Try to open the ringtone page
+    const clients = await self.clients.matchAll();
+    let existingClient = null;
+    
+    // Check if ringtone page is already open
+    for (const client of clients) {
+      if (client.url.includes('ringtone.html')) {
+        existingClient = client;
+        break;
+      }
+    }
+    
+    if (existingClient) {
+      // Focus existing ringtone page
+      await existingClient.focus();
+      existingClient.postMessage({ 
+        type: 'PLAY_RINGTONE',
+        duration: 60000,
+        callId: data.callId 
+      });
+    } else {
+      // Open new ringtone page
+      const newClient = await self.clients.openWindow(url);
+      
+      if (!newClient) {
+        console.error('[SW] Could not open ringtone page - popup blocked?');
+        return;
+      }
+      
+      // Send stop signal when call is answered/declined (handled elsewhere)
+      ringtoneTimeout = setTimeout(() => {
+        if (newClient) {
+          newClient.postMessage({ type: 'STOP_RINGTONE' });
+        }
+      }, 60000);
+    }
+    
+  } catch (error) {
+    console.error('[SW] Error opening ringtone page:', error);
+    // Fall back to regular ringtone method
+    playRingtone();
+  }
+}
+
 // --- Create Android notification with sound priority ---
 function createAndroidNotification(title, body, data) {
   // For Android, we need to create a high-priority notification
