@@ -377,33 +377,51 @@ function disableAppImmediately() {
   if (isDisabled) return;
   isDisabled = true;
   
-  console.log("IMMEDIATE DISABLE: Another instance detected");
+  console.log("DISABLING: Another WebRTC instance is already running");
   
-  // Clear the lock since we're closing
-  releaseLock();
+  // Show a simple message
+  const blocker = document.createElement('div');
+  blocker.id = 'instanceBlocker';
+  blocker.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.9);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    text-align: center;
+    padding: 20px;
+    font-family: system-ui;
+  `;
   
-  // Simple, immediate redirect to close the tab
-  try {
-    // Try to close first (works for popups)
-    window.close();
-    
-    // If close doesn't work, navigate to blank page after a short delay
-    setTimeout(() => {
-      try {
-        window.location.href = 'about:blank';
-      } catch (e) {
-        // Last resort - replace page content
-        document.body.innerHTML = '<div style="padding:20px;text-align:center;">WebRTC already running in another tab. Please close this tab.</div>';
-      }
-    }, 50);
-  } catch (e) {
-    // If window.close() throws, try navigation immediately
+  blocker.innerHTML = `
+    <div style="max-width: 400px;">
+      <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+      <h2 style="margin: 0 0 10px;">WebRTC Already Running</h2>
+      <p>This WebRTC app is already open in another browser tab.</p>
+      <p style="font-size: 14px; opacity: 0.8; margin-top: 20px;">Please close this tab and use the existing instance.</p>
+    </div>
+  `;
+  
+  document.body.appendChild(blocker);
+  
+  // Try to close after a delay
+  setTimeout(() => {
     try {
-      window.location.href = 'about:blank';
-    } catch (e2) {
-      document.body.innerHTML = '<div style="padding:20px;text-align:center;">WebRTC already running in another tab.</div>';
+      // Try to close the window (works for popups)
+      if (window.opener) {
+        window.close();
+      }
+      // For regular tabs, just show the message
+    } catch (e) {
+      // Ignore errors - just keep showing the message
     }
-  }
+  }, 1000);
 }
 
 // Function to release our lock
@@ -424,50 +442,36 @@ function releaseLock() {
   }
 }
 
-// Function to check and acquire lock
+// Function to check and acquire lock - SIMPLE VERSION
 function checkAndAcquireLock() {
   try {
     const now = Date.now();
     const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
     const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
     
-    // If there's already a lock
-    if (storedLock) {
-      // Parse timestamp safely
-      let lockTime = 0;
-      if (storedTimestamp) {
-        const parsed = parseInt(storedTimestamp, 10);
-        if (!isNaN(parsed) && parsed > 0) {
-          lockTime = parsed;
-        }
+    // Parse timestamp safely
+    let lockTime = 0;
+    if (storedTimestamp) {
+      const parsed = parseInt(storedTimestamp, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        lockTime = parsed;
       }
-      
-      const lockAge = now - lockTime;
-      
-      // If it's OUR lock and it's less than 5 seconds old, we can reclaim it
-      // (this handles page refreshes)
-      if (storedLock === tabId && lockAge < 5000) {
-        console.log(`Reclaiming our own recent lock (age: ${lockAge}ms)`);
-        localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-        localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-        hasLock = true;
-        return true;
-      }
-      
-      // If it's someone else's lock and it's less than 10 seconds old, reject
-      if (storedLock !== tabId && lockAge < 10000) {
-        console.log(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
-        return false;
-      }
-      
-      // Lock is stale (older than 10 seconds or our own old lock), clear it
-      console.log(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
     }
     
-    // Acquire the lock
+    const lockAge = now - lockTime;
+    
+    // If there's a lock and it's less than 2 seconds old, check if it's ours
+    if (storedLock && lockAge < 2000) {
+      // If it's not our lock and it's fresh (less than 2 seconds), reject
+      if (storedLock !== tabId) {
+        console.log(`LOCK REJECTED: Fresh lock exists for tab ${storedLock} (age: ${lockAge}ms)`);
+        return false;
+      }
+      // If it's our own lock and fresh, renew it
+      console.log(`Renewing our own lock (age: ${lockAge}ms)`);
+    }
+    
+    // If lock is stale (older than 10 seconds) or doesn't exist, acquire it
     localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
     localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
     localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
@@ -478,7 +482,10 @@ function checkAndAcquireLock() {
     
   } catch (e) {
     console.log("Lock acquisition error: " + e.message);
-    return false;
+    // If we can't access localStorage, allow the app to continue
+    // This is better than blocking the user
+    hasLock = true; // Pretend we have the lock
+    return true;
   }
 }
 
@@ -514,8 +521,8 @@ function renewAndCheckLock() {
   if (!checkAndAcquireLock()) {
     console.log("Failed to acquire lock on initialization - closing duplicate tab");
     disableAppImmediately();
-    // Prevent any further JavaScript execution
-    throw new Error("WebRTC already running in another tab");
+    // Don't throw an error - just stop further execution in this function
+    return;
   }
   
   console.log("Lock acquired successfully, continuing with app initialization");
