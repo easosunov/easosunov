@@ -519,6 +519,17 @@ let pendingIncomingCallWhileLoggedOut = null;
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
+
+
+// Check if we should redirect to the primary tab
+// Only do this check once when the page loads
+let hasCheckedRedirect = false;
+if (!hasCheckedRedirect && primaryTabUrl && primaryTabUrl !== window.location.href) {
+  hasCheckedRedirect = true;
+  // We're a duplicate tab - redirect to the primary tab
+  window.location.href = primaryTabUrl;
+}
+
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -839,6 +850,46 @@ if(authBC){
   };
 }
 
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front and store the URL
+      if (msg.url) {
+        localStorage.setItem('webrtc_primary_tab_url', msg.url);
+      }
+      
+      // Try to focus this window
+      window.focus();
+      
+      // Also try to use the Window.focus() API if available
+      if (window.focus) {
+        window.focus();
+      }
+      
+      console.log("Original WebRTC tab focused - duplicate tab redirected");
+    }
+  };
+}
+
+ 
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front
+      window.focus();
+      if (document.hidden) {
+        // Try to make browser bring tab to front (may not work due to browser restrictions)
+        console.log("Focus requested by duplicate tab");
+      }
+    }
+  };
+}
 /* ================== SINGLE PAGE INSTANCE LOCK ================== */
 const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
 const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
@@ -856,9 +907,6 @@ function disableAppImmediately() {
   isDisabled = true;
   
   logDiag("IMMEDIATE DISABLE: Another instance detected");
-  
-  // Stop all media and connections
-  stopAll();
   
   // Disable UI
   if (appRoot) {
@@ -931,6 +979,81 @@ function disableAppImmediately() {
   `;
   
   document.body.appendChild(blocker);
+  
+  // Add button hover effects
+  const buttons = blocker.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff5252';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#5a6573';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.color = '#ddd';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff6b6b';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#4a5568';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'transparent';
+        btn.style.color = '#aaa';
+      }
+    });
+  });
+  
+  // Add button handlers
+  document.getElementById('goBackBtn')?.addEventListener('click', () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // If no history, redirect to a blank page or previous page
+      window.location.href = 'about:blank';
+    }
+  });
+  
+  document.getElementById('closePageBtn')?.addEventListener('click', () => {
+    // Try multiple methods to close or navigate away
+    try {
+      // Method 1: Try to close (works for popup windows)
+      if (window.opener || window.history.length <= 1) {
+        window.close();
+      } else {
+        // Method 2: For regular tabs, navigate to blank page
+        window.location.href = 'about:blank';
+        // Method 3: Try to close after a delay
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+      }
+    } catch (e) {
+      // Method 4: If close fails, navigate to previous page or blank
+      if (window.history.length > 1) {
+        window.history.go(-1);
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    // First clear the lock so we can try to acquire it again
+    try {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    } catch (e) {}
+    
+    // Remove blocker and reload
+    blocker.remove();
+    isDisabled = false;
+    setTimeout(() => {
+      window.location.reload();
+    }, 300);
+  });
   
   // Add button hover effects
   const buttons = blocker.querySelectorAll('button');
