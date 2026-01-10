@@ -10,7 +10,7 @@ import {
 } from './modules.js';
 
 // ==================== GLOBAL DECLARATIONS ====================
-console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
+console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2"); 
 
 // ==================== NOTIFICATION HANDLING ====================
 let webPageShowedNotification = false;
