@@ -360,13 +360,204 @@ select{
 </div>
 
 <script type="module">
+// ================== SINGLE PAGE INSTANCE LOCK ==================
+// This must run BEFORE anything else to prevent duplicate tabs
+const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
+const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
+const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
+
+// Generate unique tab ID
+const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+let hasLock = false;
+let lockCheckInterval = null;
+let isDisabled = false;
+
+// Function to IMMEDIATELY disable the app
+function disableAppImmediately() {
+  if (isDisabled) return;
+  isDisabled = true;
+  
+  console.log("IMMEDIATE DISABLE: Another instance detected - closing duplicate tab");
+  
+  // Immediately clear all content and show closing message
+  document.body.innerHTML = `
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; color: white; display: flex; align-items: center; justify-content: center; font-family: system-ui; padding: 20px; z-index: 10000;">
+      <div style="text-align: center; max-width: 400px;">
+        <div style="font-size: 48px; margin-bottom: 20px;">⛔</div>
+        <h2 style="color: #ff6b6b; margin: 0 0 10px;">WebRTC Already Running</h2>
+        <p style="color: #ccc; margin: 10px 0;">Closing this duplicate tab...</p>
+      </div>
+    </div>
+  `;
+  
+  // Clear the lock since we're closing
+  releaseLock();
+  
+  // Try to close immediately with multiple attempts
+  function attemptClose() {
+    try {
+      // First try: direct close
+      window.close();
+      
+      // If still here after 100ms, try navigation
+      setTimeout(() => {
+        try {
+          // Navigate to blank page
+          window.location.replace('about:blank');
+          
+          // Last resort after another 100ms
+          setTimeout(() => {
+            try {
+              if (window.history.length > 1) {
+                window.history.go(-1);
+              } else {
+                window.location.href = 'about:blank';
+              }
+            } catch (e) {
+              // Do nothing - we've tried everything
+            }
+          }, 100);
+        } catch (e) {
+          // Continue with final attempt
+        }
+      }, 100);
+    } catch (e) {
+      // Try navigation immediately
+      try {
+        window.location.href = 'about:blank';
+      } catch (e2) {
+        // Final fallback - just keep the message displayed
+      }
+    }
+  }
+  
+  // Start closing attempt immediately
+  attemptClose();
+}
+
+// Function to release our lock
+function releaseLock() {
+  if (hasLock) {
+    try {
+      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+      if (currentLock === tabId) {
+        localStorage.removeItem(PAGE_INSTANCE_KEY);
+        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+        console.log(`Lock released by tab ${tabId}`);
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+    hasLock = false;
+  }
+}
+
+// Function to check and acquire lock - VERY STRICT VERSION
+function checkAndAcquireLock() {
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    
+    // If there's already ANY lock and it's not ours, REJECT IMMEDIATELY
+    if (storedLock && storedLock !== tabId) {
+      console.log(`LOCK REJECTED: Tab ${storedLock} already has the lock`);
+      return false; // Never steal the lock, just reject
+    }
+    
+    // Only acquire if no lock exists or it's our lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    hasLock = true;
+    
+    console.log(`LOCK ACQUIRED by tab ${tabId}`);
+    return true;
+    
+  } catch (e) {
+    console.log("Lock acquisition error: " + e.message);
+    return false;
+  }
+}
+
+// Function to renew our lock and check for conflicts
+function renewAndCheckLock() {
+  if (!hasLock || isDisabled) return false;
+  
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    
+    // If we don't own the lock anymore, DISABLE IMMEDIATELY
+    if (storedLock !== tabId) {
+      console.log(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
+      disableAppImmediately();
+      return false;
+    }
+    
+    // Renew our lock
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    return true;
+    
+  } catch (e) {
+    console.log("Lock renewal error: " + e.message);
+    return false;
+  }
+}
+
+// Initialize lock IMMEDIATELY
+(function initializeLockImmediately() {
+  // Try to acquire lock immediately
+  if (!checkAndAcquireLock()) {
+    console.log("Failed to acquire lock on initialization - closing duplicate tab");
+    disableAppImmediately();
+    // Prevent any further JavaScript execution
+    throw new Error("WebRTC already running in another tab");
+  }
+  
+  console.log("Lock acquired successfully, continuing with app initialization");
+  
+  // Start lock checking
+  lockCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      renewAndCheckLock();
+    }
+  }, 2000);
+  
+  // Also check when page becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      renewAndCheckLock();
+    }
+  });
+  
+  // Listen for storage events (other tabs changing localStorage)
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
+      console.log(`Storage event: Another tab (${event.newValue}) set the lock`);
+      setTimeout(() => {
+        if (!renewAndCheckLock()) {
+          disableAppImmediately();
+        }
+      }, 100);
+    }
+  });
+  
+  // Beforeunload cleanup
+  window.addEventListener('beforeunload', () => {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+    }
+    releaseLock();
+  });
+})();
+
 console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
- // Track if we showed a notification (for background app coordination)
+// Track if we showed a notification (for background app coordination)
 let webPageShowedNotification = false;
-
-// Handle notification redirects
-(function handleNotificationRedirect() {
   try {
     // Check URL parameters for notification click (from background app)
     const urlParams = new URLSearchParams(window.location.search);
@@ -836,245 +1027,6 @@ if(authBC){
   };
 }
 
-/* ================== SINGLE PAGE INSTANCE LOCK ================== */
-const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
-const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
-const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
-
-// Generate unique tab ID
-const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-let hasLock = false;
-let lockCheckInterval = null;
-let isDisabled = false;
-
-// Function to IMMEDIATELY disable the app
-function disableAppImmediately() {
-  if (isDisabled) return;
-  isDisabled = true;
-  
-  logDiag("IMMEDIATE DISABLE: Another instance detected - closing duplicate tab");
-  
-  // Stop all media and connections
-  stopAll();
-  
-  // Clear the lock since we're closing
-  releaseLock();
-  
-  // Try to close the tab/window immediately
-  setTimeout(() => {
-    try {
-      // For regular browser tabs
-      if (window.opener) {
-        // We're a popup - can close directly
-        window.close();
-      } else if (window.history.length > 1) {
-        // We have history - go back
-        window.history.back();
-      } else {
-        // No history - navigate to blank page
-        window.location.href = 'about:blank';
-      }
-    } catch (e) {
-      // If direct close fails, try fallback methods
-      try {
-        // Create a simple page that tells user to close manually
-        document.body.innerHTML = `
-          <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-family: system-ui; padding: 20px;">
-            <div style="text-align: center; max-width: 500px;">
-              <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
-              <h2 style="color: #333;">WebRTC already running</h2>
-              <p style="color: #666; margin: 20px 0;">This WebRTC app is already open in another tab.</p>
-              <p style="color: #999; font-size: 14px;">Please close this tab and use the existing instance.</p>
-            </div>
-          </div>
-        `;
-      } catch (e2) {
-        // Final fallback - just clear everything
-        document.body.innerHTML = '';
-      }
-    }
-  }, 100); // Small delay to ensure logs are written
-}
-
-// Function to check and acquire lock - SIMPLIFIED VERSION
-function checkAndAcquireLock() {
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    
-    // If there's already a lock and it's not ours
-    if (storedLock && storedLock !== tabId) {
-      // Parse timestamp safely
-      let lockTime = 0;
-      if (storedTimestamp) {
-        const parsed = parseInt(storedTimestamp, 10);
-        if (!isNaN(parsed) && parsed > 0) {
-          lockTime = parsed;
-        }
-      }
-      
-      const lockAge = now - lockTime;
-      
-      // If lock is fresh (less than 60 seconds), reject
-      if (lockAge < 60000) {
-        logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
-        return false;
-      }
-      
-      // Lock is stale (older than 60 seconds), clear it
-      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-    }
-    
-    // Acquire the lock
-    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    hasLock = true;
-    
-    logDiag(`LOCK ACQUIRED by tab ${tabId} (previous lock: ${storedLock || 'none'})`);
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock acquisition error: " + e.message);
-    return false;
-  }
-}
-
-// Function to renew our lock and check for conflicts
-function renewAndCheckLock() {
-  if (!hasLock || isDisabled) return false;
-  
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
-    
-    // If we don't own the lock anymore, DISABLE IMMEDIATELY
-    if (storedLock !== tabId) {
-      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
-      disableAppImmediately();
-      return false;
-    }
-    
-    // If lock is stale (older than 30 seconds), someone else might have taken it
-    const lockAge = now - lockTime;
-    if (lockAge > 30000) {
-      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
-      // Try to reacquire
-      if (!checkAndAcquireLock()) {
-        disableAppImmediately();
-        return false;
-      }
-    }
-    
-    // Renew our lock
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock renewal error: " + e.message);
-    return false;
-  }
-}
-
-// Function to release our lock
-function releaseLock() {
-  if (hasLock) {
-    try {
-      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-      if (currentLock === tabId) {
-        localStorage.removeItem(PAGE_INSTANCE_KEY);
-        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-        logDiag(`Lock released by tab ${tabId}`);
-      }
-    } catch (e) {
-      // Ignore errors
-    }
-    hasLock = false;
-  }
-}
-
-// Initialize lock on page load - DO THIS EARLY
-(function initializeLock() {
-  // Try to acquire lock immediately
-  if (!checkAndAcquireLock()) {
-    logDiag("Failed to acquire lock on initialization - closing duplicate tab");
-    disableAppImmediately();
-    // Prevent any further JavaScript execution
-    throw new Error("WebRTC already running in another tab");
-  }
-  
-  logDiag("Lock acquired successfully, continuing with app initialization");
-  
-  // Start aggressive lock checking
-  lockCheckInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      if (!renewAndCheckLock()) {
-        clearInterval(lockCheckInterval);
-        disableAppImmediately();
-      }
-    }
-  }, 1000); // Check every second when visible
-  
-  // Also check when page becomes visible
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      // Page hidden - reduce checking frequency
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-        lockCheckInterval = setInterval(() => {
-          if (!renewAndCheckLock()) {
-            clearInterval(lockCheckInterval);
-            disableAppImmediately();
-          }
-        }, 3000); // Check every 3 seconds when hidden
-      }
-    } else {
-      // Page visible - check immediately and frequently
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-      }
-      if (!renewAndCheckLock()) {
-        disableAppImmediately();
-        return;
-      }
-      lockCheckInterval = setInterval(() => {
-        if (!renewAndCheckLock()) {
-          clearInterval(lockCheckInterval);
-          disableAppImmediately();
-        }
-      }, 1000);
-    }
-  });
-  
-  // Listen for storage events (other tabs changing localStorage)
-  window.addEventListener('storage', (event) => {
-    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
-      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
-      setTimeout(() => {
-        if (!renewAndCheckLock()) {
-          disableAppImmediately();
-        }
-      }, 100);
-    }
-  });
-  
-  // Beforeunload cleanup
-  window.addEventListener('beforeunload', () => {
-    if (lockCheckInterval) {
-      clearInterval(lockCheckInterval);
-      lockCheckInterval = null;
-    }
-    releaseLock();
-  });
-})();
  
 
 // Also add a pre-check before any significant action
