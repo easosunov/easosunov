@@ -896,35 +896,34 @@ function disableAppImmediately() {
   }, 100); // Small delay to ensure logs are written
 }
 
-// Function to check and acquire lock - STRICTER VERSION
+// Function to check and acquire lock - SIMPLIFIED VERSION
 function checkAndAcquireLock() {
   try {
     const now = Date.now();
     const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
     const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
     
-    // Parse timestamp safely
-    let lockTime = 0;
-    if (storedTimestamp) {
-      const parsed = parseInt(storedTimestamp, 10);
-      if (!isNaN(parsed) && parsed > 0) {
-        lockTime = parsed;
+    // If there's already a lock and it's not ours
+    if (storedLock && storedLock !== tabId) {
+      // Parse timestamp safely
+      let lockTime = 0;
+      if (storedTimestamp) {
+        const parsed = parseInt(storedTimestamp, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          lockTime = parsed;
+        }
       }
-    }
-    
-    const lockAge = now - lockTime;
-    
-    // CRITICAL: If lock exists and is less than 30 seconds old, reject immediately
-    if (storedLock && storedLock !== tabId && lockAge < 30000) {
-      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
-      return false;
-    }
-    
-    // Clear any stale lock (older than 30 seconds or invalid)
-    if (lockAge >= 30000 || lockTime === 0) {
-      if (storedLock) {
-        logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms, time: ${lockTime})`);
+      
+      const lockAge = now - lockTime;
+      
+      // If lock is fresh (less than 60 seconds), reject
+      if (lockAge < 60000) {
+        logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
+        return false;
       }
+      
+      // Lock is stale (older than 60 seconds), clear it
+      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
       localStorage.removeItem(PAGE_INSTANCE_KEY);
       localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
       localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
@@ -936,12 +935,12 @@ function checkAndAcquireLock() {
     localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
     hasLock = true;
     
-    logDiag(`LOCK ACQUIRED by tab ${tabId} (storedLock was: ${storedLock})`);
+    logDiag(`LOCK ACQUIRED by tab ${tabId} (previous lock: ${storedLock || 'none'})`);
     return true;
     
   } catch (e) {
     logDiag("Lock acquisition error: " + e.message);
-    return false; // Be strict if localStorage fails
+    return false;
   }
 }
 
@@ -1006,16 +1005,20 @@ function releaseLock() {
 (function initializeLock() {
   // Try to acquire lock immediately
   if (!checkAndAcquireLock()) {
-    logDiag("Failed to acquire lock on initialization");
-    setTimeout(disableAppImmediately, 100);
-    return;
+    logDiag("Failed to acquire lock on initialization - closing duplicate tab");
+    disableAppImmediately();
+    // Prevent any further JavaScript execution
+    throw new Error("WebRTC already running in another tab");
   }
+  
+  logDiag("Lock acquired successfully, continuing with app initialization");
   
   // Start aggressive lock checking
   lockCheckInterval = setInterval(() => {
     if (document.visibilityState === 'visible') {
       if (!renewAndCheckLock()) {
         clearInterval(lockCheckInterval);
+        disableAppImmediately();
       }
     }
   }, 1000); // Check every second when visible
@@ -1029,6 +1032,7 @@ function releaseLock() {
         lockCheckInterval = setInterval(() => {
           if (!renewAndCheckLock()) {
             clearInterval(lockCheckInterval);
+            disableAppImmediately();
           }
         }, 3000); // Check every 3 seconds when hidden
       }
@@ -1038,11 +1042,13 @@ function releaseLock() {
         clearInterval(lockCheckInterval);
       }
       if (!renewAndCheckLock()) {
+        disableAppImmediately();
         return;
       }
       lockCheckInterval = setInterval(() => {
         if (!renewAndCheckLock()) {
           clearInterval(lockCheckInterval);
+          disableAppImmediately();
         }
       }, 1000);
     }
@@ -1068,14 +1074,8 @@ function releaseLock() {
     }
     releaseLock();
   });
-  
-  // Double-check after a short delay
-  setTimeout(() => {
-    if (!renewAndCheckLock()) {
-      disableAppImmediately();
-    }
-  }, 2000);
 })();
+ 
 
 // Also add a pre-check before any significant action
  /*
