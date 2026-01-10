@@ -902,18 +902,29 @@ function checkAndAcquireLock() {
     const now = Date.now();
     const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
     const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    
+    // Parse timestamp safely
+    let lockTime = 0;
+    if (storedTimestamp) {
+      const parsed = parseInt(storedTimestamp, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        lockTime = parsed;
+      }
+    }
+    
     const lockAge = now - lockTime;
     
-    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
-    if (storedLock && storedLock !== tabId && lockAge < 10000) {
+    // CRITICAL: If lock exists and is less than 30 seconds old, reject immediately
+    if (storedLock && storedLock !== tabId && lockAge < 30000) {
       logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
       return false;
     }
     
-    // Clear any stale lock (older than 10 seconds)
-    if (lockAge >= 10000) {
-      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
+    // Clear any stale lock (older than 30 seconds or invalid)
+    if (lockAge >= 30000 || lockTime === 0) {
+      if (storedLock) {
+        logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms, time: ${lockTime})`);
+      }
       localStorage.removeItem(PAGE_INSTANCE_KEY);
       localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
       localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
@@ -925,7 +936,7 @@ function checkAndAcquireLock() {
     localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
     hasLock = true;
     
-    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
+    logDiag(`LOCK ACQUIRED by tab ${tabId} (storedLock was: ${storedLock})`);
     return true;
     
   } catch (e) {
