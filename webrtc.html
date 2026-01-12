@@ -511,6 +511,8 @@ const stopBgBtn = document.getElementById('stopBgBtn');
 const bgStatus = document.getElementById('bgStatus');
 const downloadBgLink = document.getElementById('downloadBgLink');
 
+const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
+ 
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
 let myUid = null;
@@ -3070,6 +3072,21 @@ resetPushBtn.onclick = async ()=>{
     showError(e);
   }
 };
+
+/* Add this handler after the other button handlers: */
+logoutUtilityBtn.onclick = async () => {
+    if (!isAuthed) return;
+    
+    if (confirm("Are you sure you want to log out? Any active calls will be ended.")) {
+        try {
+            stopAll(); // stop listeners/media before auth changes
+            await revokePushForCurrentDevice(); // remove token mapping for this browser
+            await signOut(auth);
+        } catch (e) {
+            showError(e);
+        }
+    }
+};
  
 hangupBtn.onclick = ()=> hangup().catch(showError);
 
@@ -3140,6 +3157,14 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
+/* ADD THIS LINE: Show utility logout button when signed in */
+    if (logoutUtilityBtn) {
+        logoutUtilityBtn.style.display = "inline-block";
+        logoutUtilityBtn.disabled = false;
+    }
+    
+    hangupBtn.disabled = true;
+   
     hangupBtn.disabled = true;
 
     refreshCopyInviteState();
@@ -3182,6 +3207,14 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
+/* ADD THIS LINE: Hide utility logout button when signed out */
+    if (logoutUtilityBtn) {
+        logoutUtilityBtn.style.display = "none";
+        logoutUtilityBtn.disabled = true;
+    }
+    
+    setStatus(pushStatus, "Push: not enabled.");
+   
     setStatus(pushStatus, "Push: not enabled.");
     setStatus(dirCallStatus, "Idle.");
     myNameStatus.textContent = "Not set.";
