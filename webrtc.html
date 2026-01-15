@@ -3282,6 +3282,55 @@ window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
 });
+// Make function globally available
+window.sendFCMToAndroid = async function(toUid, roomId, callerName, note, callId) {
+  try {
+    console.log("[FCM GLOBAL] Starting FCM push to Android:", toUid);
+    
+    // 1. Get Android user's FCM token from Firestore
+    const userDoc = await getDoc(doc(db, "users", toUid));
+    if (!userDoc.exists()) {
+      console.log("[FCM] Android user not found:", toUid);
+      return;
+    }
+    
+    const userData = userDoc.data();
+    const fcmToken = userData?.fcmToken;
+    
+    if (!fcmToken) {
+      console.log("[FCM] No FCM token for Android user:", toUid);
+      return;
+    }
+    
+    console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
+    
+    // 2. Send FCM via your existing Cloud Function
+    const response = await fetch(NOTIFY_CALL_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        fcmToken: fcmToken,
+        roomId: roomId,
+        callerName: callerName,
+        note: note || "",
+        callId: callId,
+        toUid: toUid
+      })
+    });
+    
+    const result = await response.json();
+    console.log("[FCM] Cloud Function response:", result);
+    
+    console.log("[FCM] Notification sent to Android");
+    
+  } catch (error) {
+    console.error("[FCM] Error sending to Android:", error);
+  }
+};
+
+ 
 </script>
 </body>
 </html>
