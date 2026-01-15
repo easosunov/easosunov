@@ -3282,55 +3282,62 @@ window.addEventListener("beforeunload", ()=>{
   try{ closePeer(); }catch{}
   try{ stopRingtone(); }catch{}
 });
-// Make function globally available
-window.sendFCMToAndroid = async function(toUid, roomId, callerName, note, callId) {
-  try {
-    console.log("[FCM GLOBAL] Starting FCM push to Android:", toUid);
-    
-    // 1. Get Android user's FCM token from Firestore
-    const userDoc = await getDoc(doc(db, "users", toUid));
-    if (!userDoc.exists()) {
-      console.log("[FCM] Android user not found:", toUid);
-      return;
-    }
-    
-    const userData = userDoc.data();
-    const fcmToken = userData?.fcmToken;
-    
-    if (!fcmToken) {
-      console.log("[FCM] No FCM token for Android user:", toUid);
-      return;
-    }
-    
-    console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
-    
-    // 2. Send FCM via your existing Cloud Function
-    const response = await fetch(NOTIFY_CALL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        fcmToken: fcmToken,
-        roomId: roomId,
-        callerName: callerName,
-        note: note || "",
-        callId: callId,
-        toUid: toUid
-      })
-    });
-    
-    const result = await response.json();
-    console.log("[FCM] Cloud Function response:", result);
-    
-    console.log("[FCM] Notification sent to Android");
-    
-  } catch (error) {
-    console.error("[FCM] Error sending to Android:", error);
-  }
-};
 
  
+// ================== MAKE FCM FUNCTION GLOBALLY AVAILABLE ==================
+// Wait for the module to load, then expose the function globally
+(async function exposeFCMFunction() {
+  // Wait a bit to ensure the module is loaded
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  // Check if the function exists in module scope
+  if (typeof sendFCMToAndroid === 'function') {
+    window.sendFCMToAndroid = sendFCMToAndroid;
+    console.log("[FCM] Function exposed globally");
+  } else {
+    console.error("[FCM] Function not found in module");
+    
+    // Create a fallback global function
+    window.sendFCMToAndroid = async function(toUid, roomId, callerName, note, callId) {
+      console.log("[FCM FALLBACK] Using fallback function");
+      
+      try {
+        // Get Android token
+        const userDoc = await getDoc(doc(db, "users", toUid));
+        if (!userDoc.exists()) {
+          console.log("[FCM] Android user not found");
+          return;
+        }
+        
+        const fcmToken = userDoc.data()?.fcmToken;
+        if (!fcmToken) {
+          console.log("[FCM] No FCM token");
+          return;
+        }
+        
+        console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
+        
+        await fetch("https://us-central1-easosunov-webrtc.cloudfunctions.net/notifyIncomingCall", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fcmToken: fcmToken,
+            roomId: roomId,
+            callerName: callerName,
+            note: note || "",
+            callId: callId,
+            toUid: toUid
+          })
+        });
+        
+        console.log("[FCM] Notification sent");
+      } catch (error) {
+        console.error("[FCM] Error:", error);
+      }
+    };
+    console.log("[FCM] Created fallback function");
+  }
+})(); 
 </script>
 </body>
 </html>
