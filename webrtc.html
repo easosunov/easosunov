@@ -440,7 +440,8 @@ async function ensureServiceWorkerInstalled() {
 // RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
 
- const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
+ /*const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";*/
+ const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/notifyIncomingCall";
 
 /* ================== FCM PUSH TO ANDROID ================== */
 async function sendFCMToAndroid(toUid, roomId, callerName, note, callId) {
