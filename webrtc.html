@@ -442,6 +442,49 @@ await ensureServiceWorkerInstalled();
 
  const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";
 
+/* ================== FCM PUSH TO ANDROID ================== */
+async function sendFCMToAndroid(toUid, roomId, callerName, note, callId) {
+  try {
+    // 1. Get Android user's FCM token from Firestore
+    const userDoc = await getDoc(doc(db, "users", toUid));
+    if (!userDoc.exists()) {
+      console.log("[FCM] Android user not found:", toUid);
+      return;
+    }
+    
+    const userData = userDoc.data();
+    const fcmToken = userData?.fcmToken; // Android stores token here
+    
+    if (!fcmToken) {
+      console.log("[FCM] No FCM token for Android user:", toUid);
+      return;
+    }
+    
+    console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
+    
+    // 2. Send FCM via your existing Cloud Function
+    await fetch(NOTIFY_CALL_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        fcmToken: fcmToken,
+        roomId: roomId,
+        callerName: callerName,
+        note: note || "",
+        callId: callId,
+        toUid: toUid
+      })
+    });
+    
+    console.log("[FCM] Notification sent to Android");
+    
+  } catch (error) {
+    console.error("[FCM] Error sending to Android:", error);
+  }
+}
+ 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
 function cleanVapidKey(k){
@@ -2711,7 +2754,12 @@ async function startCallToUid(toUid, toName=""){
   endedAt: null
 });
 
-
+// NEW: SEND FCM PUSH NOTIFICATION TO ANDROID
+try {
+  await sendFCMToAndroid(toUid, created.roomId, myDisplayName, note, callRef.id);
+} catch (e) {
+  console.error("Error sending FCM to Android:", e);
+}
 
   activeCallId = callRef.id;
   // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
