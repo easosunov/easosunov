@@ -1,10 +1,9 @@
-<!doctype html>
-<html lang="en">
+=ml lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>WebRTC</title>
-<link rel="manifest" href="manifest.json"> 
+ <link rel="manifest" href="manifest.json"> 
 
 <style>
 body{font-family:system-ui;margin:16px} 
@@ -38,7 +37,7 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
-#loginRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+#loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
@@ -361,29 +360,21 @@ select{
 </div>
 
 <script type="module">
-console.log("APP VERSION:", "2026-01-17-fixed-android-windows");
+console.log("APP VERSION:", "2026-01-03-sw-debug-ALWAYS-2");
 
-// ========== CRITICAL FIX: DETECT NOTIFICATION SOURCE ==========
-console.log('=== PAGE OPEN DEBUG ===');
-console.log('Full URL:', window.location.href);
-console.log('Hash:', window.location.hash);
-console.log('Search:', window.location.search);
-console.log('Referrer:', document.referrer);
-console.log('=== END DEBUG ===');
-
-// Track if we showed a notification (for background app coordination)
+ // Track if we showed a notification (for background app coordination)
 let webPageShowedNotification = false;
 
-// ========== MODIFIED NOTIFICATION HANDLER ==========
+// Handle notification redirects
 (function handleNotificationRedirect() {
   try {
+    // Check URL parameters for notification click (from background app)
     const urlParams = new URLSearchParams(window.location.search);
     const callId = urlParams.get('callId');
     const roomId = urlParams.get('roomId');
     const fromName = urlParams.get('fromName');
     const toName = urlParams.get('toName');
     const note = urlParams.get('note');
-    const source = urlParams.get('source'); // 'android' or 'windows'
     
     // Store for later use when user signs in
     if (callId && roomId) {
@@ -393,20 +384,18 @@ let webPageShowedNotification = false;
         fromName: fromName || 'Unknown',
         toName: toName || '',
         note: note || '',
-        timestamp: Date.now(),
-        source: source || 'unknown'
+        timestamp: Date.now()
       }));
       
-      // SET CRITICAL FLAG: Page opened from notification (prevents auto-join)
-      localStorage.setItem('pageOpenedFromNotification', 'true');
-      localStorage.setItem('notificationSource', source || 'unknown');
+      // Clear URL parameters for a clean URL
+      const cleanUrl = window.location.origin + window.location.pathname;
+      if (window.location.hash) {
+        window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
+      } else {
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
       
-      console.log('Notification stored. Source:', source, 'Flag set to prevent auto-join');
-    } else if (location.hash.length > 1 && !location.search.includes('callId')) {
-      // Windows listener opens with just hash, no query params
-      localStorage.setItem('pageOpenedFromNotification', 'false');
-      localStorage.setItem('notificationSource', 'windows');
-      console.log('Windows listener opened page (hash only)');
+      console.log('Notification stored, waiting for auth...');
     }
   } catch (e) {
     console.warn('Notification redirect handler error:', e);
@@ -576,13 +565,6 @@ let pendingIncomingCallWhileLoggedOut = null;
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
-
-// ========== NEW: AUTO-JOIN CONTROL FLAGS ==========
-let suppressAutoJoinForNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
-let notificationSource = localStorage.getItem('notificationSource') || '';
-let autoJoinDone = false;
-let autoJoinScheduled = false;
-let autoJoinTimer = null;
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -1490,89 +1472,9 @@ function refreshCopyInviteState(){
 
 /* ================== MEDIA + AUTOJOIN ================== */
 let startingPromise = null;
-
-// ========== MODIFIED AUTO-JOIN FUNCTIONS ==========
-async function autoJoinIfNeeded(){
-  // CRITICAL: Check if page was opened from notification
-  const openedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
-  const source = localStorage.getItem('notificationSource');
-  
-  if (openedFromNotification) {
-    console.log('🚫 BLOCKING auto-join: Page opened from', source, 'notification');
-    
-    // Don't auto-join - show Accept/Decline instead
-    const pending = localStorage.getItem('pendingNotificationCall');
-    if (pending) {
-      try {
-        const pendingData = JSON.parse(pending);
-        if (isAuthed && myUid) {
-          // Clear flags but keep pending data
-          localStorage.removeItem('pageOpenedFromNotification');
-          localStorage.removeItem('notificationSource');
-          
-          // Show incoming call UI
-          showIncomingUI(pendingData.callId, {
-            roomId: pendingData.roomId,
-            fromName: pendingData.fromName || 'Unknown',
-            toName: pendingData.toName || '',
-            note: pendingData.note || ''
-          });
-        }
-      } catch (e) {
-        console.warn('Error processing pending notification:', e);
-      }
-    }
-    
-    return; // STOP HERE - don't auto-join
-  }
-  
-  // Normal auto-join logic (for Windows listener or direct link)
-  if(autoJoinDone) return;
-  if(!roomIdInput.value.trim()) return;
-
-  autoJoinDone = true;
-  setStatus(callStatus,"Auto-joining room…");
-  logDiag("Auto-joining triggered.");
-
-  try{
-    await joinRoom();
-  }catch(e){
-    autoJoinDone = false;
-    throw e;
-  }
-}
-
-function cancelPendingAutoJoin(){
-  autoJoinScheduled = false;
-  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
-}
-
-function scheduleAutoJoin(){
-  // CRITICAL: Check if we should suppress auto-join for notifications
-  const openedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
-  
-  if (openedFromNotification) {
-    console.log('Suppressing auto-join: page opened from notification');
-    return;
-  }
-  
-  if (!openedFromInvite) return;
-  if (suppressAutoJoin) return;
-  if (autoJoinScheduled) return;
-
-  cancelPendingAutoJoin();
-  autoJoinScheduled = true;
-
-  autoJoinTimer = setTimeout(async ()=>{
-    autoJoinScheduled = false;
-    autoJoinTimer = null;
-    try{ await autoJoinIfNeeded(); }
-    catch(e){
-      setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
-      showError(e);
-    }
-  }, 1000); // 1 second delay
-}
+let autoJoinDone = false;
+let autoJoinScheduled = false;
+let autoJoinTimer = null;
 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
@@ -1627,6 +1529,46 @@ async function startMedia(opts={skipAutoJoin:false}){
   finally{ startingPromise = null; }
 
   if(!opts.skipAutoJoin) scheduleAutoJoin();
+}
+
+function cancelPendingAutoJoin(){
+  autoJoinScheduled = false;
+  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
+}
+
+function scheduleAutoJoin(){
+  if (!openedFromInvite) return;
+  if (suppressAutoJoin) return;
+  if (autoJoinScheduled) return;
+
+  cancelPendingAutoJoin();
+  autoJoinScheduled = true;
+
+  autoJoinTimer = setTimeout(async ()=>{
+    autoJoinScheduled = false;
+    autoJoinTimer = null;
+    try{ await autoJoinIfNeeded(); }
+    catch(e){
+      setStatus(callStatus, `Auto-join failed: ${e?.message || e}`);
+      showError(e);
+    }
+  }, 0);
+}
+
+async function autoJoinIfNeeded(){
+  if(autoJoinDone) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus,"Auto-joining room…");
+  logDiag("Auto-joining triggered.");
+
+  try{
+    await joinRoom();
+  }catch(e){
+    autoJoinDone = false;
+    throw e;
+  }
 }
 
 /* ================== LISTENERS ================== */
@@ -2388,14 +2330,9 @@ if (snap.exists()) {
   try { await loadRecentCalls(); } catch {} // Refresh calls list
 }
 
-/* ========== MODIFIED ANSWER/DECLINE BUTTONS ========== */
+/* Answer / Decline buttons for incoming */
 answerBtn.onclick = async ()=>{
   try{
-    // Clear notification flags
-    localStorage.removeItem('pageOpenedFromNotification');
-    localStorage.removeItem('notificationSource');
-    localStorage.removeItem('pendingNotificationCall');
-    
     const call = currentIncomingCall;
     stopIncomingUI();
 
@@ -2441,11 +2378,6 @@ answerBtn.onclick = async ()=>{
 
 declineBtn.onclick = async ()=>{
   try{
-    // Clear notification flags
-    localStorage.removeItem('pageOpenedFromNotification');
-    localStorage.removeItem('notificationSource');
-    localStorage.removeItem('pendingNotificationCall');
-    
     const call = currentIncomingCall;
     stopIncomingUI();
 
@@ -2900,4 +2832,512 @@ let swReg = null;
 let lastPushUid = null;
 
 async function rotateFcmTokenIfUserChanged(){
-  try
+  try{
+    if(!("Notification" in window)) return;
+    if(!("serviceWorker" in navigator)) return;
+    if(Notification.permission !== "granted") return;
+
+    // If browser already had push for another user, invalidate token
+    if(lastPushUid && myUid && lastPushUid !== myUid){
+      logDiag(`Push: user changed ${lastPushUid} -> ${myUid}. Deleting old FCM token`);
+
+      if(!messaging){
+        messaging = getMessaging(app);
+      }
+
+      // IMPORTANT: this invalidates the token at FCM level
+      await deleteToken(messaging);
+      logDiag("Push: deleteToken() success");
+    }
+
+    lastPushUid = myUid || null;
+  }catch(e){
+    logDiag("rotateFcmTokenIfUserChanged failed: " + (e?.message || e));
+  }
+}
+  // Remember which token belongs to THIS browser + which UID it was saved under
+const LS_PUSH_UID = "webrtc_push_uid";
+const LS_PUSH_TID = "webrtc_push_tokenId";
+
+function getSavedPushBinding(){
+  try{
+    const uid = localStorage.getItem(LS_PUSH_UID);
+    const tid = localStorage.getItem(LS_PUSH_TID);
+    return { uid: uid || null, tokenId: tid || null };
+  }catch{
+    return { uid:null, tokenId:null };
+  }
+}
+
+function savePushBinding(uid, tokenId){
+  try{
+    localStorage.setItem(LS_PUSH_UID, String(uid || ""));
+    localStorage.setItem(LS_PUSH_TID, String(tokenId || ""));
+  }catch{}
+}
+
+function clearPushBinding(){
+  try{
+    localStorage.removeItem(LS_PUSH_UID);
+    localStorage.removeItem(LS_PUSH_TID);
+  }catch{}
+}
+
+// Remove this browser's token doc from the PREVIOUS user's profile (and invalidate token)
+async function revokePushForCurrentDevice(){
+  const { uid, tokenId } = getSavedPushBinding();
+  if(!uid || !tokenId) return;
+
+  logDiag(`Revoking push token for this device: uid=${uid} tokenId=${tokenId}`);
+
+  // Delete token doc from Firestore (stops server from targeting this browser)
+  try{
+    await deleteDoc(doc(db, "users", uid, "fcmTokens", tokenId));
+    logDiag("Push token doc deleted from Firestore.");
+  }catch(e){
+    logDiag("Push token doc delete failed: " + (e?.message || e));
+    // don't throw; continue
+  }
+
+  // Invalidate token in browser
+  try{
+    if(!messaging) messaging = getMessaging(app);
+    await deleteToken(messaging);
+    logDiag("Browser FCM token deleted (deleteToken).");
+  }catch(e){
+    logDiag("deleteToken failed: " + (e?.message || e));
+  }
+
+  clearPushBinding();
+}
+
+function base64UrlToUint8Array(base64Url) {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+function validateVapid(vapid) {
+  const s = String(vapid || "").trim();
+  if (!/^[A-Za-z0-9\-_]+$/.test(s)) return { ok:false, why:"contains invalid characters" };
+  try {
+    const bytes = base64UrlToUint8Array(s);
+    if (bytes.length !== 65) return { ok:false, why:`decoded length ${bytes.length}, expected 65` };
+    return { ok:true, why:`ok (65 bytes)` };
+  } catch (e) {
+    return { ok:false, why:`decode failed: ${e?.message || e}` };
+  }
+}
+
+async function enablePush(){
+  logDiag("enablePush(): ENTER");
+  if(!requireAuthOrPrompt()) return;
+
+// If this browser previously stored a token under a different UID, remove it first
+const prev = getSavedPushBinding();
+if(prev.uid && prev.uid !== myUid){
+  await revokePushForCurrentDevice();
+}
+
+  
+  if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
+  if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
+  if(!PUBLIC_VAPID_KEY || PUBLIC_VAPID_KEY.includes("PASTE_")) { setStatus(pushStatus, "Push: set PUBLIC_VAPID_KEY in HTML first."); return; }
+
+  try {
+    const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+    swUrl.searchParams.set("v", "2026-01-03-sw-note-ts-1");
+
+
+    const resp = await fetch(swUrl.toString(), { cache: "no-store" });
+    const ct = resp.headers.get("content-type") || "";
+    const txt = await resp.text();
+    logDiag("SW prefetch url=" + swUrl.toString());
+    logDiag("SW prefetch status=" + resp.status + " content-type=" + ct);
+    logDiag("SW prefetch first200=" + txt.slice(0, 200).replace(/\s+/g, " "));
+    if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
+
+    // Reuse bootstrap SW registration (do NOT register again)
+swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
+if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
+
+await navigator.serviceWorker.ready;
+try { await swReg.update(); } catch {}
+
+    await navigator.serviceWorker.ready;
+    try { await swReg.update(); } catch {}
+
+    messaging = getMessaging(app);
+
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted"){ setStatus(pushStatus, "Push: permission not granted."); return; }
+
+    const check = validateVapid(VAPID);
+    logDiag("VAPID check: " + check.ok + " - " + check.why);
+    if (!check.ok) throw new Error("Invalid VAPID: " + check.why);
+
+    const token = await getToken(messaging, {
+      vapidKey: VAPID,
+      serviceWorkerRegistration: swReg
+    });
+
+    if(!token){ setStatus(pushStatus, "Push: no token returned."); return; }
+
+    const tokenId = token.slice(0, 32);
+
+    await setDoc(doc(db, "users", myUid, "fcmTokens", tokenId), {
+      token,
+      createdAt: Date.now(),
+      ua: navigator.userAgent,
+      enabled: true
+    }, { merge:true });
+// Remember that THIS browser token now belongs to THIS uid
+savePushBinding(myUid, tokenId);
+
+    setStatus(pushStatus, "Push: enabled.");
+    logDiag("FCM token stored (users/{uid}/fcmTokens).");
+
+   onMessage(messaging, async (payload)=>{
+  try{
+    logDiag("FCM foreground message: " + JSON.stringify(payload));
+    const data = payload?.data || {};
+
+    // Must be signed in to react
+    if(!isAuthed || !myUid) {
+      logDiag("Ignoring FCM: not authed");
+      return;
+    }
+
+    // If this is a call, verify it is REALLY for me by reading the call doc
+    if (data.callId) {
+      const callRef = doc(db, "calls", data.callId);
+      const callSnap = await getDoc(callRef);
+      if(!callSnap.exists()){
+        logDiag("Ignoring FCM: call doc missing");
+        return;
+      }
+      const call = callSnap.data() || {};
+
+      if(call.toUid !== myUid){
+        logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
+        return;
+      }
+
+      // OK - it is for me
+      if (call.roomId) roomIdInput.value = call.roomId;
+      currentIncomingCall = { id: data.callId, data: call };
+
+      incomingText.textContent =
+        payload?.notification?.body ||
+        (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
+
+      incomingOverlay.style.display = "flex";
+      startRingtone();
+      return;
+    }
+
+    // Non-call pushes: ignore (or handle if you want)
+    logDiag("Ignoring FCM: not a callId payload");
+  }catch(e){
+    logDiag("onMessage handler error: " + (e?.message || e));
+  }
+});
+
+  } catch (e) {
+    setStatus(pushStatus, "Push: failed (see diagnostics).");
+    try { logDiag("Push error props: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    logDiag("Push enable failed: " + (e?.message || e));
+    showError(e);
+  }
+}
+
+let autoPushClickArmed = false;
+
+function autoEnablePushOnLogin(){
+  if (!("Notification" in window)) { setStatus(pushStatus, "Push: not supported in this browser."); return; }
+  if (!("serviceWorker" in navigator)) { setStatus(pushStatus, "Push: service worker not supported."); return; }
+
+  const perm = Notification.permission;
+
+  if (perm === "granted") {
+    logDiag("Auto-push: permission granted -> enabling push now");
+    enablePush().catch((e)=> logDiag("Auto-push enable failed: " + (e?.message || e)));
+    return;
+  }
+
+  if (perm === "denied") {
+    setStatus(pushStatus, "Push: blocked in browser settings (Notifications = Block).");
+    logDiag("Auto-push: permission denied");
+    return;
+  }
+
+  setStatus(pushStatus, "Push: click anywhere once to enable notifications.");
+  if (autoPushClickArmed) return;
+  autoPushClickArmed = true;
+
+  const handler = () => {
+    autoPushClickArmed = false;
+    logDiag("Auto-push: user click detected -> enabling push");
+    enablePush().catch((e)=>{ logDiag("Auto-push enable failed: " + (e?.message || e)); showError(e); });
+  };
+
+  window.addEventListener("click", handler, { once:true, capture:true });
+}
+
+/* ================== BUTTON WIRING ================== */
+startBtn.onclick = async ()=>{
+  try{
+    hideErrorBox();
+    await startMedia();
+  }catch(e){
+    const name = String(e?.name || "");
+    if(name === "NotAllowedError" || name === "NotFoundError") return;
+    showError(e);
+  }
+};
+
+createBtn.onclick = ()=> createRoom({updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}).catch(showError);
+joinBtn.onclick   = ()=> joinRoom().catch(showError);
+
+roomIdInput.addEventListener("input", ()=> refreshCopyInviteState());
+refreshCopyInviteState();
+
+testSoundBtn.onclick = async ()=>{
+  await unlockAudio();
+  startRingtone();
+  setTimeout(()=>stopRingtone(), 1800);
+};
+
+resetPushBtn.onclick = async ()=>{
+  try{
+    setStatus(pushStatus, "Push: resetting…");
+    await revokePushForCurrentDevice();   // deletes token doc + deleteToken()
+    await enablePush();                   // registers SW + gets fresh token + stores it
+    setStatus(pushStatus, "Push: enabled (reset).");
+  }catch(e){
+    showError(e);
+  }
+};
+
+/* Add this handler after the other button handlers: */
+logoutUtilityBtn.onclick = async () => {
+    if (!isAuthed) return;
+    
+    if (confirm("Are you sure you want to log out? Any active calls will be ended.")) {
+        try {
+            stopAll(); // stop listeners/media before auth changes
+            await revokePushForCurrentDevice(); // remove token mapping for this browser
+            await signOut(auth);
+        } catch (e) {
+            showError(e);
+        }
+    }
+};
+ 
+hangupBtn.onclick = ()=> hangup().catch(showError);
+
+/* C-lite directory buttons */
+saveNameBtn.onclick = ()=> saveMyName().catch(showError);
+refreshUsersBtn.onclick = ()=> loadAllAllowedUsers().catch(showError);
+myNameInput.addEventListener("input", ()=>{
+  saveNameBtn.disabled = !isAuthed || !String(myNameInput.value||"").trim();
+});
+userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
+
+
+/* Calls list button */
+refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
+
+ 
+/* ================== AUTH STATE ================== */
+onAuthStateChanged(auth, async (user)=>{
+  isAuthed = !!user;
+  myUid = user?.uid || null;
+  logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
+
+  if (isAuthed){
+    try{ await enforceAllowlist(user); }
+    catch(e){
+      showError(e);
+
+      // restore locked UI so login doesn't look frozen
+      loginOverlay.style.display = "flex";
+      appRoot.classList.add("locked");
+      logoutBtn.style.display = "none";
+      startBtn.disabled = true;
+
+      return;
+    }
+
+    // Single-user lock: reaffirm ownership after allowlist passes
+    setDeviceOwner(user.uid);
+    broadcastNewOwner(user.uid);
+
+    // Hide login overlay if this was a manual login
+    if (wasManualLogin) {
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
+      wasManualLogin = false;
+    } else {
+      // Auto-authenticated - still allow access
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
+    }
+    
+    logoutBtn.style.display = "inline-block";
+    loginStatus.textContent = "Signed in.";
+
+    startBtn.disabled = false;
+    setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
+
+    // ===== NEW: enable quality selector once authed =====
+    videoQualitySelect.disabled = false;
+    updateVideoQualityUi();
+
+    testSoundBtn.disabled = false;
+    resetPushBtn.disabled = false;
+
+    await rotateFcmTokenIfUserChanged();
+    autoEnablePushOnLogin();
+
+    saveNameBtn.disabled = !String(myNameInput.value||"").trim();
+    refreshUsersBtn.disabled = false;
+
+/* ADD THIS LINE: Show utility logout button when signed in */
+    if (logoutUtilityBtn) {
+        logoutUtilityBtn.style.display = "inline-block";
+        logoutUtilityBtn.disabled = false;
+    }
+    
+    hangupBtn.disabled = true;
+   
+    hangupBtn.disabled = true;
+
+    refreshCopyInviteState();
+
+    try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+    await catchUpMissedRingingCall();
+    await catchUpMissedCallNotification();
+    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
+    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
+    try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
+    // Process any pending notifications after auth
+    await processPendingNotifications();
+
+    if (pendingIncomingCallWhileLoggedOut?.id) {
+      const callId = pendingIncomingCallWhileLoggedOut.id;
+      updateDoc(doc(db,"calls", callId), {
+        deliveredAt: serverTimestamp(),
+        deliveredVia: "push_open"
+      }).catch(()=>{});
+    }
+
+    // Update background service status
+    updateServiceStatus();
+    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
+
+    window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
+
+  } else {
+    loginOverlay.style.display = "flex";
+    appRoot.classList.add("locked");
+    logoutBtn.style.display = "none";
+    stopAll();
+   
+    // ===== NEW: lock quality selector when signed out =====
+    if(videoQualitySelect) videoQualitySelect.disabled = true;
+
+    testSoundBtn.disabled = true;
+    resetPushBtn.disabled = true;
+
+    saveNameBtn.disabled = true;
+    refreshUsersBtn.disabled = true;
+
+/* ADD THIS LINE: Hide utility logout button when signed out */
+    if (logoutUtilityBtn) {
+        logoutUtilityBtn.style.display = "none";
+        logoutUtilityBtn.disabled = true;
+    }
+    
+    setStatus(pushStatus, "Push: not enabled.");
+   
+    setStatus(pushStatus, "Push: not enabled.");
+    setStatus(dirCallStatus, "Idle.");
+    myNameStatus.textContent = "Not set.";
+
+    bgStatus.textContent = 'Sign in required';
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+
+    usersList.innerHTML = "";
+    allUsersCache = [];
+    myDisplayName = "";
+  }
+});
+
+window.addEventListener("beforeunload", ()=>{
+  try{ closePeer(); }catch{}
+  try{ stopRingtone(); }catch{}
+});
+
+ 
+// ================== MAKE FCM FUNCTION GLOBALLY AVAILABLE ==================
+// Wait for the module to load, then expose the function globally
+(async function exposeFCMFunction() {
+  // Wait a bit to ensure the module is loaded
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  
+  // Check if the function exists in module scope
+  if (typeof sendFCMToAndroid === 'function') {
+    window.sendFCMToAndroid = sendFCMToAndroid;
+    console.log("[FCM] Function exposed globally");
+  } else {
+    console.error("[FCM] Function not found in module");
+    
+    // Create a fallback global function
+    window.sendFCMToAndroid = async function(toUid, roomId, callerName, note, callId) {
+      console.log("[FCM FALLBACK] Using fallback function");
+      
+      try {
+        // Get Android token
+        const userDoc = await getDoc(doc(db, "users", toUid));
+        if (!userDoc.exists()) {
+          console.log("[FCM] Android user not found");
+          return;
+        }
+        
+        const fcmToken = userDoc.data()?.fcmToken;
+        if (!fcmToken) {
+          console.log("[FCM] No FCM token");
+          return;
+        }
+        
+        console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
+        
+        await fetch("https://us-central1-easosunov-webrtc.cloudfunctions.net/notifyIncomingCall", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fcmToken: fcmToken,
+            roomId: roomId,
+            callerName: callerName,
+            note: note || "",
+            callId: callId,
+            toUid: toUid
+          })
+        });
+        
+        console.log("[FCM] Notification sent");
+      } catch (error) {
+        console.error("[FCM] Error:", error);
+      }
+    };
+    console.log("[FCM] Created fallback function");
+  }
+})(); 
+</script>
+</body>
+</html>
