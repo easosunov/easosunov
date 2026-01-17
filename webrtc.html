@@ -4,18 +4,364 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>WebRTC</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest.json"> 
 
 <style>
-/* ... (keep all your existing CSS styles exactly as they are) ... */
+body{font-family:system-ui;margin:16px} 
+h1{font-size:20px;margin:0 0 10px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
+.videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width: 720px){ .videos{grid-template-columns:1fr} }
+video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
+button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
+button:disabled{opacity:.6;cursor:not-allowed}
+input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
+.status{font-size:13px;margin-top:8px}
+.small{font-size:12px;color:#555;margin-top:6px}
+ 
+#errorBox{
+  display:none;margin:12px 0;padding:10px;
+  border:1px solid #f3b5b5;background:#fff5f5;
+  color:#7a1b1b;border-radius:12px;white-space:pre-wrap
+}
+
+/* LOGIN OVERLAY */
+#loginOverlay{
+  position:fixed; inset:0; z-index:9999;
+  background:rgba(0,0,0,.55);
+  display:flex; align-items:center; justify-content:center;
+}
+#loginCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+#loginRow{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+#logoutBtn{float:right}
+#app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
+
+/* DIAGNOSTICS */
+#diagBox{
+  display:none;
+  margin-top:8px;
+  max-height:220px;
+  overflow:auto;
+  background:#111;
+  color:#0f0;
+  padding:8px;
+  border-radius:8px;
+  font-size:12px;
+  white-space:pre-wrap
+}
+.diagActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+
+/* INCOMING CALL MODAL */
+#incomingOverlay{
+  position:fixed; inset:0; z-index:9998;
+  background:rgba(0,0,0,.55);
+  display:none; align-items:center; justify-content:center;
+}
+#incomingCard{
+  width:min(520px,calc(100% - 24px));
+  background:#fff; border-radius:14px;
+  padding:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+.incomingActions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#answerBtn{background:#e8fff0;border-color:#bdeccc}
+#declineBtn{background:#fff0f0;border-color:#f1bcbc}
+
+/* ===== NEW: Video Quality UI ===== */
+select{
+  padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%;
+  background:#fff;
+}
+ /* ===== BOTTOM PANEL LAYOUT ===== */
+.bottomPanel{
+  margin-top:12px;
+  border:1px solid #ddd;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+
+.bottomGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:12px;
+}
+
+.bottomCard{
+  border:1px solid #eee;
+  border-radius:12px;
+  padding:12px;
+  background:#fff;
+}
+
+@media (max-width: 980px){
+  .bottomGrid{ grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 720px){
+  .bottomGrid{ grid-template-columns: 1fr; }
+}
+/* This media query will only apply styles for mobile screens (max-width: 720px) */
+@media (max-width: 720px) {
+  body {
+    font-size: 18px; /* Larger font size for body text */
+  }
+
+  h1 {
+    font-size: 24px; /* Increase header size */
+  }
+
+  h2 {
+    font-size: 20px; /* Larger sub-header size */
+  }
+
+  p, .status, .small {
+    font-size: 16px; /* Increase font size for paragraphs, status text, and small text */
+  }
+
+  .button {
+    font-size: 16px; /* Increase font size for buttons */
+  }
+}
+
+/* Recent calls styling */
+.call-item {
+  padding: 6px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  border-left: 3px solid #ccc;
+  background: white;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.call-incoming { border-left-color: #4CAF50; }
+.call-outgoing { border-left-color: #2196F3; }
+.call-missed { border-left-color: #f44336; }
+.call-ended { border-left-color: #9E9E9E; }
+.call-accepted { border-left-color: #8BC34A; }
+.call-declined { border-left-color: #FF9800; }
+.call-ringing { border-left-color: #FFC107; }
+.call-item-time {
+  color: #666;
+  font-size: 10px;
+  margin-top: 2px;
+}
 </style>
 </head>
 
 <body>
-<!-- ... (keep all your existing HTML structure exactly as it is) ... -->
+<h1>Telefon WebRTC</h1>
+
+<div id="errorBox"></div>
+
+<!-- INCOMING CALL -->
+<div id="incomingOverlay">
+  <div id="incomingCard">
+    <h2 style="margin:0 0 8px;font-size:18px;">Incoming call</h2>
+    <div id="incomingText" class="status">Someone is calling…</div>
+    <div class="small">If you don't hear ringing, tap once anywhere to enable sound.</div>
+    <div class="incomingActions">
+      <button id="answerBtn">Answer</button>
+      <button id="declineBtn">Decline</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN -->
+<div id="loginOverlay">
+  <div id="loginCard">
+    <button id="logoutBtn" style="display:none;">Logout</button>
+    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
+    <div class="small">Only approved users can access this communicator.</div>
+
+    <label class="small">Email</label>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
+
+    <label class="small">Password</label>
+    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
+
+    <div id="loginRow">
+      <button id="loginBtn">Login</button>
+    </div>
+    <div id="loginStatus" class="status">Please sign in.</div>
+    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
+  </div>
+</div>
+
+<div id="app" class="locked">
+
+  <!-- VIDEOS + CONTROLS UNDER EACH VIDEO (NEW LAYOUT) -->
+  <div class="videos">
+
+    <!-- LEFT: Person A video + your controls/status -->
+    <div class="card">
+  <b id="personATitle">Person A (You)</b>
+  <video id="localVideo" autoplay muted playsinline></video>
+      <div class="small">Muted so you don't hear yourself.</div>
+<!-- Hang up button and call note moved to Person B section -->
+     <!-- Recent calls list -->
+<div style="margin-top:10px;">
+  <div class="small" style="display:flex;justify-content:space-between;align-items:center;">
+    <b>Recent Calls (max 30)</b>
+    <button id="refreshCallsBtn" class="small" style="padding:4px 8px;font-size:11px;">Refresh</button>
+  </div>
+  <div id="callsList" style="margin-top:8px;max-height:200px;overflow-y:auto;border:1px solid #eee;border-radius:8px;padding:8px;font-size:12px;background:#f9f9f9;">
+    <div style="color:#777;text-align:center;">No calls yet</div>
+  </div>
+</div>
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+    </div>
+
+    <!-- RIGHT: Person B video + directory list -->
+    <div class="card">
+  <b id="personBTitle">Person B (Other)</b>
+  <video id="remoteVideo" autoplay playsinline></video>
+      <div class="small">If audio doesn't play, click the video once.</div>
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+<!-- Hang up button and call note moved here -->
+<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
+  <button id="hangupBtn" disabled>Hang up</button>
+
+  <div>
+    <div class="small">Message to send with call (optional)</div>
+    <input
+      id="callNoteInput"
+      placeholder="e.g. Let us talk at 3 pm"
+      maxlength="140"
+    />
+    <div class="small" style="color:#777">
+      This text will appear in the notification for Person B.
+    </div>
+  </div>
+</div>
+
+<hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+<div class="small">All allowed users</div>
+<div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
+   
+    </div>
+
+  </div>
+
+<!-- ===== BOTTOM PANEL (everything except A hangup+note and B users list) ===== -->
+<div class="bottomPanel">
+  <div class="bottomGrid">
+
+    <!-- Status / Push -->
+    <div class="bottomCard">
+      <b>Status</b>
+      <div class="status" id="myNameStatus">Not set.</div>
+      <div class="status" id="pushStatus">Push: not enabled.</div>
+      <div class="status" id="dirCallStatus">Idle.</div>
+    </div>
+
+    <!-- Video Quality -->
+    <div class="bottomCard">
+      <b>Video quality</b>
+      <div class="small">Choose before Start (you can change during a call).</div>
+      <select id="videoQualitySelect" disabled>
+        <option value="low">Low (360p)</option>
+        <option value="medium" selected>Medium (720p)</option>
+        <option value="high">High (1080p)</option>
+      </select>
+      <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
+    </div>
+
+    <!-- Profile -->
+    <div class="bottomCard">
+      <b>Your name</b>
+      <div class="small">Shown to other users.</div>
+      <input id="myNameInput" placeholder="e.g. Alex"/>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="saveNameBtn" disabled>Save Name</button>
+      </div>
+    </div>
+
+    <!-- Call / Room -->
+    <div class="bottomCard">
+      <b>Call controls</b>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="startBtn" disabled>Start</button>
+        <button id="createBtn" disabled>Create Room</button>
+        <button id="joinBtn" disabled>Join Room</button>
+      </div>
+      <div class="status" id="mediaStatus">Not started.</div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <div class="small">Room ID</div>
+      <input id="roomId" placeholder="Room ID"/>
+      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+        <button id="copyLinkBtn" disabled>Copy Invite</button>
+      </div>
+
+      <div class="status" id="callStatus">No room yet.</div>
+      <div class="small">Invite format: <code>.../webrtc.html#ROOM_ID</code></div>
+    </div>
+
+        <!-- Utilities -->
+   <div class="bottomCard">
+  <b>Background Notifier</b>
+  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="startBgBtn" disabled>Start Background Service</button>
+    <button id="stopBgBtn" disabled>Stop Background Service</button>
+  </div>
+  <div class="status" id="bgStatus">Status: Not connected</div>
+  <div class="small">
+    Runs in system tray to show notifications when browser is closed.<br>
+    <strong>Download installer:</strong><br>
+    <a href="https://github.com/easosunov/easosunov/releases/download/v1.0.0/webrtc-notifier-installer.zip" 
+       id="downloadBgLink"
+       target="_blank"
+       download="webrtc-notifier-installer.zip"
+       style="color:#1976d2; text-decoration:underline">
+      webrtc-notifier-installer.zip
+    </a>
+    <div class="small" style="color:#666; margin-top:4px; font-size:11px">
+      After downloading:<br>
+      1. Extract the ZIP file<br>
+      2. Run <code style="background:#f5f5f5; padding:2px 6px">webrtc-notifier-installer.exe</code><br>
+      3. Look for 📞 icon in system tray
+    </div>
+  </div>
+</div>
+   
+    <div class="bottomCard">
+      <b>Utilities</b>
+<div style="margin-top:8px">
+    <div class="small">Search users</div>
+    <input id="userSearchInput" placeholder="Search users…" />
+  </div>
+     
+<div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="testSoundBtn" disabled>Test Ring Sound</button>
+    <button id="resetPushBtn" disabled>Reset Push</button>
+    <button id="refreshUsersBtn" disabled>Refresh Users</button>
+    <button id="logoutUtilityBtn" style="background:#ffebee;border-color:#f44336;color:#c62828;display:none;">Log Out</button>
+</div>
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <button id="diagBtn">Diagnostics</button>
+      <div class="diagActions">
+        <button id="copyDiagBtn" disabled>Copy log</button>
+        <button id="clearDiagBtn" disabled>Clear log</button>
+      </div>
+      <pre id="diagBox"></pre>
+      <div class="small">Diagnostics are hidden by default. Click "Diagnostics" to show/hide.</div>
+    </div>
+
+  </div>
+</div>
+
+</div>
 
 <script type="module">
-console.log("APP VERSION:", "2026-01-17-android-windows-fix");
+console.log("APP VERSION:", "2026-01-17-fixed-android-windows");
 
 // ========== CRITICAL FIX: DETECT NOTIFICATION SOURCE ==========
 console.log('=== PAGE OPEN DEBUG ===');
@@ -28,13 +374,15 @@ console.log('=== END DEBUG ===');
 // Track if we showed a notification (for background app coordination)
 let webPageShowedNotification = false;
 
-// Handle notification redirects - UPDATED TO DETECT SOURCE
+// ========== MODIFIED NOTIFICATION HANDLER ==========
 (function handleNotificationRedirect() {
   try {
     const urlParams = new URLSearchParams(window.location.search);
     const callId = urlParams.get('callId');
     const roomId = urlParams.get('roomId');
     const fromName = urlParams.get('fromName');
+    const toName = urlParams.get('toName');
+    const note = urlParams.get('note');
     const source = urlParams.get('source'); // 'android' or 'windows'
     
     // Store for later use when user signs in
@@ -43,17 +391,15 @@ let webPageShowedNotification = false;
         callId: callId,
         roomId: roomId,
         fromName: fromName || 'Unknown',
-        source: source || 'unknown',
-        timestamp: Date.now()
+        toName: toName || '',
+        note: note || '',
+        timestamp: Date.now(),
+        source: source || 'unknown'
       }));
       
-      // SET CRITICAL FLAG: Page opened from notification
+      // SET CRITICAL FLAG: Page opened from notification (prevents auto-join)
       localStorage.setItem('pageOpenedFromNotification', 'true');
       localStorage.setItem('notificationSource', source || 'unknown');
-      
-      // Clear URL parameters but KEEP THE HASH
-      const cleanUrl = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl + window.location.hash);
       
       console.log('Notification stored. Source:', source, 'Flag set to prevent auto-join');
     } else if (location.hash.length > 1 && !location.search.includes('callId')) {
@@ -67,143 +413,90 @@ let webPageShowedNotification = false;
   }
 })();
 
-// ========== AUTO-JOIN FIX ==========
-// Add these flags at the TOP level
-let pageOpenedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
-let notificationSource = localStorage.getItem('notificationSource') || '';
-
-// Clear flags after we've read them (so they don't persist)
-if (pageOpenedFromNotification) {
-  console.log('Page was opened from notification. Source:', notificationSource);
-  // Don't clear immediately - we need them for auto-join decision
-}
-
-// ========== MODIFIED AUTO-JOIN LOGIC ==========
-let autoJoinDone = false;
-let autoJoinScheduled = false;
-let autoJoinTimer = null;
-
-async function autoJoinIfNeeded(){
-  // CRITICAL FIX: Check if page was opened from notification
-  const openedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
-  const source = localStorage.getItem('notificationSource');
-  
-  if (openedFromNotification) {
-    console.log('🚫 BLOCKING auto-join: Page opened from', source, 'notification');
-    
-    // Only clear flags after we've checked them
-    localStorage.removeItem('pageOpenedFromNotification');
-    localStorage.removeItem('notificationSource');
-    
-    // Show Accept/Decline buttons instead of auto-joining
-    const roomId = location.hash.substring(1);
-    if (roomId) {
-      roomIdInput.value = roomId;
-      console.log('Room ID from hash:', roomId);
-      
-      // Check if we have pending notification data
-      const pending = localStorage.getItem('pendingNotificationCall');
-      if (pending) {
-        try {
-          const pendingData = JSON.parse(pending);
-          if (isAuthed && myUid) {
-            showIncomingUI(pendingData.callId, {
-              roomId: pendingData.roomId,
-              fromName: pendingData.fromName || 'Unknown',
-              source: pendingData.source
-            });
-          }
-        } catch (e) {
-          console.warn('Error processing pending notification:', e);
-        }
-      }
-    }
-    
-    return; // STOP HERE - don't auto-join
-  }
-  
-  // Normal auto-join logic (for Windows listener or direct link)
-  if(autoJoinDone) return;
-  if(!roomIdInput.value.trim()) return;
-
-  autoJoinDone = true;
-  setStatus(callStatus,"Auto-joining room…");
-  logDiag("Auto-joining triggered.");
-
-  try{
-    await joinRoom();
-  }catch(e){
-    autoJoinDone = false;
-    throw e;
-  }
-}
-
-// ========== MODIFIED DECLINE BUTTON HANDLER ==========
-// In your existing declineBtn.onclick, ADD THIS at the beginning:
-declineBtn.onclick = async ()=>{
-  try{
-    // CLEAR NOTIFICATION FLAGS when user clicks Decline
-    localStorage.removeItem('pageOpenedFromNotification');
-    localStorage.removeItem('notificationSource');
-    localStorage.removeItem('pendingNotificationCall');
-    
-    const call = currentIncomingCall;
-    stopIncomingUI();
-
-    if(!call) return;
-
-    const { id } = call;
-    await updateDoc(doc(db,"calls", id), {
-      status: "declined",
-      declinedAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    // Clear notification flag
-    webPageShowedNotification = false;
-    localStorage.removeItem('pendingNotificationCall');
-
-    setStatus(dirCallStatus, "Declined incoming call.");
-    try { await listenIncomingCalls(); } catch {}
-    try { await loadRecentCalls(); } catch {}
-  }catch(e){
-    showError(e);
-  }
-};
-
-// ========== MODIFIED ACCEPT BUTTON HANDLER ==========
-// In your existing answerBtn.onclick, ADD THIS at the beginning:
-answerBtn.onclick = async ()=>{
-  try{
-    // CLEAR NOTIFICATION FLAGS when user clicks Accept
-    localStorage.removeItem('pageOpenedFromNotification');
-    localStorage.removeItem('notificationSource');
-    localStorage.removeItem('pendingNotificationCall');
-    
-    const call = currentIncomingCall;
-    stopIncomingUI();
-
-    if(!call){
-      setStatus(dirCallStatus, "No call context. Please wait for the caller again.");
-      return;
-    }
-
-    const { id, data } = call;
-    
-    // ... rest of your existing Accept button code ...
-  } catch(e) {
-    showError(e);
-  }
-};
-
-// ========== SW BOOTSTRAP (keep as is) ==========
+ // ===============================
+// SW BOOTSTRAP (runs even when NOT logged in)
+// This guarantees SW exists on both computers.
+// ===============================
 let swBootstrapReg = null;
+
 async function ensureServiceWorkerInstalled() {
-  // ... keep your existing SW code ...
+  if (!("serviceWorker" in navigator)) {
+    console.log("[SW] not supported");
+    return null;
+  }
+
+  // If already controlling the page, SW exists
+  if (navigator.serviceWorker.controller) {
+    console.log("[SW] controller already active");
+  }
+
+  const swUrl = new URL("/easosunov/firebase-messaging-sw.js", location.origin);
+  // bump version when you change SW file
+  swUrl.searchParams.set("v", "2026-01-03-bootstrap-1");
+
+  try {
+    swBootstrapReg = await navigator.serviceWorker.register(swUrl.toString(), {
+      scope: "/easosunov/",
+      updateViaCache: "none",
+    });
+    await navigator.serviceWorker.ready;
+    console.log("[SW] bootstrap registered:", swBootstrapReg.scope);
+    return swBootstrapReg;
+  } catch (e) {
+    console.error("[SW] bootstrap register failed:", e);
+    return null;
+  }
 }
 
+// RUN IT NOW (top-level)
 await ensureServiceWorkerInstalled();
 
+ /*const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/sendTestPush";*/
+ const NOTIFY_CALL_URL = "https://us-central1-easosunov-webrtc.cloudfunctions.net/notifyIncomingCall";
+
+/* ================== FCM PUSH TO ANDROID ================== */
+async function sendFCMToAndroid(toUid, roomId, callerName, note, callId) {
+  try {
+    // 1. Get Android user's FCM token from Firestore
+    const userDoc = await getDoc(doc(db, "users", toUid));
+    if (!userDoc.exists()) {
+      console.log("[FCM] Android user not found:", toUid);
+      return;
+    }
+    
+    const userData = userDoc.data();
+    const fcmToken = userData?.fcmToken; // Android stores token here
+    
+    if (!fcmToken) {
+      console.log("[FCM] No FCM token for Android user:", toUid);
+      return;
+    }
+    
+    console.log("[FCM] Sending to Android token:", fcmToken.substring(0, 20) + "...");
+    
+    // 2. Send FCM via your existing Cloud Function
+    await fetch(NOTIFY_CALL_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        fcmToken: fcmToken,
+        roomId: roomId,
+        callerName: callerName,
+        note: note || "",
+        callId: callId,
+        toUid: toUid
+      })
+    });
+    
+    console.log("[FCM] Notification sent to Android");
+    
+  } catch (error) {
+    console.error("[FCM] Error sending to Android:", error);
+  }
+}
+ 
 /* ======== CONFIG ======== */
 const PUBLIC_VAPID_KEY = "BCR4B8uf0WzUuzHKlBCJO22NNnnupe88j8wkjrTwwQALDpWUeJ3umtIkNJTrLb0I_LeIeu2HyBNbogHc6Y7jNzM";
 function cleanVapidKey(k){
@@ -212,29 +505,160 @@ function cleanVapidKey(k){
 const VAPID = cleanVapidKey(PUBLIC_VAPID_KEY);
 
 /* ================== ELEMENTS ================== */
-// ... (keep all your existing element definitions) ...
+const errorBox = document.getElementById("errorBox");
 
+const loginOverlay = document.getElementById("loginOverlay");
+const loginBtn = document.getElementById("loginBtn");
+const logoutBtn = document.getElementById("logoutBtn");
+const loginStatus = document.getElementById("loginStatus");
+const emailInput = document.getElementById("emailInput");
+const passInput = document.getElementById("passInput");
+const appRoot = document.getElementById("app");
+
+const localVideo = document.getElementById("localVideo");
+const remoteVideo = document.getElementById("remoteVideo");
+const startBtn = document.getElementById("startBtn");
+const createBtn= document.getElementById("createBtn");
+const joinBtn  = document.getElementById("joinBtn");
+const copyLinkBtn = document.getElementById("copyLinkBtn");
+const roomIdInput = document.getElementById("roomId");
+const mediaStatus = document.getElementById("mediaStatus");
+const callStatus  = document.getElementById("callStatus");
+
+const diagBtn = document.getElementById("diagBtn");
+const diagBox = document.getElementById("diagBox");
+const copyDiagBtn = document.getElementById("copyDiagBtn");
+const clearDiagBtn = document.getElementById("clearDiagBtn");
+
+/* Incoming modal */
+const incomingOverlay = document.getElementById("incomingOverlay");
+const incomingText = document.getElementById("incomingText");
+const answerBtn = document.getElementById("answerBtn");
+const declineBtn = document.getElementById("declineBtn");
+
+/* Directory UI (C-lite) */
+const myNameInput = document.getElementById("myNameInput");
+const saveNameBtn = document.getElementById("saveNameBtn");
+const refreshUsersBtn = document.getElementById("refreshUsersBtn");
+const myNameStatus = document.getElementById("myNameStatus");
+const userSearchInput = document.getElementById("userSearchInput");
+const usersList = document.getElementById("usersList");
+const dirCallStatus = document.getElementById("dirCallStatus");
+
+/* Calls list UI */
+const callsList = document.getElementById("callsList");
+const refreshCallsBtn = document.getElementById("refreshCallsBtn");
+ 
+/* Push + sound + hangup */
+const pushStatus = document.getElementById("pushStatus");
+const testSoundBtn = document.getElementById("testSoundBtn");
+const hangupBtn = document.getElementById("hangupBtn");
+const resetPushBtn = document.getElementById("resetPushBtn");
+const callNoteInput = document.getElementById("callNoteInput");
+
+/* ===== NEW: video quality UI elements ===== */
+const videoQualitySelect = document.getElementById("videoQualitySelect");
+const videoQualityStatus = document.getElementById("videoQualityStatus");
+
+// Background service elements
+const startBgBtn = document.getElementById('startBgBtn');
+const stopBgBtn = document.getElementById('stopBgBtn');
+const bgStatus = document.getElementById('bgStatus');
+const downloadBgLink = document.getElementById('downloadBgLink');
+
+const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
+ 
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
 let myUid = null;
 let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
+// Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
 
-// ========== ADD THIS NEW FLAG ==========
-let suppressAutoJoinForNotification = pageOpenedFromNotification;
-
+// ========== NEW: AUTO-JOIN CONTROL FLAGS ==========
+let suppressAutoJoinForNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
+let notificationSource = localStorage.getItem('notificationSource') || '';
+let autoJoinDone = false;
+let autoJoinScheduled = false;
+let autoJoinTimer = null;
+ 
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
-  // ... keep your existing code ...
+  try{
+    if(!callId) throw new Error("notifyCall: missing callId");
+
+    const url = new URL(NOTIFY_CALL_URL);
+    url.searchParams.set("callId", callId);
+
+    logDiag("notifyCall: calling " + url.toString());
+    const r = await fetch(url.toString(), { method: "GET" });
+
+    const text = await r.text().catch(()=> "");
+    logDiag(`notifyCall: status=${r.status} body=${text.slice(0, 200)}`);
+  }catch(e){
+    logDiag("notifyCall ERROR: " + (e?.message || e));
+  }
 }
 
 /* ================== DIAGNOSTICS ================== */
-// ... (keep all your existing diagnostic code) ...
+let diagVisible = false;
+const diagLog = [];
+function logDiag(msg){
+  const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  diagLog.push(line);
+  console.log(line);
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
+  copyDiagBtn.disabled = diagLog.length === 0;
+  clearDiagBtn.disabled = diagLog.length === 0;
+}
+diagBtn.onclick = () => {
+  diagVisible = !diagVisible;
+  diagBox.style.display = diagVisible ? "block" : "none";
+  diagBtn.textContent = diagVisible ? "Hide diagnostics" : "Diagnostics";
+  if (diagVisible) {
+    diagBox.textContent = diagLog.join("\n");
+    diagBox.scrollTop = diagBox.scrollHeight;
+  }
+};
+clearDiagBtn.onclick = () => {
+  diagLog.length = 0;
+  if (diagVisible) diagBox.textContent = "";
+  copyDiagBtn.disabled = true;
+  clearDiagBtn.disabled = true;
+  logDiag("Diagnostics cleared.");
+};
+copyDiagBtn.onclick = async () => {
+  const text = diagLog.join("\n");
+  if (!text) return;
+  try{
+    await navigator.clipboard.writeText(text);
+    logDiag("Copied diagnostics to clipboard.");
+  }catch{
+    window.prompt("Copy diagnostics:", text);
+  }
+};
 
 /* ================== ERROR HANDLING ================== */
-// ... (keep all your existing error handling) ...
+function showError(e){
+  const code = e?.code ? `\ncode: ${e.code}` : "";
+  const msg  = e?.message ? `\nmessage: ${e.message}` : "";
+  errorBox.style.display = "block";
+  errorBox.textContent = `${String(e?.stack || "")}${code}${msg}`.trim() || String(e);
+  logDiag("ERROR: " + String(e?.code || "") + " :: " + String(e?.message || e));
+}
+function hideErrorBox(){
+  errorBox.style.display = "none";
+  errorBox.textContent = "";
+}
+window.addEventListener("error", (e)=> showError(e.error || e.message || e));
+window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -263,23 +687,871 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ========== URL HASH / AUTOJOIN MODE ========== */
+
+ /* UID allowlist */
+async function enforceAllowlist(user){
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
+
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
+
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
+    }
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
+    }
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
+  }
+}
+
+ 
+/* ================== BACKGROUND SERVICE ================== */
+// Test if background service is running
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Service is not running or not reachable
+    return { isRunning: false, uid: null };
+  }
+}
+
+// Start background service
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    bgStatus.textContent = 'Connecting to background service...';
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = '✅ Background service active';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    // Show helpful message
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
+
+// Stop background service
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Background service stopped';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+// Update service status
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        bgStatus.textContent = '✅ Background service active';
+        startBgBtn.disabled = true;
+        stopBgBtn.disabled = false;
+      } else {
+        bgStatus.textContent = 'Background service ready';
+        stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      bgStatus.textContent = 'Background app not detected';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// Event listeners
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+// Download link
+// Download link - remove onclick handler since href is already set
+// Or update to use your GitHub URL
+downloadBgLink.onclick = (e) => {
+  // Optional: Add analytics or confirmation
+  console.log('Downloading background app...');
+  // Let the default link behavior happen (browser will download)
+};
+
+/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
+const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
+const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
+
+const hasBroadcastChannel = ("BroadcastChannel" in window);
+const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
+
+function nowMs(){ return Date.now(); }
+
+function setDeviceOwner(uid){
+  try{
+    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
+    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
+  }catch{}
+}
+
+function clearDeviceOwner(){
+  try{
+    localStorage.removeItem(DEVICE_OWNER_KEY);
+    localStorage.removeItem(DEVICE_OWNER_AT);
+  }catch{}
+}
+
+function getDeviceOwner(){
+  try{
+    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
+  }catch{
+    return null;
+  }
+}
+
+async function forceSignOutBecauseDifferentUser(newUid){
+  // If this tab is signed in as someone else, sign out immediately.
+  const currentUid = auth.currentUser?.uid || null;
+  if (currentUid && newUid && currentUid !== newUid){
+    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
+    try{
+      stopAll(); // stop listeners/media before auth changes
+    }catch{}
+    try{
+      await signOut(auth);
+    }catch(e){
+      // If signOut fails, still show why
+      showError(e);
+    }
+  }
+}
+
+function broadcastNewOwner(uid){
+  if(authBC){
+    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
+  }
+}
+
+// Listen for owner changes via BroadcastChannel
+if(authBC){
+  authBC.onmessage = (ev)=>{
+    const msg = ev?.data || {};
+    if(msg.type === "NEW_OWNER" && msg.uid){
+      forceSignOutBecauseDifferentUser(String(msg.uid));
+    }
+    if(msg.type === "OWNER_CLEARED"){
+      // nothing required
+    }
+  };
+}
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front
+      window.focus();
+      if (document.hidden) {
+        // Try to make browser bring tab to front (may not work due to browser restrictions)
+        console.log("Focus requested by duplicate tab");
+      }
+    }
+  };
+}
+/* ================== SINGLE PAGE INSTANCE LOCK ================== */
+const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
+const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
+const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
+
+// Generate unique tab ID
+const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+let hasLock = false;
+let lockCheckInterval = null;
+let isDisabled = false;
+
+// Function to IMMEDIATELY disable the app
+function disableAppImmediately() {
+  if (isDisabled) return;
+  isDisabled = true;
+  
+  logDiag("IMMEDIATE DISABLE: Another instance detected");
+  
+  // Stop all media and connections
+  stopAll();
+  
+  // Disable UI
+  if (appRoot) {
+    appRoot.classList.add('locked');
+    appRoot.style.pointerEvents = 'none';
+    appRoot.style.opacity = '0.5';
+  }
+  
+  // Hide login overlay if visible
+  if (loginOverlay) {
+    loginOverlay.style.display = 'none';
+  }
+  
+  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
+  // by closing this tab/window and focusing the original one
+  
+  // Try to close this tab/window
+  try {
+    // Try to find and focus the original tab by broadcasting a message
+    if (hasBroadcastChannel) {
+      const focusChannel = new BroadcastChannel("webrtc_focus_request");
+      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
+      setTimeout(() => {
+        focusChannel.close();
+      }, 1000);
+    }
+    
+    // Close this tab after a short delay
+    setTimeout(() => {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    }, 100);
+    
+  } catch (e) {
+    // If we can't close, show a minimal message and redirect to about:blank
+    console.log("Another instance is already running");
+    window.location.href = "about:blank";
+  }
+  
+  // Add button hover effects
+  const buttons = blocker.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff5252';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#5a6573';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.color = '#ddd';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff6b6b';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#4a5568';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'transparent';
+        btn.style.color = '#aaa';
+      }
+    });
+  });
+  
+  // Add button handlers
+  document.getElementById('goBackBtn')?.addEventListener('click', () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // If no history, redirect to a blank page or previous page
+      window.location.href = 'about:blank';
+    }
+  });
+  
+  document.getElementById('closePageBtn')?.addEventListener('click', () => {
+    // Try multiple methods to close or navigate away
+    try {
+      // Method 1: Try to close (works for popup windows)
+      if (window.opener || window.history.length <= 1) {
+        window.close();
+      } else {
+        // Method 2: For regular tabs, navigate to blank page
+        window.location.href = 'about:blank';
+        // Method 3: Try to close after a delay
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+      }
+    } catch (e) {
+      // Method 4: If close fails, navigate to previous page or blank
+      if (window.history.length > 1) {
+        window.history.go(-1);
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    // First clear the lock so we can try to acquire it again
+    try {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    } catch (e) {}
+    
+    // Remove blocker and reload
+    blocker.remove();
+    isDisabled = false;
+    setTimeout(() => {
+      window.location.reload();
+    }, 300);
+  });
+}
+
+// Function to check and acquire lock - STRICTER VERSION
+function checkAndAcquireLock() {
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    const lockAge = now - lockTime;
+    
+    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
+    if (storedLock && storedLock !== tabId && lockAge < 10000) {
+      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
+      return false;
+    }
+    
+    // Clear any stale lock (older than 10 seconds)
+    if (lockAge >= 10000) {
+      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    }
+    
+    // Acquire the lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    hasLock = true;
+    
+    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock acquisition error: " + e.message);
+    return false; // Be strict if localStorage fails
+  }
+}
+
+// Function to renew our lock and check for conflicts
+function renewAndCheckLock() {
+  if (!hasLock || isDisabled) return false;
+  
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    
+    // If we don't own the lock anymore, DISABLE IMMEDIATELY
+    if (storedLock !== tabId) {
+      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
+      disableAppImmediately();
+      return false;
+    }
+    
+    // If lock is stale (older than 30 seconds), someone else might have taken it
+    const lockAge = now - lockTime;
+    if (lockAge > 30000) {
+      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
+      // Try to reacquire
+      if (!checkAndAcquireLock()) {
+        disableAppImmediately();
+        return false;
+      }
+    }
+    
+    // Renew our lock
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock renewal error: " + e.message);
+    return false;
+  }
+}
+
+// Function to release our lock
+function releaseLock() {
+  if (hasLock) {
+    try {
+      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+      if (currentLock === tabId) {
+        localStorage.removeItem(PAGE_INSTANCE_KEY);
+        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+        logDiag(`Lock released by tab ${tabId}`);
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+    hasLock = false;
+  }
+}
+
+// Initialize lock on page load - DO THIS EARLY
+(function initializeLock() {
+  // Try to acquire lock immediately
+  if (!checkAndAcquireLock()) {
+    logDiag("Failed to acquire lock on initialization");
+    setTimeout(disableAppImmediately, 100);
+    return;
+  }
+  
+  // Start aggressive lock checking
+  lockCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      if (!renewAndCheckLock()) {
+        clearInterval(lockCheckInterval);
+      }
+    }
+  }, 1000); // Check every second when visible
+  
+  // Also check when page becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Page hidden - reduce checking frequency
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+        lockCheckInterval = setInterval(() => {
+          if (!renewAndCheckLock()) {
+            clearInterval(lockCheckInterval);
+          }
+        }, 3000); // Check every 3 seconds when hidden
+      }
+    } else {
+      // Page visible - check immediately and frequently
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+      }
+      if (!renewAndCheckLock()) {
+        return;
+      }
+      lockCheckInterval = setInterval(() => {
+        if (!renewAndCheckLock()) {
+          clearInterval(lockCheckInterval);
+        }
+      }, 1000);
+    }
+  });
+  
+  // Listen for storage events (other tabs changing localStorage)
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
+      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
+      setTimeout(() => {
+        if (!renewAndCheckLock()) {
+          disableAppImmediately();
+        }
+      }, 100);
+    }
+  });
+  
+  // Beforeunload cleanup
+  window.addEventListener('beforeunload', () => {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+    }
+    releaseLock();
+  });
+  
+  // Double-check after a short delay
+  setTimeout(() => {
+    if (!renewAndCheckLock()) {
+      disableAppImmediately();
+    }
+  }, 2000);
+})();
+
+// Also add a pre-check before any significant action
+ /*
+const originalStartMedia = window.startMedia;
+if (originalStartMedia) {
+  window.startMedia = function(...args) {
+    if (!hasLock || isDisabled) {
+      logDiag("Blocked startMedia - no lock or disabled");
+      disableAppImmediately();
+      return Promise.reject(new Error("Another instance is running"));
+    }
+    return originalStartMedia.apply(this, args);
+  };
+}
+ */
+ /* ================== AUTH GATE ================== */
+function requireAuthOrPrompt(){
+  if (isAuthed) return true;
+  // Don't show login overlay here - let the auth state handler manage it
+  return false;
+}
+
+loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Signing in…";
+  wasManualLogin = true;  // <-- Add this line
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    loginStatus.textContent = "Signed in. Checking allowlist…";
+
+    // Claim device owner immediately (forces other tabs with different UID to sign out)
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+
+  } catch (e) {
+    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
+  }
+};
+
+logoutBtn.onclick = async () => {
+  try{
+    stopAll();                 // stop listeners/media/UI
+    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
+    await signOut(auth);
+  }catch(e){
+    showError(e);
+  }
+};
+
+/* ================== PROCESS PENDING NOTIFICATIONS ================== */
+// Process pending notifications after authentication
+async function processPendingNotifications() {
+  try {
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        // If notification is less than 60 seconds old
+        if (Date.now() - pendingData.timestamp < 60000) {
+          if (isAuthed && myUid) {
+            showIncomingUI(pendingData.callId, {
+              roomId: pendingData.roomId,
+              fromName: pendingData.fromName || 'Unknown',
+              toName: pendingData.toName || '',
+              note: pendingData.note || ''
+            });
+          }
+        }
+        // Clear after processing
+        localStorage.removeItem('pendingNotificationCall');
+      } catch (e) {
+        localStorage.removeItem('pendingNotificationCall');
+      }
+    }
+  } catch (e) {
+    console.warn('processPendingNotifications error:', e);
+  }
+}
+
+/* ================== URL OPEN (from push click) ================== */
+(function handlePushOpen(){
+  try{
+    const qs = new URLSearchParams(location.search);
+    const callId = qs.get("callId");
+    const roomId = qs.get("roomId");
+    const fromName = qs.get("fromName");
+    const toName = qs.get("toName");
+
+    if(callId && roomId){
+      incomingText.textContent = `Call from ${fromName || "unknown"}…`;
+      incomingOverlay.style.display = "flex";
+      if (typeof startRingtone === "function") startRingtone();
+
+      pendingIncomingCallWhileLoggedOut = {
+        id: callId,
+        data: { roomId, fromName, toName }
+      };
+
+      roomIdInput.value = roomId;
+    }
+  }catch(e){
+    console.warn("Push open parse failed", e);
+  }
+})();
+
+/* ================== URL HASH / AUTOJOIN MODE ================== */
 const openedFromInvite = (location.hash.length > 1);
+let suppressAutoJoin = false;
 
 if (openedFromInvite) {
   roomIdInput.value = location.hash.slice(1);
   setStatus(callStatus, "Room ID detected in URL.");
   logDiag("Room ID from URL hash: " + roomIdInput.value);
-  
-  // Log the source for debugging
-  const notificationSource = localStorage.getItem('notificationSource');
-  logDiag("Notification source detected: " + notificationSource);
 }
 
-/* ========== MODIFIED SCHEDULE AUTOJOIN ========== */
+/* ================== WEBRTC ================== */
+let rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+async function loadIceServers() {
+  logDiag("Fetching ICE servers …");
+  const r = await fetch("https://turn-token.easosunov.workers.dev/ice");
+  if (!r.ok) throw new Error("ICE fetch failed: " + r.status);
+  const data = await r.json();
+  rtcConfig = { iceServers: data.iceServers };
+  logDiag("ICE servers detail (urls only): " + JSON.stringify(
+    (data.iceServers || []).map(s => ({ urls: s.urls }))
+  ));
+  logDiag("ICE servers loaded: " + (data.iceServers?.length || 0));
+}
+
+let localStream = null;
+let pc = null;
+
+/* ===== NEW: Video quality profiles =====
+   Low:    640x360 @ 15fps
+   Medium: 1280x720 @ 30fps
+   High:   1920x1080 @ 30fps
+*/
+const VIDEO_PROFILES = {
+  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
+  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
+  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+};
+
+// Persist selection
+const LS_VIDEO_QUALITY = "webrtc_video_quality";
+function getSavedVideoQuality(){
+  try{
+    const v = String(localStorage.getItem(LS_VIDEO_QUALITY) || "").trim();
+    return (v && VIDEO_PROFILES[v]) ? v : "medium";
+  }catch{
+    return "medium";
+  }
+}
+function saveVideoQuality(v){
+  try{ localStorage.setItem(LS_VIDEO_QUALITY, String(v||"")); }catch{}
+}
+
+let selectedVideoQuality = getSavedVideoQuality();
+
+function updateVideoQualityUi(){
+  if(videoQualitySelect){
+    videoQualitySelect.value = selectedVideoQuality;
+  }
+  const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+  if(videoQualityStatus) videoQualityStatus.textContent = `Video: ${label}.`;
+}
+
+updateVideoQualityUi();
+
+// Change handler
+videoQualitySelect?.addEventListener("change", async ()=>{
+  const v = String(videoQualitySelect.value || "medium");
+  selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
+  saveVideoQuality(selectedVideoQuality);
+  updateVideoQualityUi();
+
+  // If camera already started, apply immediately
+  if(localStream){
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+      logDiag("Video quality applied while running: " + selectedVideoQuality);
+    }catch(e){
+      logDiag("applyVideoQuality error: " + (e?.message || e));
+      showError(e);
+    }
+  }
+});
+
+async function applyVideoQualityToCurrentStream(quality){
+  const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  const vTrack = localStream?.getVideoTracks?.()[0];
+  if(!vTrack) throw new Error("No video track to apply constraints to.");
+  await vTrack.applyConstraints(profile.constraints);
+
+  const s = vTrack.getSettings ? vTrack.getSettings() : {};
+  logDiag("Video track settings now: " + JSON.stringify({
+    width: s.width, height: s.height, frameRate: s.frameRate
+  }));
+}
+
+/* for call sessions, pin the room id so restarts never jump rooms */
+let pinnedRoomId = null;
+
+function closePeer(){
+  if(pc){
+    pc.onicecandidate=null;
+    pc.ontrack=null;
+    pc.onconnectionstatechange=null;
+    pc.oniceconnectionstatechange=null;
+    try{ pc.close(); }catch{}
+    pc=null;
+  }
+  remoteVideo.srcObject = null;
+}
+
+async function ensurePeer() {
+  closePeer();
+
+  if (!rtcConfig || !rtcConfig.iceServers || rtcConfig.iceServers.length === 0) {
+    await loadIceServers();
+  }
+
+  pc = new RTCPeerConnection(rtcConfig);
+  logDiag("Created RTCPeerConnection with ICE servers");
+
+  const rs = new MediaStream();
+  remoteVideo.srcObject = rs;
+
+  pc.ontrack = (e) => {
+    e.streams[0].getTracks().forEach(t => rs.addTrack(t));
+    remoteVideo.muted = false;
+    remoteVideo.play().catch(() => {});
+    logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+  };
+
+  pc.onconnectionstatechange = () => { if (pc) logDiag("pc.connectionState=" + pc.connectionState); };
+  pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
+
+  if (!localStream) throw new Error("Local media not started.");
+  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+}
+
+/* ================== FIRESTORE HELPERS ================== */
+async function clearSub(col){
+  const s = await getDocs(col);
+  if(s.empty) return;
+  const b = writeBatch(db);
+  s.forEach(d=>b.delete(d.ref));
+  await b.commit();
+  logDiag(`Cleared subcollection ${col.path} docs=${s.size}`);
+}
+
+/* ================== UI HELPERS ================== */
+function refreshCopyInviteState(){
+  const hasRoomId = !!roomIdInput.value.trim();
+  copyLinkBtn.disabled = !(isAuthed && hasRoomId);
+}
+
+/* ================== MEDIA + AUTOJOIN ================== */
+let startingPromise = null;
+
+// ========== MODIFIED AUTO-JOIN FUNCTIONS ==========
+async function autoJoinIfNeeded(){
+  // CRITICAL: Check if page was opened from notification
+  const openedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
+  const source = localStorage.getItem('notificationSource');
+  
+  if (openedFromNotification) {
+    console.log('🚫 BLOCKING auto-join: Page opened from', source, 'notification');
+    
+    // Don't auto-join - show Accept/Decline instead
+    const pending = localStorage.getItem('pendingNotificationCall');
+    if (pending) {
+      try {
+        const pendingData = JSON.parse(pending);
+        if (isAuthed && myUid) {
+          // Clear flags but keep pending data
+          localStorage.removeItem('pageOpenedFromNotification');
+          localStorage.removeItem('notificationSource');
+          
+          // Show incoming call UI
+          showIncomingUI(pendingData.callId, {
+            roomId: pendingData.roomId,
+            fromName: pendingData.fromName || 'Unknown',
+            toName: pendingData.toName || '',
+            note: pendingData.note || ''
+          });
+        }
+      } catch (e) {
+        console.warn('Error processing pending notification:', e);
+      }
+    }
+    
+    return; // STOP HERE - don't auto-join
+  }
+  
+  // Normal auto-join logic (for Windows listener or direct link)
+  if(autoJoinDone) return;
+  if(!roomIdInput.value.trim()) return;
+
+  autoJoinDone = true;
+  setStatus(callStatus,"Auto-joining room…");
+  logDiag("Auto-joining triggered.");
+
+  try{
+    await joinRoom();
+  }catch(e){
+    autoJoinDone = false;
+    throw e;
+  }
+}
+
+function cancelPendingAutoJoin(){
+  autoJoinScheduled = false;
+  if (autoJoinTimer) { clearTimeout(autoJoinTimer); autoJoinTimer = null; }
+}
+
 function scheduleAutoJoin(){
-  // CRITICAL: Don't schedule auto-join if opened from notification
-  if (suppressAutoJoinForNotification) {
+  // CRITICAL: Check if we should suppress auto-join for notifications
+  const openedFromNotification = localStorage.getItem('pageOpenedFromNotification') === 'true';
+  
+  if (openedFromNotification) {
     console.log('Suppressing auto-join: page opened from notification');
     return;
   }
@@ -302,11 +1574,1330 @@ function scheduleAutoJoin(){
   }, 1000); // 1 second delay
 }
 
-// ========== THE REST OF YOUR CODE ==========
-// ... (keep ALL the rest of your existing code EXACTLY as it is) ...
-// This includes all your Firebase functions, WebRTC code, UI handlers, etc.
-// Only the sections I've explicitly shown above need modification.
+async function startMedia(opts={skipAutoJoin:false}){
+  if(!requireAuthOrPrompt()) return;
 
-</script>
-</body>
-</html>
+  if(localStream){
+    if(!opts.skipAutoJoin) scheduleAutoJoin();
+    return;
+  }
+  if(startingPromise) return startingPromise;
+
+  startingPromise = (async()=>{
+    hideErrorBox();
+
+    setStatus(mediaStatus,"Requesting camera/mic…");
+    logDiag("Requesting getUserMedia…");
+
+    // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
+    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: profile.constraints,
+      audio: true
+    });
+
+    localVideo.srcObject = localStream;
+
+    // Also try to apply constraints again (some cameras ignore initial ideals)
+    try{
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+    }catch(e){
+      logDiag("Initial applyConstraints failed (non-fatal): " + (e?.message || e));
+    }
+
+    setStatus(mediaStatus,"Camera/mic started.");
+    logDiag("Camera/mic started (stream attached).");
+
+    localVideo.onloadedmetadata = async () => {
+      try { await localVideo.play(); } catch {}
+      setStatus(mediaStatus,"Camera/mic started.");
+      logDiag("Local video playing.");
+    };
+
+    await loadIceServers();
+
+    startBtn.disabled = true;
+    createBtn.disabled = false;
+    joinBtn.disabled   = false;
+
+  })();
+
+  try{ await startingPromise; }
+  finally{ startingPromise = null; }
+
+  if(!opts.skipAutoJoin) scheduleAutoJoin();
+}
+
+/* ================== LISTENERS ================== */
+let unsubRoomA=null, unsubCalleeA=null;
+let unsubRoomB=null, unsubCallerB=null;
+
+function stopListeners(){
+  if(unsubRoomA){ unsubRoomA(); unsubRoomA=null; }
+  if(unsubCalleeA){ unsubCalleeA(); unsubCalleeA=null; }
+  if(unsubRoomB){ unsubRoomB(); unsubRoomB=null; }
+  if(unsubCallerB){ unsubCallerB(); unsubCallerB=null; }
+}
+
+/* ================== STOP ================== */
+function stopAll(){
+  stopListeners();
+  closePeer();
+  stopCallListeners();
+  stopIncomingUI();
+ stopRingback();
+
+  if(localStream){
+    localStream.getTracks().forEach(t=>t.stop());
+    localStream=null;
+  }
+  localVideo.srcObject=null;
+
+  startBtn.disabled = !isAuthed;
+  createBtn.disabled = true;
+  joinBtn.disabled = true;
+
+  setStatus(mediaStatus,"Not started.");
+  setStatus(callStatus,"No room yet.");
+
+  autoJoinDone = false;
+  suppressAutoJoin = false;
+  cancelPendingAutoJoin();
+
+  refreshCopyInviteState();
+
+  hangupBtn.disabled = true;
+  setStatus(dirCallStatus, "Idle.");
+
+  pinnedRoomId = null;
+}
+
+/* ================== REJOIN SUPPORT ================== */
+let lastSeenJoinRequestA = 0;
+let lastAnsweredSessionB = null;
+let bRetryTimer = null;
+
+function clearBRetry(){
+  if(bRetryTimer){ clearTimeout(bRetryTimer); bRetryTimer=null; }
+}
+
+async function requestFreshOffer(roomRef){
+  lastAnsweredSessionB = null;
+  await setDoc(roomRef, { joinRequest: Date.now() }, { merge:true });
+  logDiag("Requested fresh offer (joinRequest).");
+}
+
+/* ================== ROOM A ================== */
+let createAttemptA = 0;
+
+async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixedRoomId:null}){
+  if(!requireAuthOrPrompt()) return null;
+
+  suppressAutoJoin = true;
+  autoJoinDone = true;
+  cancelPendingAutoJoin();
+
+  stopListeners();
+  clearBRetry();
+
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++createAttemptA;
+
+  const existing =
+    (options.fixedRoomId ? String(options.fixedRoomId).trim() : "") ||
+    (pinnedRoomId ? String(pinnedRoomId).trim() : "") ||
+    (options.reuseRoomIdInput ? roomIdInput.value.trim() : "");
+
+  const roomRef = existing ? doc(db, "rooms", existing) : doc(collection(db, "rooms"));
+
+  roomIdInput.value = roomRef.id;
+  if (options.updateHash) location.hash = roomRef.id;
+
+  refreshCopyInviteState();
+  logDiag("CreateRoom: roomId=" + roomRef.id);
+
+  const caller = collection(roomRef,"callerCandidates");
+  const callee = collection(roomRef,"calleeCandidates");
+  const snap = await getDoc(roomRef);
+  const prev = snap.exists() ? (snap.data().session || 0) : 0;
+  const session = Number(prev) + 1;
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await clearSub(caller);
+  await clearSub(callee);
+
+  if(myAttempt !== createAttemptA) return null;
+
+  await ensurePeer();
+
+  pc.onicecandidate = (e)=>{
+    if(e.candidate){
+      addDoc(caller, { session, ...e.candidate.toJSON() }).catch(()=>{});
+    }
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+
+  await setDoc(roomRef, {
+    session,
+    offer: { type: offer.type, sdp: offer.sdp },
+    answer: null,
+    updatedAt: Date.now()
+  }, { merge:true });
+
+  setStatus(callStatus, `Room active (session ${session}).`);
+  logDiag(`Room written. session=${session}`);
+
+  unsubRoomA = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== createAttemptA) return;
+    const d = s.data();
+    if(!d) return;
+
+    if(d.joinRequest && d.joinRequest > lastSeenJoinRequestA){
+      lastSeenJoinRequestA = d.joinRequest;
+      setStatus(callStatus, "Join request received — restarting session…");
+      logDiag("JoinRequest seen => restarting offer/session.");
+      setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 150);
+      return;
+    }
+
+    if(d.answer && d.session === session && pc && pc.signalingState === "have-local-offer" && !pc.currentRemoteDescription){
+      try{
+        await pc.setRemoteDescription(d.answer);
+        setStatus(callStatus, `Connected (session ${session}).`);
+        logDiag("Applied remote answer.");
+      }catch(e){
+        logDiag("setRemoteDescription(answer) failed: " + (e?.message || e));
+        setStatus(callStatus, "Answer failed — restarting session…");
+        setTimeout(()=>createRoom({ ...options, fixedRoomId: roomRef.id, reuseRoomIdInput: true }).catch(()=>{}), 200);
+      }
+    }
+  });
+
+  unsubCalleeA = onSnapshot(callee, (ss)=>{
+    ss.docChanges().forEach(ch=>{
+      if(ch.type !== "added" || !pc) return;
+      const c = ch.doc.data();
+      if(c.session !== session) return;
+      try{ pc.addIceCandidate(c); }catch{}
+    });
+  });
+
+  return { roomId: roomRef.id, roomRef };
+}
+
+/* ================== ROOM B ================== */
+let joinAttemptB = 0;
+
+async function joinRoom(){
+  if(!requireAuthOrPrompt()) return;
+
+  suppressAutoJoin = false;
+  await startMedia({ skipAutoJoin:true });
+
+  const myAttempt = ++joinAttemptB;
+  stopListeners();
+  clearBRetry();
+
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) throw new Error("Room ID is empty.");
+  location.hash = roomId;
+
+  logDiag("JoinRoom: roomId=" + roomId);
+
+  const roomRef = doc(db,"rooms", roomId);
+  const snap = await getDoc(roomRef);
+  if(!snap.exists()) throw new Error("Room not found");
+
+  await requestFreshOffer(roomRef);
+  if(myAttempt !== joinAttemptB) return;
+
+  setStatus(callStatus, "Connecting… (requested fresh offer)");
+
+  unsubRoomB = onSnapshot(roomRef, async (s)=>{
+    if(myAttempt !== joinAttemptB) return;
+    const d = s.data();
+    if(!d?.offer || !d.session) return;
+
+    if(lastAnsweredSessionB === d.session) return;
+
+    const session = d.session;
+    lastAnsweredSessionB = session;
+    logDiag("New offer/session detected: " + session);
+
+    try{
+      await ensurePeer();
+
+      const caller = collection(roomRef,"callerCandidates");
+      const callee = collection(roomRef,"calleeCandidates");
+
+      await clearSub(callee);
+      if(myAttempt !== joinAttemptB) return;
+
+      pc.onicecandidate = (e)=>{
+        if(e.candidate){
+          addDoc(callee, { session, ...e.candidate.toJSON() }).catch(()=>{});
+        }
+      };
+
+      await pc.setRemoteDescription(d.offer);
+      const ans = await pc.createAnswer();
+      await pc.setLocalDescription(ans);
+
+      await updateDoc(roomRef, { answer: ans, session, answeredAt: Date.now() });
+      setStatus(callStatus, `Joined room. Connecting… (session ${session})`);
+      logDiag("Answer written to room doc.");
+
+      unsubCallerB = onSnapshot(caller, (ss)=>{
+        if(myAttempt !== joinAttemptB) return;
+        ss.docChanges().forEach(ch=>{
+          if(ch.type !== "added" || !pc) return;
+          const c = ch.doc.data();
+          if(c.session !== session) return;
+          try{ pc.addIceCandidate(c); }catch{}
+        });
+      });
+
+      clearBRetry();
+      bRetryTimer = setTimeout(async ()=>{
+        if(myAttempt !== joinAttemptB) return;
+        if(!pc) return;
+        if(pc.connectionState === "connected") return;
+
+        setStatus(callStatus, "Still connecting… retrying (requesting new offer)…");
+        logDiag("Watchdog: requesting fresh offer again.");
+        try{
+          lastAnsweredSessionB = null;
+          await requestFreshOffer(roomRef);
+        }catch(e){ showError(e); }
+      }, 10000);
+
+      pc.onconnectionstatechange = async ()=>{
+        if(myAttempt !== joinAttemptB || !pc) return;
+        setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+        if(pc.connectionState === "connected"){ clearBRetry(); }
+        if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
+          setStatus(callStatus, "Connection lost — requesting new offer…");
+          logDiag("Connection lost => requesting fresh offer.");
+          try{
+            lastAnsweredSessionB = null;
+            await requestFreshOffer(roomRef);
+          }catch(e){ showError(e); }
+        }
+      };
+
+    }catch(e){
+      lastAnsweredSessionB = null;
+      logDiag("Join flow error: " + (e?.message || e));
+      setStatus(callStatus, "Join failed — requesting new offer…");
+      try{ await requestFreshOffer(roomRef); }catch(err){ showError(err); }
+    }
+  });
+}
+
+/* ================== COPY INVITE ================== */
+async function copyTextRobust(text){
+  if(navigator.clipboard && window.isSecureContext){
+    try{ await navigator.clipboard.writeText(text); return true; }catch{}
+  }
+  window.prompt("Copy this invite link:", text);
+  return false;
+}
+
+copyLinkBtn.onclick = async ()=>{
+  const roomId = roomIdInput.value.trim();
+  if(!roomId) return;
+  const invite = `${location.origin}${location.pathname}#${roomId}`;
+  const ok = await copyTextRobust(invite);
+  setStatus(callStatus, ok ? "Invite copied." : "Clipboard blocked — link shown for manual copy.");
+  logDiag("Copy invite clicked.");
+};
+
+/* ================== RINGTONE ================== */
+let audioCtx = null;
+let ringOsc = null;
+let ringGain = null;
+let ringTimer = null;
+
+function ensureAudio(){
+  if(!audioCtx){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return audioCtx;
+}
+async function unlockAudio(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") await ctx.resume();
+  }catch{}
+}
+window.addEventListener("click", ()=>{ unlockAudio(); }, { once:false, passive:true });
+
+function startRingtone(){
+  stopRingtone();
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+    ringGain = ctx.createGain();
+    ringGain.gain.value = 0.10;
+    ringGain.connect(ctx.destination);
+
+    ringOsc = ctx.createOscillator();
+    ringOsc.type = "sine";
+    ringOsc.frequency.value = 880;
+    ringOsc.connect(ringGain);
+    ringOsc.start();
+
+    let on = true;
+    ringTimer = setInterval(()=>{
+      if(!ringGain) return;
+      ringGain.gain.value = on ? 0.10 : 0.0001;
+      on = !on;
+    }, 450);
+
+    logDiag("Ringtone started.");
+  }catch(e){
+    logDiag("Ringtone failed: " + (e?.message || e));
+  }
+}
+function stopRingtone(){
+  if(ringTimer){ clearInterval(ringTimer); ringTimer=null; }
+  try{ if(ringOsc){ ringOsc.stop(); } }catch{}
+  try{ if(ringOsc){ ringOsc.disconnect(); } }catch{}
+  try{ if(ringGain){ ringGain.disconnect(); } }catch{}
+  ringOsc = null;
+  ringGain = null;
+}
+/* ================== CALLER RINGBACK (quiet beeps) ================== */
+let ringbackTimer = null;
+
+function stopRingback(){
+  if(ringbackTimer){
+    clearInterval(ringbackTimer);
+    ringbackTimer = null;
+  }
+}
+
+function playRingbackBeepOnce(){
+  try{
+    const ctx = ensureAudio();
+    if(ctx.state !== "running") ctx.resume().catch(()=>{});
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    gain.gain.value = 0.04;     // quiet volume
+    osc.type = "sine";
+    osc.frequency.value = 440;  // phone-ish
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    const now = ctx.currentTime;
+    osc.start(now);
+    osc.stop(now + 0.18);
+
+    osc.onended = ()=>{
+      try{ osc.disconnect(); }catch{}
+      try{ gain.disconnect(); }catch{}
+    };
+  }catch{}
+}
+
+function startRingback(){
+  stopRingback();
+
+  // Ensure audio is unlocked (browser policy)
+  try{ unlockAudio(); }catch{}
+
+  // Pattern: beep, 250ms later beep, then ~2s pause, repeat
+  const cycleMs = 2500;
+
+  playRingbackBeepOnce();
+  setTimeout(()=> playRingbackBeepOnce(), 250);
+
+  ringbackTimer = setInterval(()=>{
+    playRingbackBeepOnce();
+    setTimeout(()=> playRingbackBeepOnce(), 250);
+  }, cycleMs);
+}
+
+/* ================== CALLS (UID-based) ================== */
+let currentIncomingCall = null; // { id, data }
+let activeCallId = null;        // NEW: callId for BOTH sides (caller OR callee)
+let lastDismissedIncomingCallId = null;
+
+let unsubIncoming = null;
+let unsubCallDoc = null;
+
+function stopCallListeners(){
+  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  currentIncomingCall = null;
+  activeCallId = null;
+}
+
+function showIncomingUI(callId, data){
+  currentIncomingCall = { id: callId, data };
+  incomingText.textContent = `Call from ${data.fromName || "unknown"}…`;
+
+  // Let caller know callee browser received/displayed invite
+  if (!data?.deliveredAt) {
+    updateDoc(doc(db,"calls", callId), {
+      deliveredAt: serverTimestamp(),
+      deliveredVia: "firestore",
+      deliveredAtMs: Date.now()  // Add milliseconds timestamp for precise timing
+    }).catch(()=>{});
+  }
+
+  // MARK THAT WEB PAGE HANDLED NOTIFICATION
+  webPageShowedNotification = true;
+  console.log('Web page showing incoming call UI, marking as delivered');
+
+  incomingOverlay.style.display = "flex";
+  startRingtone();
+}
+
+function stopIncomingUI(){
+  incomingOverlay.style.display = "none";
+  stopRingtone();
+  lastDismissedIncomingCallId = currentIncomingCall?.id || lastDismissedIncomingCallId;
+  currentIncomingCall = null;
+}
+
+async function listenIncomingCalls(){
+  if(!myUid) return;
+
+  if(unsubIncoming){ unsubIncoming(); unsubIncoming=null; }
+
+  const qy = query(
+    collection(db, "calls"),
+    where("toUid", "==", myUid),
+    where("status", "==", "ringing"),
+    orderBy("createdAt", "desc"),
+    limit(1)
+  );
+
+  unsubIncoming = onSnapshot(qy, (snap)=>{
+    if(snap.empty) return;
+    const d = snap.docs[0];
+    const data = d.data();
+
+    if (d.id === lastDismissedIncomingCallId) return;
+    if(currentIncomingCall?.id === d.id) return;
+
+    logDiag("Incoming call (Firestore): " + d.id);
+    showIncomingUI(d.id, data);
+  }, (err)=>{
+    logDiag("Incoming call listener error: " + (err?.message || err));
+  });
+}
+
+// Catch-up: if Chrome was closed and push was missed, show the newest ringing call after login
+async function catchUpMissedRingingCall() {
+  try {
+    if (!myUid) return;
+
+    // 1) Query newest ringing call addressed to me
+    const qy = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid),
+      where("status", "==", "ringing"),
+      orderBy("createdAt", "desc"),
+      limit(1)
+    );
+
+    const snap = await getDocs(qy);
+    if (snap.empty) return;
+
+    const d = snap.docs[0];
+    const callId = d.id;
+    const call = d.data() || {};
+if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+if (currentIncomingCall?.id === callId) return;
+
+    // 2) Derive created time (ms) safely
+    const createdMs =
+      (call.createdAt && typeof call.createdAt.toMillis === "function")
+        ? call.createdAt.toMillis()
+        : Date.now();
+
+    // 3) Show in-page incoming UI (works even if notifications are blocked)
+    roomIdInput.value = call.roomId || "";
+    currentIncomingCall = { id: callId, data: call };
+    incomingText.textContent = `Call from ${call.fromName || "unknown"}…`;
+    incomingOverlay.style.display = "flex";
+    startRingtone();
+
+// Update Person B title with caller's name for the UI
+if (call.fromName) {
+  updatePersonBTitle(call.fromName);
+}
+   
+    // 4) Optional: also show a system notification (if permission granted)
+    if ("Notification" in window && Notification.permission === "granted") {
+      const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+      if (reg) {
+        const fromName = call.fromName || "Unknown";
+        const note = String(call.note || "").trim();
+        const tsLocal = new Date(createdMs).toLocaleString();
+
+        const body =
+          `Call from ${fromName}` +
+          (note ? ` — ${note}` : "") +
+          ` — ${tsLocal}`;
+
+        await reg.showNotification("Incoming call", {
+          body,
+          tag: `webrtc-call-${myUid}`,
+          renotify: true,
+          requireInteraction: true,
+          data: { callId, roomId: call.roomId || "", fromName, note }
+        });
+      }
+    }
+
+    logDiag("Catch-up: showed ringing call " + callId);
+  } catch (e) {
+    logDiag("catchUpMissedRingingCall failed: " + (e?.message || e));
+  }
+}
+
+// Catch-up: if Chrome was closed and the call became MISSED, show newest missed call after login
+async function catchUpMissedCallNotification() {
+  try {
+    if (!myUid) return;
+
+    // 0) Don't repeat the same missed call notification forever
+    const LS_LAST_MISSED = "webrtc_last_missed_call_id";
+    const lastId = String(localStorage.getItem(LS_LAST_MISSED) || "");
+
+    // Helper to show system notification
+    async function showMissed(callId, call, whenMs) {
+      const fromName = call.fromName || "Unknown";
+      const note = String(call.note || "").trim();
+      const tsLocal = new Date(whenMs).toLocaleString();
+
+      // Always update in-page status so you can debug even if notifications are blocked
+      setStatus(dirCallStatus, `Missed call from ${fromName}.`);
+      logDiag(`Catch-up: MISSED/ENDED call found ${callId} from=${fromName}`);
+
+      if ("Notification" in window && Notification.permission === "granted") {
+        const reg = await navigator.serviceWorker.getRegistration("/easosunov/");
+        if (reg) {
+          const body =
+            `Missed call from ${fromName}` +
+            (note ? ` — ${note}` : "") +
+            ` — ${tsLocal}`;
+
+          await reg.showNotification("Missed call", {
+            body,
+            tag: `webrtc-missed-${myUid}`,
+            renotify: true,
+            requireInteraction: true,
+            data: { callId, roomId: call.roomId || "", fromName, note }
+          });
+        }
+      }
+
+      localStorage.setItem(LS_LAST_MISSED, callId);
+    }
+
+    // 1) First, try newest explicit MISSED call
+    {
+      const q1 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "missed"),
+        orderBy("missedAt", "desc"),
+        limit(1)
+      );
+
+      const s1 = await getDocs(q1);
+      if (!s1.empty) {
+        const d = s1.docs[0];
+        const callId = d.id;
+        const call = d.data() || {};
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const missedMs =
+            (call.missedAt && typeof call.missedAt.toMillis === "function")
+              ? call.missedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, missedMs);
+          return;
+        }
+      }
+    }
+
+    // 2) If not found, treat "ended" as missed IF it was never accepted/declined
+    {
+      const q2 = query(
+        collection(db, "calls"),
+        where("toUid", "==", myUid),
+        where("status", "==", "ended"),
+        orderBy("endedAt", "desc"),
+        limit(5) // check a few, because newest ended might be a real answered call
+      );
+
+      const s2 = await getDocs(q2);
+      if (s2.empty) return;
+
+      for (const docSnap of s2.docs) {
+        const callId = docSnap.id;
+        const call = docSnap.data() || {};
+
+        // Skip if it was actually answered or declined
+        const hadAccept = !!call.acceptedAt;
+        const hadDecline = !!call.declinedAt;
+        if (hadAccept || hadDecline) continue;
+
+        if (callId && callId !== lastId &&
+            pendingIncomingCallWhileLoggedOut?.id !== callId &&
+            currentIncomingCall?.id !== callId) {
+
+          const endedMs =
+            (call.endedAt && typeof call.endedAt.toMillis === "function")
+              ? call.endedAt.toMillis()
+              : Date.now();
+
+          await showMissed(callId, call, endedMs);
+          return;
+        }
+      }
+    }
+
+  } catch (e) {
+    logDiag("catchUpMissedCallNotification failed: " + (e?.message || e));
+  }
+}
+
+function cleanupCallUI(){
+  hangupBtn.disabled = true;
+  activeCallId = null;
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  pinnedRoomId = null;
+}
+
+function listenActiveCall(callId){
+  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+
+  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
+    if(!s.exists()) return;
+    const d = s.data();
+    if(!d) return;
+
+    // If the other side ends the call, clean everything up locally
+// If the other side ends the call, clean everything up locally
+if(d.status === "ended"){
+  stopRingback();
+  setStatus(dirCallStatus, "Ended.");
+  logDiag("Call ended (remote).");
+  cleanupCallUI();
+  stopAll(); // full local cleanup
+  // Reset Person B title
+  updatePersonBTitle('Other');
+  return;
+}
+
+    // Optional: keep your existing status feedback
+    if(d.status === "accepted"){
+      stopRingback();
+      setStatus(dirCallStatus, "Answered. Connecting…");
+      return;
+    }
+    if(d.status === "declined"){
+      stopRingback();
+      setStatus(dirCallStatus, "Declined.");
+      logDiag("Call declined.");
+      cleanupCallUI();
+      return;
+    }
+if(d.status === "missed"){
+  stopRingback();
+  setStatus(dirCallStatus, "Missed.");
+  logDiag("Call missed.");
+  cleanupCallUI();
+  return;
+}
+
+    if (d.deliveredAt) {
+      setStatus(dirCallStatus, "Delivered (callee page open).");
+      return;
+    }
+
+    const stage = d.push?.stage || "";
+    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
+    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
+    if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
+
+    setStatus(dirCallStatus, "Ringing…");
+  });
+}
+
+async function hangup(){
+ stopRingback();
+// Reset Person B title
+  updatePersonBTitle('Other');
+ 
+  // NEW: works for BOTH caller and callee
+  if (activeCallId) {
+    try{
+      const callRef = doc(db, "calls", activeCallId);
+const snap = await getDoc(callRef);
+
+if (snap.exists()) {
+  const call = snap.data() || {};
+
+  // If caller hangs up BEFORE callee answered/declined → MISSED
+  if (call.status === "ringing") {
+    await updateDoc(callRef, {
+      status: "missed",
+      missedAt: serverTimestamp(),
+      endedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } else {
+    // Normal hangup after answer
+    await updateDoc(callRef, {
+      status: "ended",
+      endedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+}
+
+    }catch(e){
+      // If rules block it, you'll see it in the error box (we fix rules below)
+      showError(e);
+    }
+  }
+
+  // FULL local cleanup
+  stopAll();
+  cleanupCallUI();
+  setStatus(dirCallStatus, "Ended.");
+  try { await loadRecentCalls(); } catch {} // Refresh calls list
+}
+
+/* ========== MODIFIED ANSWER/DECLINE BUTTONS ========== */
+answerBtn.onclick = async ()=>{
+  try{
+    // Clear notification flags
+    localStorage.removeItem('pageOpenedFromNotification');
+    localStorage.removeItem('notificationSource');
+    localStorage.removeItem('pendingNotificationCall');
+    
+    const call = currentIncomingCall;
+    stopIncomingUI();
+
+    if(!call){
+      setStatus(dirCallStatus, "No call context. Please wait for the caller again.");
+      return;
+    }
+
+    const { id, data } = call;
+
+    await updateDoc(doc(db,"calls", id), {
+      status: "accepted",
+      acceptedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    // Clear notification flag
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
+
+    // NEW: Callee now has an active call id and can hang up
+    activeCallId = id;
+    hangupBtn.disabled = false;
+    listenActiveCall(id);
+
+    roomIdInput.value = data.roomId;
+
+    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
+    
+    // Update Person B title with caller's name
+    if (data.fromName) {
+      updatePersonBTitle(data.fromName);
+    }
+
+    await joinRoom();
+
+    try { await listenIncomingCalls(); } catch {}
+    try { await loadRecentCalls(); } catch {} // Refresh calls list
+  }catch(e){
+    showError(e);
+  }
+};
+
+declineBtn.onclick = async ()=>{
+  try{
+    // Clear notification flags
+    localStorage.removeItem('pageOpenedFromNotification');
+    localStorage.removeItem('notificationSource');
+    localStorage.removeItem('pendingNotificationCall');
+    
+    const call = currentIncomingCall;
+    stopIncomingUI();
+
+    if(!call) return;
+
+    const { id } = call;
+    await updateDoc(doc(db,"calls", id), {
+      status: "declined",
+      declinedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    // Clear notification flag
+    webPageShowedNotification = false;
+    localStorage.removeItem('pendingNotificationCall');
+
+    setStatus(dirCallStatus, "Declined incoming call.");
+    try { await listenIncomingCalls(); } catch {}
+    try { await loadRecentCalls(); } catch {} // Refresh calls list
+  }catch(e){
+    showError(e);
+  }
+};
+
+/* ================== USER DIRECTORY (C-lite) ================== */
+let myDisplayName = "";
+let allUsersCache = []; // [{uid, displayName}]
+
+function defaultNameFromEmail(email){
+  const e = String(email || "").trim();
+  if(!e) return "";
+  return e.split("@")[0].slice(0, 24);
+}
+
+async function ensureMyUserProfile(user){
+  const ref = doc(db, "users", user.uid);
+  const snap = await getDoc(ref);
+
+  const existing = snap.exists() ? (snap.data() || {}) : {};
+  const name = existing.displayName || defaultNameFromEmail(user.email);
+
+  await setDoc(ref, {
+    uid: user.uid,
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  myDisplayName = name;
+  myNameInput.value = name || "";
+  myNameStatus.textContent = name ? `Saved: ${name}` : "Not set.";
+  
+  // Update Person A title with username
+  updatePersonATitle();
+}
+
+
+// Function to update Person A title with username
+function updatePersonATitle() {
+  const personATitle = document.getElementById('personATitle');
+  if (personATitle && myDisplayName) {
+    personATitle.textContent = `Person A (${myDisplayName})`;
+  } else if (personATitle) {
+    personATitle.textContent = 'Person A (You)';
+  }
+}
+
+// Function to update Person B title with username
+function updatePersonBTitle(username = 'Other') {
+  const personBTitle = document.getElementById('personBTitle');
+  if (personBTitle) {
+    if (username && username !== 'Other') {
+      personBTitle.textContent = `Person B (${username})`;
+    } else {
+      personBTitle.textContent = 'Person B (Other)';
+    }
+  }
+}
+
+ 
+async function saveMyName(){
+  if(!requireAuthOrPrompt()) return;
+
+  const name = String(myNameInput.value || "").trim();
+  if(!name) throw new Error("Name cannot be empty.");
+  if(name.length > 40) throw new Error("Name is too long (max 40).");
+
+  await setDoc(doc(db, "users", myUid), {
+    displayName: name,
+    updatedAt: serverTimestamp()
+  }, { merge:true });
+
+  myDisplayName = name;
+  myNameStatus.textContent = `Saved: ${name}`;
+  logDiag("Saved displayName=" + name);
+  
+  // Update Person A title with new username
+  updatePersonATitle();
+}
+
+function chunk(arr, n){
+  const out = [];
+  for(let i=0;i<arr.length;i+=n) out.push(arr.slice(i, i+n));
+  return out;
+}
+
+function renderUsersList(filterText=""){
+  const q = String(filterText || "").trim().toLowerCase();
+  const rows = allUsersCache
+    .filter(u => u.uid !== myUid)
+    .filter(u => !q || String(u.displayName||"").toLowerCase().includes(q))
+    .sort((a,b)=> String(a.displayName||"").localeCompare(String(b.displayName||"")));
+
+  usersList.innerHTML = "";
+
+  if(rows.length === 0){
+    usersList.innerHTML = `<div class="small" style="color:#777">No users found.</div>`;
+    return;
+  }
+
+  for(const u of rows){
+    const div = document.createElement("div");
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.justifyContent = "space-between";
+    div.style.gap = "10px";
+    div.style.border = "1px solid #eee";
+    div.style.borderRadius = "10px";
+    div.style.padding = "10px";
+
+    const left = document.createElement("div");
+    left.innerHTML = `<b>${u.displayName || "(no name)"}</b>`;
+
+    const btn = document.createElement("button");
+    btn.textContent = "Call";
+    btn.disabled = !isAuthed;
+    btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
+
+    div.appendChild(left);
+    div.appendChild(btn);
+    usersList.appendChild(div);
+  }
+}
+
+async function loadAllAllowedUsers(){
+  if(!requireAuthOrPrompt()) return;
+
+  const alSnap = await getDocs(
+    query(collection(db,"allowlistUids"), where("enabled","==",true), limit(200))
+  );
+  const uids = alSnap.docs.map(d => d.id).filter(Boolean);
+
+  const users = [];
+  for(const group of chunk(uids, 10)){
+    const usSnap = await getDocs(query(collection(db,"users"), where(documentId(), "in", group)));
+    usSnap.forEach(docu => {
+      const d = docu.data() || {};
+      users.push({ uid: docu.id, displayName: d.displayName || "" });
+    });
+  }
+
+  allUsersCache = users;
+  renderUsersList(userSearchInput.value);
+  logDiag("Loaded users directory: " + users.length);
+}
+
+
+/* ================== RECENT CALLS LIST ================== */
+async function loadRecentCalls() {
+  if (!requireAuthOrPrompt()) return;
+  
+  try {
+    // Get incoming calls
+    const q1 = query(
+      collection(db, "calls"),
+      where("toUid", "==", myUid)
+    );
+    
+    // Get outgoing calls  
+    const q2 = query(
+      collection(db, "calls"),
+      where("fromUid", "==", myUid)
+    );
+    
+    const [snap1, snap2] = await Promise.all([
+      getDocs(q1),
+      getDocs(q2)
+    ]);
+    
+    // Combine all calls
+    const allCalls = [];
+    
+    // Process incoming calls
+    snap1.docs.forEach(doc => {
+      const data = doc.data();
+      allCalls.push({ 
+        id: doc.id, 
+        ...data,
+        direction: 'incoming',
+        timestamp: data.createdAt?.toMillis?.() || data.createdAt?._seconds * 1000 || 0
+      });
+    });
+    
+    // Process outgoing calls
+    snap2.docs.forEach(doc => {
+      const data = doc.data();
+      allCalls.push({ 
+        id: doc.id, 
+        ...data,
+        direction: 'outgoing',
+        timestamp: data.createdAt?.toMillis?.() || data.createdAt?._seconds * 1000 || 0
+      });
+    });
+    
+    logDiag(`DEBUG: Total calls before deduplication: ${allCalls.length}`);
+    
+    // Sort by timestamp (newest first) for processing
+    allCalls.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Deduplicate based on similar content and time
+    const deduplicated = [];
+    const seenKeys = new Set();
+    
+    // Time window for considering duplicates (5 minutes = 300000 ms)
+    const DUPLICATE_TIME_WINDOW = 5 * 60 * 1000;
+    
+    allCalls.forEach(call => {
+      // Create a unique key based on: other user + direction + status + time window
+      const otherUid = call.direction === 'incoming' ? call.fromUid : call.toUid;
+      const timeBucket = Math.floor(call.timestamp / DUPLICATE_TIME_WINDOW);
+      const key = `${otherUid}_${call.direction}_${call.status}_${timeBucket}`;
+      
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        deduplicated.push(call);
+      } else {
+        logDiag(`DEBUG: Skipping duplicate: ${call.id} (key: ${key})`);
+      }
+    });
+    
+    logDiag(`DEBUG: After content-based deduplication: ${deduplicated.length} calls`);
+    
+    // Take only the most recent 30 calls
+    const recentCalls = deduplicated
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 30);
+    
+    // DEBUG: Log final list
+    logDiag(`DEBUG: Final calls list has ${recentCalls.length} items`);
+    recentCalls.forEach((call, index) => {
+      logDiag(`DEBUG: [${index}] ${call.id} - ${call.fromName} to ${call.toName} - ${call.status} - ${new Date(call.timestamp).toLocaleString()}`);
+    });
+    
+    renderCallsList(recentCalls);
+    logDiag(`Loaded ${recentCalls.length} recent calls (content-deduplicated)`);
+    
+  } catch (error) {
+    logDiag("Error loading recent calls: " + error.message);
+    callsList.innerHTML = `<div style="color:#f44336;text-align:center;">Error: ${error.message}</div>`;
+  }
+}
+
+
+function renderCallsList(calls) {
+  if (!callsList || calls.length === 0) {
+    callsList.innerHTML = `<div style="color:#777;text-align:center;">No calls yet</div>`;
+    return;
+  }
+  
+  let html = '';
+  
+  calls.forEach(call => {
+    const isIncoming = call.toUid === myUid;
+    const isOutgoing = call.fromUid === myUid;
+    const status = call.status || 'unknown';
+    
+    // Determine CSS class based on status and direction
+    let statusClass = '';
+    if (status === 'ringing') statusClass = 'call-ringing';
+    else if (status === 'accepted') statusClass = 'call-accepted';
+    else if (status === 'declined') statusClass = 'call-declined';
+    else if (status === 'missed') statusClass = 'call-missed';
+    else if (status === 'ended') statusClass = 'call-ended';
+    else if (isIncoming) statusClass = 'call-incoming';
+    else if (isOutgoing) statusClass = 'call-outgoing';
+    
+    // Format timestamp
+    let timeText = '';
+    if (call.createdAt) {
+      const timeMs = call.createdAt.toMillis ? call.createdAt.toMillis() : Date.now();
+      const date = new Date(timeMs);
+      timeText = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    }
+    
+    // Determine display text
+    const otherName = isIncoming ? call.fromName || 'Unknown' : call.toName || 'Unknown';
+    const directionIcon = isIncoming ? '📥' : '📤';
+    const directionText = isIncoming ? 'From' : 'To';
+    const note = call.note || '';
+    
+    // Format the call entry
+    html += `
+      <div class="call-item ${statusClass}" style="min-height: ${note ? '60px' : 'auto'};">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+              ${directionIcon} ${directionText}: ${otherName}
+            </div>
+            <div style="font-size: 10px; color: #666; margin-top: 2px;">
+              ${timeText}
+            </div>
+          </div>
+          <div style="font-size: 10px; background: ${getStatusColor(status)}; color: white; padding: 2px 6px; border-radius: 10px; white-space: nowrap;">
+            ${status}
+          </div>
+        </div>
+        ${note ? `
+        <div style="margin-top: 6px; padding: 4px 6px; background: rgba(0,0,0,0.03); border-radius: 4px; border-left: 2px solid #ddd; font-size: 10px; color: #555; white-space: pre-wrap; word-break: break-word;">
+          ${note}
+        </div>
+        ` : ''}
+      </div>
+    `;
+  });
+  
+  callsList.innerHTML = html;
+}
+
+// Helper function to get status color
+function getStatusColor(status) {
+  switch(status) {
+    case 'ringing': return '#FFC107';
+    case 'accepted': return '#8BC34A';
+    case 'declined': return '#FF9800';
+    case 'missed': return '#f44336';
+    case 'ended': return '#9E9E9E';
+    default: return '#757575';
+  }
+}
+
+ 
+async function startCallToUid(toUid, toName=""){
+  logDiag("startCallToUid(): ENTER toUid=" + toUid);
+
+  if(!requireAuthOrPrompt()) return;
+  if(!toUid) throw new Error("Missing toUid.");
+  if(toUid === myUid) throw new Error("You can't call yourself.");
+
+  setStatus(dirCallStatus, "Creating room…");
+  const created = await createRoom({ updateHash:false, reuseRoomIdInput:false, fixedRoomId:null });
+  if(!created?.roomId) throw new Error("Room creation failed.");
+
+  pinnedRoomId = created.roomId;
+
+  const note = String(callNoteInput?.value || "").trim().slice(0, 140);
+
+   // Update Person B title with recipient's name
+  if (toName) {
+    updatePersonBTitle(toName);
+  }
+
+  const callRef = await addDoc(collection(db,"calls"), {
+  fromUid: myUid,
+  toUid,
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+  toName: toName || "",
+  roomId: created.roomId,
+  note,
+  status: "ringing",
+  createdAt: serverTimestamp(),
+  updatedAt: serverTimestamp(),
+
+  // NEW: lifecycle markers
+  acceptedAt: null,
+  declinedAt: null,
+  endedAt: null
+});
+
+// NEW: SEND FCM PUSH NOTIFICATION TO ANDROID
+try {
+  await sendFCMToAndroid(toUid, created.roomId, myDisplayName, note, callRef.id);
+} catch (e) {
+  console.error("Error sending FCM to Android:", e);
+}
+
+  activeCallId = callRef.id;
+  // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
+try {
+  const messagePayload = {
+  toUid,          // Callee's UID
+  callId: callRef.id,
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+  note: note,
+  timestamp: new Date().toLocaleString(), // Adding timestamp
+  sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
+};
+
+await sendIncomingCallNotification(messagePayload);
+
+
+  // Trigger the push notification for incoming call
+  await sendIncomingCallNotification(messagePayload);
+} catch (e) {
+  console.error("Error sending incoming call push notification:", e);
+}
+
+  hangupBtn.disabled = false;
+
+  // Watch the call doc for accepted/declined/ended/delivery/push status
+  listenActiveCall(activeCallId);
+
+  setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
+ startRingback();
+ logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+ sendIncomingCallNotification({
+  callId: callRef.id,    // the unique call identifier
+  fromName: myDisplayName, // the caller's name
+  toUid: toUid,           // the recipient's UID
+  note: note,             // the optional note/message
+  roomId: created.roomId, // the unique room ID
+});
+   // Refresh calls list to show the new outgoing call
+  try { await loadRecentCalls(); } catch {};
+
+ // NEW: Function to send incoming call push notification
+async function sendIncomingCallNotification(message) {
+  try {
+    const response = await fetch("/easosunov/sendIncomingPush", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to send incoming call push notification");
+    }
+
+    const data = await response.json();
+    console.log("Incoming call push notification sent:", data);
+  } catch (error) {
+    console.error("Error sending incoming call notification:", error);
+  }
+}
+
+}
+
+/* ================== PUSH (optional) ================== */
+let messaging = null;
+let swReg = null;
+/* ===== NEW: rotate FCM token when user changes on same browser ===== */
+let lastPushUid = null;
+
+async function rotateFcmTokenIfUserChanged(){
+  try
