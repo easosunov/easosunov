@@ -2377,8 +2377,15 @@ answerBtn.onclick = async ()=>{
 };
 
 declineBtn.onclick = async ()=>{
-  try{
+  try {
     const call = currentIncomingCall;
+    
+    // If there's an active peer connection, hang up first
+    if (pc && (pc.connectionState === "connected" || pc.connectionState === "connecting")) {
+      logDiag("Decline clicked while call is connected/connecting - hanging up");
+      await hangup();
+    }
+    
     stopIncomingUI();
 
     if(!call) return;
@@ -2396,8 +2403,8 @@ declineBtn.onclick = async ()=>{
 
     setStatus(dirCallStatus, "Declined incoming call.");
     try { await listenIncomingCalls(); } catch {}
-    try { await loadRecentCalls(); } catch {} // Refresh calls list
-  }catch(e){
+    try { await loadRecentCalls(); } catch {}
+  } catch(e) {
     showError(e);
   }
 };
