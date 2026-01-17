@@ -2378,37 +2378,82 @@ answerBtn.onclick = async ()=>{
 
 declineBtn.onclick = async ()=>{
   try {
-    const call = currentIncomingCall;
+    // First, do exactly what hangup() does
+    stopRingback();
+    // Reset Person B title
+    updatePersonBTitle('Other');
     
-    // If there's an active peer connection, hang up first
-    if (pc && (pc.connectionState === "connected" || pc.connectionState === "connecting")) {
-      logDiag("Decline clicked while call is connected/connecting - hanging up");
-      await hangup();
+    // If there's an active call ID, update it to "declined" in Firestore
+    if (activeCallId) {
+      try {
+        const callRef = doc(db, "calls", activeCallId);
+        const snap = await getDoc(callRef);
+
+        if (snap.exists()) {
+          const call = snap.data() || {};
+          
+          // If caller hangs up BEFORE callee answered/declined → MISSED
+          if (call.status === "ringing") {
+            await updateDoc(callRef, {
+              status: "declined",
+              declinedAt: serverTimestamp(),
+              endedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            // Normal hangup after answer
+            await updateDoc(callRef, {
+              status: "declined",
+              declinedAt: serverTimestamp(),
+              endedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+      } catch(e) {
+        showError(e);
+      }
     }
+
+    // Also update any incoming call that might not be activeCallId yet
+    const call = currentIncomingCall;
+    if (call && call.id) {
+      try {
+        await updateDoc(doc(db, "calls", call.id), {
+          status: "declined",
+          declinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      } catch(e) {
+        // Ignore errors if already updated above
+      }
+    }
+
+    // FULL local cleanup (same as hangup())
+    stopAll();
     
+    // Cleanup call UI (same as hangup())
+    hangupBtn.disabled = true;
+    activeCallId = null;
+    if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+    pinnedRoomId = null;
+    
+    // Stop incoming UI
     stopIncomingUI();
 
-    if(!call) return;
-
-    const { id } = call;
-    await updateDoc(doc(db,"calls", id), {
-      status: "declined",
-      declinedAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
+    setStatus(dirCallStatus, "Declined and disconnected.");
+    
     // Clear notification flag
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
 
-    setStatus(dirCallStatus, "Declined incoming call.");
+    // Restart listeners and refresh
     try { await listenIncomingCalls(); } catch {}
     try { await loadRecentCalls(); } catch {}
   } catch(e) {
     showError(e);
   }
 };
-
 /* ================== USER DIRECTORY (C-lite) ================== */
 let myDisplayName = "";
 let allUsersCache = []; // [{uid, displayName}]
