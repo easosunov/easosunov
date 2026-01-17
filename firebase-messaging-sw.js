@@ -72,36 +72,56 @@ function startFirestoreListener(uid) {
       .where('toUid', '==', uid)
       .where('status', '==', 'ringing');
     
-    unsubscribeCallListener = callsQuery.onSnapshot(
-      (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const callData = change.doc.data();
-            const callId = change.doc.id;
-            
-            console.log('[SW] Firestore new call detected:', callId);
-            
-            // Check if web page is already showing this call
-            checkIfPageHandled(callId, callData).then((pageHandled) => {
-              if (!pageHandled) {
-                // Web page isn't handling it, show notification
-                showCallNotification({
-                  callId: callId,
-                  toUid: uid,
-                  roomId: callData.roomId,
-                  fromName: callData.fromName || 'Unknown',
-                  toName: callData.toName || '',
-                  note: callData.note || '',
-                  sentAtMs: Date.now()
-                });
-                
-                // Mark as delivered in Firestore
-                markAsDelivered(callId);
-              }
+unsubscribeCallListener = callsQuery.onSnapshot(
+  (snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === 'added') {
+        const callData = change.doc.data();
+        const callId = change.doc.id;
+        
+        console.log('[SW] Firestore new call detected:', callId);
+        
+        // NEW: Check if this call is too old
+        const currentTime = Date.now();
+        const callCreatedAt = callData.createdAt ? 
+          callData.createdAt.toMillis() : 
+          (callData.sentAtMs || 0);
+        
+        // If call is older than 2 minutes (120,000 ms), ignore it
+        if (callCreatedAt > 0 && (currentTime - callCreatedAt) > 120000) {
+          console.log('[SW] Ignoring old call:', callId, 'age:', currentTime - callCreatedAt, 'ms');
+          
+          // Auto-mark old calls as "expired"
+          firestore.collection('calls').doc(callId).update({
+            status: 'expired',
+            expiredAtMs: currentTime,
+            expiredReason: 'service_worker_auto_expire'
+          }).catch(err => console.error('[SW] Error marking as expired:', err));
+          
+          return; // Skip this call
+        }
+        
+        // Check if web page is already showing this call
+        checkIfPageHandled(callId, callData).then((pageHandled) => {
+          if (!pageHandled) {
+            // Web page isn't handling it, show notification
+            showCallNotification({
+              callId: callId,
+              toUid: uid,
+              roomId: callData.roomId,
+              fromName: callData.fromName || 'Unknown',
+              toName: callData.toName || '',
+              note: callData.note || '',
+              sentAtMs: Date.now()
             });
+            
+            // Mark as delivered in Firestore
+            markAsDelivered(callId);
           }
         });
-      },
+      }
+    });
+  },
       (error) => {
         console.error('[SW] Firestore listener error:', error);
       }
