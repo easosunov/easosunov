@@ -1320,10 +1320,11 @@ async function processPendingNotifications() {
 const openedFromInvite = (location.hash.length > 1);
 let suppressAutoJoin = false;
 
-if (openedFromInvite) {
-  roomIdInput.value = location.hash.slice(1);
-  setStatus(callStatus, "Room ID detected in URL.");
-  logDiag("Room ID from URL hash: " + roomIdInput.value);
+// NEW: If opened from Android notification (has query params), suppress auto-join
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.has('callId') || urlParams.has('roomId')) {
+  suppressAutoJoin = true;
+  logDiag("Android notification detected - suppressing auto-join");
 }
 
 /* ================== WEBRTC ================== */
