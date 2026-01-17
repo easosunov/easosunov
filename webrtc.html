@@ -240,7 +240,12 @@ select{
 </div>
 
 <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
-<div class="small">All allowed users</div>
+<div style="display:flex; justify-content:space-between; align-items:center;">
+  <div class="small">All allowed users</div>
+  <button id="logoutUtilityBtn" style="background:#ffebee;border-color:#f44336;color:#c62828;display:none; padding:4px 8px; font-size:11px;">
+    Log Out
+  </button>
+</div>
 <div id="usersList" style="margin-top:10px;display:flex;flex-direction:column;gap:8px"></div>
    
     </div>
@@ -347,8 +352,7 @@ select{
     <button id="testSoundBtn" disabled>Test Ring Sound</button>
     <button id="resetPushBtn" disabled>Reset Push</button>
     <button id="refreshUsersBtn" disabled>Refresh Users</button>
-    <button id="logoutUtilityBtn" style="background:#ffebee;border-color:#f44336;color:#c62828;display:none;">Log Out</button>
-</div>
+    </div>
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
       <button id="diagBtn">Diagnostics</button>
