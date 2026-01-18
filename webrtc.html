@@ -12,7 +12,38 @@ h1{font-size:20px;margin:0 0 10px}
 .card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
 .videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media (max-width: 720px){ .videos{grid-template-columns:1fr} }
-video{width:100%;background:#000;border-radius:12px;aspect-ratio:16/9}
+video {
+    width: 100%;
+    background: #000;
+    border-radius: 12px;
+    aspect-ratio: 16/9;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+/* Add these new classes AFTER the video selector */
+video.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    border-radius: 0;
+    object-fit: contain;
+}
+
+video.small {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 200px;
+    height: 150px;
+    z-index: 9998;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    border: 2px solid #1976d2;
+}
 button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
 button:disabled{opacity:.6;cursor:not-allowed}
 input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
@@ -516,6 +547,105 @@ const appRoot = document.getElementById("app");
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
+ /* ================== VIDEO SCREEN TOGGLE ================== */
+let videoMode = {
+    local: 'normal',  // 'normal', 'fullscreen', 'small'
+    remote: 'normal'
+};
+
+function toggleVideoMode(videoElement, videoType) {
+    const currentMode = videoMode[videoType];
+    let nextMode;
+    
+    // Cycle through modes: normal → fullscreen → small → normal
+    if (currentMode === 'normal') {
+        nextMode = 'fullscreen';
+    } else if (currentMode === 'fullscreen') {
+        nextMode = 'small';
+    } else {
+        nextMode = 'normal';
+    }
+    
+    // Remove all mode classes
+    videoElement.classList.remove('fullscreen', 'small');
+    
+    // Apply new mode
+    if (nextMode !== 'normal') {
+        videoElement.classList.add(nextMode);
+    }
+    
+    videoMode[videoType] = nextMode;
+    
+    // Log for debugging
+    logDiag(`Video ${videoType} mode: ${currentMode} → ${nextMode}`);
+    
+    // If other video is in fullscreen, put it in small mode
+    const otherVideo = videoType === 'local' ? remoteVideo : localVideo;
+    const otherType = videoType === 'local' ? 'remote' : 'local';
+    
+    if (otherVideo.classList.contains('fullscreen')) {
+        otherVideo.classList.remove('fullscreen');
+        otherVideo.classList.add('small');
+        videoMode[otherType] = 'small';
+        logDiag(`Other video ${otherType} downgraded to small mode`);
+    }
+}
+
+// Add click event listeners
+localVideo.addEventListener('click', () => {
+    toggleVideoMode(localVideo, 'local');
+});
+
+remoteVideo.addEventListener('click', () => {
+    toggleVideoMode(remoteVideo, 'remote');
+});
+
+// Also allow double-click for direct fullscreen
+localVideo.addEventListener('dblclick', () => {
+    if (videoMode.local !== 'fullscreen') {
+        localVideo.classList.remove('small');
+        localVideo.classList.add('fullscreen');
+        videoMode.local = 'fullscreen';
+        
+        // If remote is fullscreen, make it small
+        if (remoteVideo.classList.contains('fullscreen')) {
+            remoteVideo.classList.remove('fullscreen');
+            remoteVideo.classList.add('small');
+            videoMode.remote = 'small';
+        }
+    }
+});
+
+remoteVideo.addEventListener('dblclick', () => {
+    if (videoMode.remote !== 'fullscreen') {
+        remoteVideo.classList.remove('small');
+        remoteVideo.classList.add('fullscreen');
+        videoMode.remote = 'fullscreen';
+        
+        // If local is fullscreen, make it small
+        if (localVideo.classList.contains('fullscreen')) {
+            localVideo.classList.remove('fullscreen');
+            localVideo.classList.add('small');
+            videoMode.local = 'small';
+        }
+    }
+});
+
+// Exit fullscreen on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (localVideo.classList.contains('fullscreen')) {
+            localVideo.classList.remove('fullscreen');
+            localVideo.classList.add('small');
+            videoMode.local = 'small';
+        }
+        if (remoteVideo.classList.contains('fullscreen')) {
+            remoteVideo.classList.remove('fullscreen');
+            remoteVideo.classList.add('small');
+            videoMode.remote = 'small';
+        }
+    }
+});
 const startBtn = document.getElementById("startBtn");
 const createBtn= document.getElementById("createBtn");
 const joinBtn  = document.getElementById("joinBtn");
