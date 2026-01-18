@@ -3639,7 +3639,7 @@ onAuthStateChanged(auth, async (user)=>{
     autoEnablePushOnLogin();
 
 /* In the isAuthed block, add these lines: */
-audioOnlyBtn.disabled = !localStream;  // Enable only when media is started
+audioOnlyBtn.disabled = false;  // Enable immediately after auth
 restoreVideoBtn.disabled = true;
     setStatus(connectionStatus, "Normal connection");
    
