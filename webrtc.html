@@ -140,25 +140,29 @@ select{
   background:#fff;
 }
 
-.bottomGrid{
-  display:grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap:12px;
-}
-
 .bottomCard{
   border:1px solid #eee;
   border-radius:12px;
   padding:12px;
   background:#fff;
 }
+ 
+.bottomGrid{
+  display:grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap:12px;
+}
 
+@media (max-width: 1200px){
+  .bottomGrid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 980px){
   .bottomGrid{ grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
+ 
 /* This media query will only apply styles for mobile screens (max-width: 720px) */
 @media (max-width: 720px) {
   body {
