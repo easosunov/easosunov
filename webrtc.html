@@ -740,7 +740,11 @@ const audioOnlyBtn = document.getElementById('audioOnlyBtn');
 const restoreVideoBtn = document.getElementById('restoreVideoBtn');
 const connectionStatus = document.getElementById('connectionStatus');
 
-audioOnlyBtn.onclick = () => switchToAudioOnly().catch(showError);
+audioOnlyBtn.onclick = () => {
+    console.log("Audio Only clicked. isAudioOnly before:", isAudioOnly);
+    switchToAudioOnly().catch(showError);
+    console.log("Audio Only clicked. isAudioOnly after:", isAudioOnly);
+};
 restoreVideoBtn.onclick = () => restoreVideo().catch(showError);
 
  
@@ -752,6 +756,16 @@ let pendingIncomingCallWhileLoggedOut = null;
  /* Add these variables with other state variables: */
 let isAudioOnly = false;
 let originalVideoTracks = [];
+ // Add with other state variables at the top
+let isAudioOnly = false;
+let originalVideoTracks = [];
+
+// Add this to reset on page load
+window.addEventListener('load', () => {
+    isAudioOnly = false;
+    originalVideoTracks = [];
+    console.log("Page loaded - reset audio-only state");
+});
 let audioOnlyConstraints = {
     audio: {
         channelCount: 1,
@@ -1659,6 +1673,11 @@ async function ensurePeer() {
 
 /* ================== AUDIO ONLY MODE FOR SLOW CONNECTIONS ================== */
 async function switchToAudioOnly() {
+    console.log("switchToAudioOnly called. isAudioOnly:", isAudioOnly, "localStream:", !!localStream);
+    if (isAudioOnly) {
+        console.log("Already in audio-only mode, returning");
+        return;
+    }
     if (!localStream || isAudioOnly) return;
     
     try {
