@@ -1662,7 +1662,7 @@ async function switchToAudioOnly() {
     if (!localStream || isAudioOnly) return;
     
     try {
-        logDiag("Switching to audio-only mode for slow connection...");
+        logDiag("Switching to audio-only mode...");
         setStatus(connectionStatus, "Switching to audio-only...");
         
         // Store original video tracks
@@ -1674,7 +1674,7 @@ async function switchToAudioOnly() {
             localStream.removeTrack(track);
         });
         
-        // Apply minimal audio constraints
+        // Apply minimal audio constraints for slow connections
         const audioTracks = localStream.getAudioTracks();
         if (audioTracks.length > 0) {
             await audioTracks[0].applyConstraints({
@@ -1687,7 +1687,7 @@ async function switchToAudioOnly() {
         
         // Update UI
         localVideo.classList.add('disabled-video');
-        localVideo.srcObject = null; // Clear video feed
+        localVideo.srcObject = null;
         setStatus(connectionStatus, "Audio only (optimized for slow connection)");
         
         // Update remote peer if in a call
@@ -1751,7 +1751,7 @@ async function restoreVideo() {
             });
         }
         
-        // Update remote peer
+        // Update remote peer if in a call
         if (pc) {
             // Add video transceiver back
             const transceivers = pc.getTransceivers();
@@ -1846,6 +1846,35 @@ audioOnlyBtn.disabled = false;
    
     localVideo.srcObject = localStream;
 
+// If we were in audio-only mode before, apply it to the new stream
+if (isAudioOnly && localStream) {
+    // Stop video tracks immediately
+    const videoTracks = localStream.getVideoTracks();
+    videoTracks.forEach(track => {
+        track.stop();
+        localStream.removeTrack(track);
+    });
+    
+    // Update UI
+    localVideo.classList.add('disabled-video');
+    localVideo.srcObject = null;
+    
+    // Apply audio constraints
+    const audioTracks = localStream.getAudioTracks();
+    if (audioTracks.length > 0) {
+        await audioTracks[0].applyConstraints({
+            channelCount: 1,
+            sampleRate: 8000,
+            sampleSize: 8
+        });
+    }
+    
+    // Update button states
+    audioOnlyBtn.disabled = true;
+    restoreVideoBtn.disabled = false;
+    setStatus(connectionStatus, "Audio only (optimized for slow connection)");
+}
+   
     // Also try to apply constraints again (some cameras ignore initial ideals)
     try{
       await applyVideoQualityToCurrentStream(selectedVideoQuality);
