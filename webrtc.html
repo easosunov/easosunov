@@ -333,18 +333,7 @@ select{
       </select>
       <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
     </div>
-
-<!-- Add this right after the Video Quality card -->
-<div class="bottomCard">
-  <b>Connection Optimizer</b>
-  <div class="small">For slow connections or poor quality.</div>
-  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="audioOnlyBtn" disabled>Audio Only</button>
-    <button id="restoreVideoBtn" disabled>Restore Video</button>
-  </div>
-  <div class="status" id="connectionStatus">Normal connection</div>
-</div>
-   
+  
     <!-- Profile -->
     <div class="bottomCard">
       <b>Your name</b>
@@ -735,46 +724,13 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
 
- /* Add these with other button listeners: */
-const audioOnlyBtn = document.getElementById('audioOnlyBtn');
-const restoreVideoBtn = document.getElementById('restoreVideoBtn');
-const connectionStatus = document.getElementById('connectionStatus');
 
-audioOnlyBtn.onclick = () => {
-    console.log("Audio Only clicked. isAudioOnly before:", isAudioOnly);
-    switchToAudioOnly().catch(showError);
-    console.log("Audio Only clicked. isAudioOnly after:", isAudioOnly);
-};
-restoreVideoBtn.onclick = () => restoreVideo().catch(showError);
-
- 
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
 let myUid = null;
 let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
- /* Add these variables with other state variables: */
-let isAudioOnly = false;
-let originalVideoTracks = [];
- 
-// Add this to reset on page load
-window.addEventListener('load', () => {
-    isAudioOnly = false;
-    originalVideoTracks = [];
-    console.log("Page loaded - reset audio-only state");
-});
-let audioOnlyConstraints = {
-    audio: {
-        channelCount: 1,
-        sampleRate: 8000,
-        sampleSize: 8,
-        volume: 1.0,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-    },
-    video: false
-};
+
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
@@ -1668,149 +1624,7 @@ async function ensurePeer() {
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 }
 
-/* ================== AUDIO ONLY MODE FOR SLOW CONNECTIONS ================== */
-async function switchToAudioOnly() {
-    console.log("switchToAudioOnly called. isAudioOnly:", isAudioOnly, "localStream:", !!localStream);
-    if (isAudioOnly) {
-        console.log("Already in audio-only mode, returning");
-        return;
-    }
-    if (!localStream || isAudioOnly) return;
-    
-    try {
-        logDiag("Switching to audio-only mode...");
-        setStatus(connectionStatus, "Switching to audio-only...");
-        
-        // Store original video tracks
-        originalVideoTracks = localStream.getVideoTracks();
-        
-        // Stop all video tracks
-        originalVideoTracks.forEach(track => {
-            track.stop();
-            localStream.removeTrack(track);
-        });
-        
-        // Apply minimal audio constraints for slow connections
-        const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-            await audioTracks[0].applyConstraints({
-                channelCount: 1,
-                sampleRate: 8000,
-                sampleSize: 8
-            });
-            logDiag("Audio optimized for slow connection: 8kHz mono");
-        }
-        
-        // Update UI
-        localVideo.classList.add('disabled-video');
-        localVideo.srcObject = null;
-        setStatus(connectionStatus, "Audio only (optimized for slow connection)");
-        
-        // Update remote peer if in a call
-        if (pc) {
-            // Remove video transceivers
-            const transceivers = pc.getTransceivers();
-            transceivers.forEach(transceiver => {
-                if (transceiver.sender.track && transceiver.sender.track.kind === 'video') {
-                    transceiver.sender.replaceTrack(null);
-                    transceiver.direction = 'inactive';
-                }
-            });
-            
-            // Recreate offer with audio only
-            if (pc.signalingState === 'stable') {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                logDiag("Created new offer without video tracks");
-            }
-        }
-        
-        isAudioOnly = true;
-        audioOnlyBtn.disabled = true;
-        restoreVideoBtn.disabled = false;
-        logDiag("Successfully switched to audio-only mode");
-        
-    } catch (error) {
-        logDiag("Failed to switch to audio-only: " + error.message);
-        setStatus(connectionStatus, "Failed to switch to audio-only");
-        showError(error);
-    }
-}
 
-async function restoreVideo() {
-    if (!localStream || !isAudioOnly) return;
-    
-    try {
-        logDiag("Restoring video...");
-        setStatus(connectionStatus, "Restoring video...");
-        
-        // Get fresh video track with low quality
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-            video: VIDEO_PROFILES.low.constraints,
-            audio: false
-        });
-        
-        const newVideoTrack = videoStream.getVideoTracks()[0];
-        localStream.addTrack(newVideoTrack);
-        
-        // Restore local video display
-        localVideo.classList.remove('disabled-video');
-        localVideo.srcObject = localStream;
-        
-        // Restore audio to normal quality
-        const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-            await audioTracks[0].applyConstraints({
-                channelCount: 2,
-                sampleRate: 48000,
-                sampleSize: 16
-            });
-        }
-        
-        // Update remote peer if in a call
-        if (pc) {
-            // Add video transceiver back
-            const transceivers = pc.getTransceivers();
-            const videoTransceiver = transceivers.find(t => 
-                t.sender.track === null && t.receiver.track === null
-            );
-            
-            if (videoTransceiver) {
-                videoTransceiver.sender.replaceTrack(newVideoTrack);
-                videoTransceiver.direction = 'sendrecv';
-            } else {
-                // Add new transceiver
-                pc.addTrack(newVideoTrack, localStream);
-            }
-            
-            // Recreate offer with video
-            if (pc.signalingState === 'stable') {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                logDiag("Created new offer with video restored");
-            }
-        }
-        
-        // Clear stored tracks
-        originalVideoTracks = [];
-        
-        // Update UI
-        setStatus(connectionStatus, "Video restored");
-        isAudioOnly = false;
-        audioOnlyBtn.disabled = false;
-        restoreVideoBtn.disabled = true;
-        logDiag("Video successfully restored");
-        
-    } catch (error) {
-        logDiag("Failed to restore video: " + error.message);
-        setStatus(connectionStatus, "Failed to restore video");
-        showError(error);
-        
-        // Fallback to remain in audio-only mode
-        audioOnlyBtn.disabled = true;
-        restoreVideoBtn.disabled = false;
-    }
-}
  
 /* ================== FIRESTORE HELPERS ================== */
 async function clearSub(col){
@@ -1862,34 +1676,6 @@ audioOnlyBtn.disabled = false;
    
     localVideo.srcObject = localStream;
 
-// If we were in audio-only mode before, apply it to the new stream
-if (isAudioOnly && localStream) {
-    // Stop video tracks immediately
-    const videoTracks = localStream.getVideoTracks();
-    videoTracks.forEach(track => {
-        track.stop();
-        localStream.removeTrack(track);
-    });
-    
-    // Update UI
-    localVideo.classList.add('disabled-video');
-    localVideo.srcObject = null;
-    
-    // Apply audio constraints
-    const audioTracks = localStream.getAudioTracks();
-    if (audioTracks.length > 0) {
-        await audioTracks[0].applyConstraints({
-            channelCount: 1,
-            sampleRate: 8000,
-            sampleSize: 8
-        });
-    }
-    
-    // Update button states
-    audioOnlyBtn.disabled = true;
-    restoreVideoBtn.disabled = false;
-    setStatus(connectionStatus, "Audio only (optimized for slow connection)");
-}
    
     // Also try to apply constraints again (some cameras ignore initial ideals)
     try{
@@ -2004,13 +1790,6 @@ function stopAll(){
 
   pinnedRoomId = null;
 
- /* Inside stopAll function, add: */
-isAudioOnly = false;
-originalVideoTracks = [];
-localVideo.classList.remove('disabled-video');
-audioOnlyBtn.disabled = !isAuthed;
-restoreVideoBtn.disabled = true;
-setStatus(connectionStatus, "Normal connection");
 }
 
 /* ================== REJOIN SUPPORT ================== */
@@ -3654,11 +3433,6 @@ onAuthStateChanged(auth, async (user)=>{
     await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
-/* In the isAuthed block, add these lines: */
-audioOnlyBtn.disabled = false;  // Enable immediately after auth
-restoreVideoBtn.disabled = true;
-    setStatus(connectionStatus, "Normal connection");
-   
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
@@ -3708,11 +3482,6 @@ restoreVideoBtn.disabled = true;
 
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
-
-/* ADD THESE LINES HERE: */
-    audioOnlyBtn.disabled = true;
-    restoreVideoBtn.disabled = true;
-    setStatus(connectionStatus, "Normal connection");
    
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
