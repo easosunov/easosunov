@@ -44,29 +44,6 @@ video.small {
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     border: 2px solid #1976d2;
 }
-
- video.disabled-video {
-    background: #333;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 14px;
-    position: relative;
-}
-
-video.disabled-video::after {
-    content: "Video Disabled (Audio Only)";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 8px 12px;
-    border-radius: 8px;
-}
- 
 button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
 button:disabled{opacity:.6;cursor:not-allowed}
 input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
@@ -140,29 +117,25 @@ select{
   background:#fff;
 }
 
+.bottomGrid{
+  display:grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap:12px;
+}
+
 .bottomCard{
   border:1px solid #eee;
   border-radius:12px;
   padding:12px;
   background:#fff;
 }
- 
-.bottomGrid{
-  display:grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap:12px;
-}
 
-@media (max-width: 1200px){
-  .bottomGrid{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
 @media (max-width: 980px){
   .bottomGrid{ grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 720px){
   .bottomGrid{ grid-template-columns: 1fr; }
 }
- 
 /* This media query will only apply styles for mobile screens (max-width: 720px) */
 @media (max-width: 720px) {
   body {
@@ -334,17 +307,6 @@ select{
       <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
     </div>
 
-<!-- Add this right after the Video Quality card -->
-<div class="bottomCard">
-  <b>Connection Optimizer</b>
-  <div class="small">For slow connections or poor quality.</div>
-  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-    <button id="audioOnlyBtn" disabled>Audio Only</button>
-    <button id="restoreVideoBtn" disabled>Restore Video</button>
-  </div>
-  <div class="status" id="connectionStatus">Normal connection</div>
-</div>
-   
     <!-- Profile -->
     <div class="bottomCard">
       <b>Your name</b>
@@ -734,40 +696,16 @@ const bgStatus = document.getElementById('bgStatus');
 const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
-
- /* Add these with other button listeners: */
-const audioOnlyBtn = document.getElementById('audioOnlyBtn');
-const restoreVideoBtn = document.getElementById('restoreVideoBtn');
-const connectionStatus = document.getElementById('connectionStatus');
-
-audioOnlyBtn.onclick = () => switchToAudioOnly().catch(showError);
-restoreVideoBtn.onclick = () => restoreVideo().catch(showError);
-
  
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
 let myUid = null;
 let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
- /* Add these variables with other state variables: */
-let isAudioOnly = false;
-let originalVideoTracks = [];
-let audioOnlyConstraints = {
-    audio: {
-        channelCount: 1,
-        sampleRate: 8000,
-        sampleSize: 8,
-        volume: 1.0,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-    },
-    video: false
-};
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
-  
+ 
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
   try{
@@ -1657,145 +1595,6 @@ async function ensurePeer() {
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 }
 
-/* ================== AUDIO ONLY MODE FOR SLOW CONNECTIONS ================== */
-async function switchToAudioOnly() {
-    if (!localStream || isAudioOnly) return;
-    
-    try {
-        logDiag("Switching to audio-only mode for slow connection...");
-        setStatus(connectionStatus, "Switching to audio-only...");
-        
-        // Store original video tracks
-        originalVideoTracks = localStream.getVideoTracks();
-        
-        // Stop all video tracks
-        originalVideoTracks.forEach(track => {
-            track.stop();
-            localStream.removeTrack(track);
-        });
-        
-        // Apply minimal audio constraints
-        const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-            await audioTracks[0].applyConstraints({
-                channelCount: 1,
-                sampleRate: 8000,
-                sampleSize: 8
-            });
-            logDiag("Audio optimized for slow connection: 8kHz mono");
-        }
-        
-        // Update UI
-        localVideo.classList.add('disabled-video');
-        localVideo.srcObject = null; // Clear video feed
-        setStatus(connectionStatus, "Audio only (optimized for slow connection)");
-        
-        // Update remote peer if in a call
-        if (pc) {
-            // Remove video transceivers
-            const transceivers = pc.getTransceivers();
-            transceivers.forEach(transceiver => {
-                if (transceiver.sender.track && transceiver.sender.track.kind === 'video') {
-                    transceiver.sender.replaceTrack(null);
-                    transceiver.direction = 'inactive';
-                }
-            });
-            
-            // Recreate offer with audio only
-            if (pc.signalingState === 'stable') {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                logDiag("Created new offer without video tracks");
-            }
-        }
-        
-        isAudioOnly = true;
-        audioOnlyBtn.disabled = true;
-        restoreVideoBtn.disabled = false;
-        logDiag("Successfully switched to audio-only mode");
-        
-    } catch (error) {
-        logDiag("Failed to switch to audio-only: " + error.message);
-        setStatus(connectionStatus, "Failed to switch to audio-only");
-        showError(error);
-    }
-}
-
-async function restoreVideo() {
-    if (!localStream || !isAudioOnly) return;
-    
-    try {
-        logDiag("Restoring video...");
-        setStatus(connectionStatus, "Restoring video...");
-        
-        // Get fresh video track with low quality
-        const videoStream = await navigator.mediaDevices.getUserMedia({
-            video: VIDEO_PROFILES.low.constraints,
-            audio: false
-        });
-        
-        const newVideoTrack = videoStream.getVideoTracks()[0];
-        localStream.addTrack(newVideoTrack);
-        
-        // Restore local video display
-        localVideo.classList.remove('disabled-video');
-        localVideo.srcObject = localStream;
-        
-        // Restore audio to normal quality
-        const audioTracks = localStream.getAudioTracks();
-        if (audioTracks.length > 0) {
-            await audioTracks[0].applyConstraints({
-                channelCount: 2,
-                sampleRate: 48000,
-                sampleSize: 16
-            });
-        }
-        
-        // Update remote peer
-        if (pc) {
-            // Add video transceiver back
-            const transceivers = pc.getTransceivers();
-            const videoTransceiver = transceivers.find(t => 
-                t.sender.track === null && t.receiver.track === null
-            );
-            
-            if (videoTransceiver) {
-                videoTransceiver.sender.replaceTrack(newVideoTrack);
-                videoTransceiver.direction = 'sendrecv';
-            } else {
-                // Add new transceiver
-                pc.addTrack(newVideoTrack, localStream);
-            }
-            
-            // Recreate offer with video
-            if (pc.signalingState === 'stable') {
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                logDiag("Created new offer with video restored");
-            }
-        }
-        
-        // Clear stored tracks
-        originalVideoTracks = [];
-        
-        // Update UI
-        setStatus(connectionStatus, "Video restored");
-        isAudioOnly = false;
-        audioOnlyBtn.disabled = false;
-        restoreVideoBtn.disabled = true;
-        logDiag("Video successfully restored");
-        
-    } catch (error) {
-        logDiag("Failed to restore video: " + error.message);
-        setStatus(connectionStatus, "Failed to restore video");
-        showError(error);
-        
-        // Fallback to remain in audio-only mode
-        audioOnlyBtn.disabled = true;
-        restoreVideoBtn.disabled = false;
-    }
-}
- 
 /* ================== FIRESTORE HELPERS ================== */
 async function clearSub(col){
   const s = await getDocs(col);
@@ -1841,9 +1640,6 @@ async function startMedia(opts={skipAutoJoin:false}){
       audio: true
     });
 
-   /* Inside startMedia, after localStream is obtained, add: */
-audioOnlyBtn.disabled = false;
-   
     localVideo.srcObject = localStream;
 
     // Also try to apply constraints again (some cameras ignore initial ideals)
@@ -1958,14 +1754,6 @@ function stopAll(){
   setStatus(dirCallStatus, "Idle.");
 
   pinnedRoomId = null;
-
- /* Inside stopAll function, add: */
-isAudioOnly = false;
-originalVideoTracks = [];
-localVideo.classList.remove('disabled-video');
-audioOnlyBtn.disabled = !isAuthed;
-restoreVideoBtn.disabled = true;
-setStatus(connectionStatus, "Normal connection");
 }
 
 /* ================== REJOIN SUPPORT ================== */
@@ -3574,7 +3362,6 @@ onAuthStateChanged(auth, async (user)=>{
       logoutBtn.style.display = "none";
       startBtn.disabled = true;
 
-  
       return;
     }
 
@@ -3609,11 +3396,6 @@ onAuthStateChanged(auth, async (user)=>{
     await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
-/* In the isAuthed block, add these lines: */
-audioOnlyBtn.disabled = !localStream;  // Enable only when media is started
-restoreVideoBtn.disabled = true;
-    setStatus(connectionStatus, "Normal connection");
-   
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
@@ -3664,11 +3446,6 @@ restoreVideoBtn.disabled = true;
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
 
-/* ADD THESE LINES HERE: */
-    audioOnlyBtn.disabled = true;
-    restoreVideoBtn.disabled = true;
-    setStatus(connectionStatus, "Normal connection");
-   
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
