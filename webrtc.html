@@ -45,19 +45,26 @@ video.small {
     border: 2px solid #1976d2;
 }
 
- ideo.disabled-video {
+ video.disabled-video {
     background: #333;
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
     font-size: 14px;
+    position: relative;
 }
 
 video.disabled-video::after {
     content: "Video Disabled (Audio Only)";
     position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     text-align: center;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 12px;
+    border-radius: 8px;
 }
  
 button{padding:10px 12px;border-radius:10px;border:1px solid #ccc;background:#f7f7f7;cursor:pointer}
@@ -3563,10 +3570,7 @@ onAuthStateChanged(auth, async (user)=>{
       logoutBtn.style.display = "none";
       startBtn.disabled = true;
 
-/* In the isAuthed block, add these lines: */
-audioOnlyBtn.disabled = !localStream;  // Enable only when media is started
-restoreVideoBtn.disabled = true;
-     
+  
       return;
     }
 
@@ -3601,6 +3605,11 @@ restoreVideoBtn.disabled = true;
     await rotateFcmTokenIfUserChanged();
     autoEnablePushOnLogin();
 
+/* In the isAuthed block, add these lines: */
+audioOnlyBtn.disabled = !localStream;  // Enable only when media is started
+restoreVideoBtn.disabled = true;
+    setStatus(connectionStatus, "Normal connection");
+   
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
