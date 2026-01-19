@@ -206,6 +206,42 @@ select{
 .call-mode-options label span {
   font-size: 14px;
 }
+
+/* ===== NEW: Button color styles ===== */
+/* Active Call button - Green */
+.call-btn-active {
+  background-color: #4CAF50 !important; /* Green */
+  color: white !important;
+  border-color: #388E3C !important;
+}
+
+/* Inactive Call button against the name of callee - Red */
+.call-btn-inactive-callee {
+  background-color: #f44336 !important; /* Red */
+  color: white !important;
+  border-color: #d32f2f !important;
+}
+
+/* Inactive Call button against all other users - White */
+.call-btn-inactive-other {
+  background-color: white !important;
+  color: #333 !important;
+  border-color: #ccc !important;
+}
+
+/* Active Hang up button - Red */
+.hangup-btn-active {
+  background-color: #f44336 !important; /* Red */
+  color: white !important;
+  border-color: #d32f2f !important;
+}
+
+/* Inactive Hang up button - White */
+.hangup-btn-inactive {
+  background-color: white !important;
+  color: #333 !important;
+  border-color: #ccc !important;
+}
 </style>
 </head>
 
@@ -280,7 +316,7 @@ select{
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 <!-- Hang up button and call note moved here -->
 <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-  <button id="hangupBtn" disabled>Hang up</button>
+  <button id="hangupBtn" disabled class="hangup-btn-inactive">Hang up</button>
 
   <div>
     <div class="small">Message to send with call (optional)</div>
@@ -1841,6 +1877,7 @@ function stopAll(){
   refreshCopyInviteState();
 
   hangupBtn.disabled = true;
+  hangupBtn.className = "hangup-btn-inactive";
   setStatus(dirCallStatus, "Idle.");
 
   pinnedRoomId = null;
@@ -2460,6 +2497,7 @@ async function catchUpMissedCallNotification() {
 
 function cleanupCallUI(){
   hangupBtn.disabled = true;
+  hangupBtn.className = "hangup-btn-inactive";
   activeCallId = null;
   if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
   pinnedRoomId = null;
@@ -2598,6 +2636,7 @@ answerBtn.onclick = async ()=>{
     // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
     hangupBtn.disabled = false;
+    hangupBtn.className = "hangup-btn-active";
     listenActiveCall(id);
 
     roomIdInput.value = data.roomId;
@@ -2679,6 +2718,7 @@ declineBtn.onclick = async ()=>{
     
     // Cleanup call UI (same as hangup())
     hangupBtn.disabled = true;
+    hangupBtn.className = "hangup-btn-inactive";
     activeCallId = null;
     if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
     pinnedRoomId = null;
@@ -2810,12 +2850,27 @@ function renderUsersList(filterText=""){
     const btn = document.createElement("button");
     btn.textContent = "Call";
     btn.disabled = !isAuthed;
+    // Apply button color classes
+    if (isAuthed && !activeCallId) {
+      btn.className = "call-btn-active";
+    } else if (activeCallId && u.uid === getCalleeUidFromActiveCall()) {
+      btn.className = "call-btn-inactive-callee";
+    } else {
+      btn.className = "call-btn-inactive-other";
+    }
     btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
 
     div.appendChild(left);
     div.appendChild(btn);
     usersList.appendChild(div);
   }
+}
+
+// Helper function to get the callee UID from the active call
+function getCalleeUidFromActiveCall() {
+  // This function needs to be implemented based on your data structure
+  // For now, returning null as a placeholder
+  return null;
 }
 
 async function loadAllAllowedUsers(){
@@ -3060,6 +3115,13 @@ try {
 }
 
   activeCallId = callRef.id;
+  // Update Hang up button to active state
+  hangupBtn.disabled = false;
+  hangupBtn.className = "hangup-btn-active";
+  
+  // NEW: Update call buttons in user list
+  renderUsersList(userSearchInput.value);
+
   // NEW: SEND INCOMING CALL PUSH NOTIFICATION TO CALLEE
 try {
   const messagePayload = {
@@ -3079,8 +3141,6 @@ await sendIncomingCallNotification(messagePayload);
 } catch (e) {
   console.error("Error sending incoming call push notification:", e);
 }
-
-  hangupBtn.disabled = false;
 
   // Watch the call doc for accepted/declined/ended/delivery/push status
   listenActiveCall(activeCallId);
@@ -3513,8 +3573,10 @@ onAuthStateChanged(auth, async (user)=>{
     }
     
     hangupBtn.disabled = true;
+    hangupBtn.className = "hangup-btn-inactive";
    
     hangupBtn.disabled = true;
+    hangupBtn.className = "hangup-btn-inactive";
 
     refreshCopyInviteState();
 
