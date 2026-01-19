@@ -2597,9 +2597,8 @@ if(d.status === "missed"){
 
 const stage = d.push?.stage || "";
 if (stage === "sent") { 
-  if(pc && pc.connectionState === "connected") {
-    setStatus(dirCallStatus, "Answered. Connected.");
-  } else {
+  // Don't override status if we're already connected
+  if(!dirCallStatus.textContent.includes("Connected")) {
     setStatus(dirCallStatus, "Push sent (waiting for answer)..."); 
   }
   return; 
