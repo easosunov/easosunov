@@ -787,6 +787,7 @@ appRoot.classList.add("locked");
 /* ===== NEW: call mode state ===== */
 let callMode = "video"; // "video" or "audio"
 let isInCall = false;
+let currentCalleeUid = null; // Track who we're calling
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -1884,6 +1885,14 @@ function stopAll(){
   
   // NEW: Enable call mode radio buttons when everything is stopped
   enableCallModeRadio();
+  
+  // NEW: Reset current callee when stopping all
+  currentCalleeUid = null;
+  
+  // NEW: Update user list to show green Call buttons again
+  if (isAuthed) {
+    renderUsersList(userSearchInput.value);
+  }
 }
 
 /* ================== REJOIN SUPPORT ================== */
@@ -2521,6 +2530,12 @@ if(d.status === "ended"){
   stopAll(); // full local cleanup
   // Reset Person B title
   updatePersonBTitle('Other');
+  // Reset current callee
+  currentCalleeUid = null;
+  // Update user list to show green Call buttons
+  if (isAuthed) {
+    renderUsersList(userSearchInput.value);
+  }
   return;
 }
 
@@ -2535,6 +2550,12 @@ if(d.status === "ended"){
       setStatus(dirCallStatus, "Declined.");
       logDiag("Call declined.");
       cleanupCallUI();
+      // Reset current callee
+      currentCalleeUid = null;
+      // Update user list to show green Call buttons
+      if (isAuthed) {
+        renderUsersList(userSearchInput.value);
+      }
       return;
     }
 if(d.status === "missed"){
@@ -2542,6 +2563,12 @@ if(d.status === "missed"){
   setStatus(dirCallStatus, "Missed.");
   logDiag("Call missed.");
   cleanupCallUI();
+  // Reset current callee
+  currentCalleeUid = null;
+  // Update user list to show green Call buttons
+  if (isAuthed) {
+    renderUsersList(userSearchInput.value);
+  }
   return;
 }
 
@@ -2604,6 +2631,12 @@ if (snap.exists()) {
   stopAll();
   cleanupCallUI();
   setStatus(dirCallStatus, "Ended.");
+  // Reset current callee
+  currentCalleeUid = null;
+  // Update user list to show green Call buttons again
+  if (isAuthed) {
+    renderUsersList(userSearchInput.value);
+  }
   try { await loadRecentCalls(); } catch {} // Refresh calls list
 }
 
@@ -2731,6 +2764,14 @@ declineBtn.onclick = async ()=>{
     // Clear notification flag
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
+    
+    // Reset current callee
+    currentCalleeUid = null;
+    
+    // Update user list to show green Call buttons again
+    if (isAuthed) {
+      renderUsersList(userSearchInput.value);
+    }
 
     // Restart listeners and refresh
     try { await listenIncomingCalls(); } catch {}
@@ -2850,27 +2891,25 @@ function renderUsersList(filterText=""){
     const btn = document.createElement("button");
     btn.textContent = "Call";
     btn.disabled = !isAuthed;
+    
     // Apply button color classes
-    if (isAuthed && !activeCallId) {
-      btn.className = "call-btn-active";
-    } else if (activeCallId && u.uid === getCalleeUidFromActiveCall()) {
+    if (!isAuthed || activeCallId) {
+      // If not authenticated OR there's an active call, buttons are white
+      btn.className = "call-btn-inactive-other";
+    } else if (currentCalleeUid && u.uid === currentCalleeUid) {
+      // If this is the person we're currently calling (or who called us)
       btn.className = "call-btn-inactive-callee";
     } else {
-      btn.className = "call-btn-inactive-other";
+      // Normal state - user can make calls (green)
+      btn.className = "call-btn-active";
     }
+    
     btn.onclick = ()=> startCallToUid(u.uid, u.displayName).catch(showError);
 
     div.appendChild(left);
     div.appendChild(btn);
     usersList.appendChild(div);
   }
-}
-
-// Helper function to get the callee UID from the active call
-function getCalleeUidFromActiveCall() {
-  // This function needs to be implemented based on your data structure
-  // For now, returning null as a placeholder
-  return null;
 }
 
 async function loadAllAllowedUsers(){
@@ -3115,6 +3154,9 @@ try {
 }
 
   activeCallId = callRef.id;
+  // NEW: Set current callee
+  currentCalleeUid = toUid;
+  
   // Update Hang up button to active state
   hangupBtn.disabled = false;
   hangupBtn.className = "hangup-btn-active";
@@ -3640,6 +3682,7 @@ onAuthStateChanged(auth, async (user)=>{
     usersList.innerHTML = "";
     allUsersCache = [];
     myDisplayName = "";
+    currentCalleeUid = null;
   }
 });
 
