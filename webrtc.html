@@ -1832,51 +1832,92 @@ async function detectBandwidth() {
   
   try {
     const stats = await pc.getStats();
-    let bandwidth = null;
+    let outgoingBandwidth = null;
+    let incomingBandwidth = null;
+    let videoBitrate = null;
+    let audioBitrate = null;
     
     stats.forEach(report => {
+      // Available outgoing bandwidth (what we can send)
       if (report.type === 'candidate-pair' && report.state === 'succeeded') {
         if (report.availableOutgoingBitrate) {
-          bandwidth = report.availableOutgoingBitrate;
+          outgoingBandwidth = report.availableOutgoingBitrate;
         }
+      }
+      
+      // Incoming media bitrate (what we're receiving)
+      if (report.type === 'inbound-rtp' && report.kind === 'video') {
+        if (report.bitrate) {
+          incomingBandwidth = (incomingBandwidth || 0) + report.bitrate;
+          videoBitrate = report.bitrate;
+        }
+      }
+      
+      if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+        if (report.bitrate) {
+          incomingBandwidth = (incomingBandwidth || 0) + report.bitrate;
+          audioBitrate = report.bitrate;
+        }
+      }
+      
+      // Outgoing media bitrate (what we're sending)
+      if (report.type === 'outbound-rtp' && report.kind === 'video') {
+        // You could track this too
       }
     });
     
-    return bandwidth;
+    return {
+      outgoing: outgoingBandwidth,
+      incoming: incomingBandwidth,
+      video: videoBitrate,
+      audio: audioBitrate
+    };
   } catch (e) {
     logDiag("Bandwidth detection error: " + e.message);
     return null;
   }
 }
 
-function updateBandwidthDisplay(bandwidth) {
+function updateBandwidthDisplay(bandwidthData) {
   if (bandwidthInfo) {
-    if (bandwidth === null) {
+    if (!bandwidthData) {
       bandwidthInfo.textContent = "Bandwidth: -- kbps";
       bandwidthInfo.style.color = "#666";
-    } else {
-      const kbps = Math.round(bandwidth / 1000);
-      let color = "#1976d2"; // Blue for normal
-      let status = "";
-      
-      if (kbps < 100) {
-        color = "#f44336"; // Red for poor
-        status = " (Poor)";
-      } else if (kbps < 300) {
-        color = "#ff9800"; // Orange for fair
-        status = " (Fair)";
-      } else if (kbps < 1000) {
-        color = "#4caf50"; // Green for good
-        status = " (Good)";
-      } else {
-        color = "#1976d2"; // Blue for excellent
-        status = " (Excellent)";
-      }
-      
-      bandwidthInfo.textContent = `Bandwidth: ${kbps} kbps${status}`;
-      bandwidthInfo.style.color = color;
-      lastBandwidth = kbps;
+      return;
     }
+    
+    const outgoing = bandwidthData.outgoing ? Math.round(bandwidthData.outgoing / 1000) : null;
+    const incoming = bandwidthData.incoming ? Math.round(bandwidthData.incoming / 1000) : null;
+    
+    let status = "";
+    let color = "#1976d2";
+    
+    // Use the lower of the two for overall quality assessment
+    const minBandwidth = outgoing && incoming ? Math.min(outgoing, incoming) : outgoing || incoming;
+    
+    if (minBandwidth < 100) {
+      color = "#f44336";
+      status = " (Poor)";
+    } else if (minBandwidth < 300) {
+      color = "#ff9800";
+      status = " (Fair)";
+    } else if (minBandwidth < 1000) {
+      color = "#4caf50";
+      status = " (Good)";
+    } else {
+      color = "#1976d2";
+      status = " (Excellent)";
+    }
+    
+    let text = "";
+    if (outgoing) text += `Send: ${outgoing} kbps`;
+    if (incoming) text += ` | Recv: ${incoming} kbps`;
+    if (bandwidthData.video) {
+      text += ` | Video: ${Math.round(bandwidthData.video / 1000)} kbps`;
+    }
+    
+    bandwidthInfo.textContent = text + status;
+    bandwidthInfo.style.color = color;
   }
 }
 
