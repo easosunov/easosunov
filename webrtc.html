@@ -1707,6 +1707,9 @@ async function ensurePeer() {
     e.streams[0].getTracks().forEach(t => rs.addTrack(t));
     remoteVideo.muted = false;
     remoteVideo.play().catch(() => {});
+   if(dirCallStatus.textContent.includes("Answered") && !dirCallStatus.textContent.includes("Connected")){
+  setStatus(dirCallStatus, "Answered. Connected.");
+}
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
   };
 
@@ -2551,7 +2554,7 @@ if(d.status === "ended"){
     // Optional: keep your existing status feedback
 if(d.status === "accepted"){
   stopRingback();
-  setStatus(dirCallStatus, "Answered. Connected.");
+  // Status will be set by pc.onconnectionstatechange when connection is established
   return;
 }
     if(d.status === "declined"){
@@ -2690,7 +2693,7 @@ answerBtn.onclick = async ()=>{
 
     roomIdInput.value = data.roomId;
 
-    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
+    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Connected.`);
     
     // Update Person B title with caller's name
     if (data.fromName) {
