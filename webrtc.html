@@ -242,6 +242,18 @@ select{
   color: #333 !important;
   border-color: #ccc !important;
 }
+
+/* Bandwidth indicator */
+.bandwidth-info {
+  font-size: 11px;
+  color: #1976d2;
+  margin-top: 4px;
+  font-family: monospace;
+  background: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #1976d2;
+}
 </style>
 </head>
 
@@ -362,7 +374,8 @@ select{
 <!-- Add this card back - place it after the Status card -->
 <div class="bottomCard">
   <b>Video quality</b>
-  <div class="small">Choose before Start (you can change during a call).</div>
+  <!-- Updated text -->
+  <div class="small">Choose before or during a call.</div>
   <select id="videoQualitySelect" disabled>
     <option value="no-video">No video (audio only)</option>
     <option value="ultra-low">Ultra Low (240p)</option>
@@ -371,6 +384,8 @@ select{
     <option value="high">High (1080p)</option>
   </select>
   <div class="status" id="videoQualityStatus">Video: Medium (720p).</div>
+  <!-- NEW: Bandwidth display -->
+  <div class="bandwidth-info" id="bandwidthInfo">Bandwidth: -- kbps</div>
 </div>
    
   
@@ -756,6 +771,7 @@ const callNoteInput = document.getElementById("callNoteInput");
 /* ===== NEW: video quality UI elements ===== */
 const videoQualitySelect = document.getElementById("videoQualitySelect");
 const videoQualityStatus = document.getElementById("videoQualityStatus");
+const bandwidthInfo = document.getElementById("bandwidthInfo"); // NEW: bandwidth display
 
 // Background service elements
 const startBgBtn = document.getElementById('startBgBtn');
@@ -777,6 +793,10 @@ appRoot.classList.add("locked");
 
 let isInCall = false;
 let currentCalleeUid = null; // Track who we're calling (or who called us)
+
+// NEW: Bandwidth monitoring
+let bandwidthCheckInterval = null;
+let lastBandwidth = null;
  
 const setStatus = (el,msg)=> el.textContent = msg;
  
@@ -1608,40 +1628,134 @@ function updateVideoQualityUi(){
 
 updateVideoQualityUi();
 
-// Change handler
-videoQualitySelect?.addEventListener("change", async ()=>{
+// ===== NEW: Enhanced video quality change handler =====
+videoQualitySelect?.addEventListener("change", async () => {
   const v = String(videoQualitySelect.value || "medium");
+  const oldQuality = selectedVideoQuality;
   selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
   saveVideoQuality(selectedVideoQuality);
   updateVideoQualityUi();
- 
-  // If camera already started, apply immediately
-  if(localStream){
-    try{
+  
+  try {
+    if (isInCall || localStream) {
+      // During active call or when stream is active, apply quality change
+      logDiag(`Changing video quality: ${oldQuality} → ${selectedVideoQuality}`);
       await applyVideoQualityToCurrentStream(selectedVideoQuality);
-      logDiag("Video quality applied while running: " + selectedVideoQuality);
-    }catch(e){
-      logDiag("applyVideoQuality error: " + (e?.message || e));
-      showError(e);
+      
+      // Show notification
+      const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+      if (videoQualityStatus) {
+        videoQualityStatus.textContent = `Video: ${label} (updated).`;
+      }
     }
+  } catch (e) {
+    logDiag("applyVideoQuality error: " + (e?.message || e));
+    showError(e);
+    // Revert UI on error
+    selectedVideoQuality = oldQuality;
+    updateVideoQualityUi();
   }
 });
 
-async function applyVideoQualityToCurrentStream(quality){
-  // If no video, nothing to apply
-  if (quality === 'no-video') return;
-  
+/* ===== NEW: Enhanced applyVideoQualityToCurrentStream function ===== */
+async function applyVideoQualityToCurrentStream(quality) {
   const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
+  
+  // If switching to audio-only
+  if (quality === 'no-video') {
+    const videoTracks = localStream?.getVideoTracks?.() || [];
+    if (videoTracks.length > 0) {
+      // Stop existing video track
+      videoTracks.forEach(track => {
+        track.stop();
+        localStream.removeTrack(track);
+      });
+      
+      // Update peer connection if in call
+      if (pc && isInCall) {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(null);
+          logDiag("Removed video track from peer connection");
+        }
+      }
+      
+      // Hide local video element
+      localVideo.style.display = 'none';
+      logDiag("Switched to audio-only mode");
+    }
+    return;
+  }
+  
+  // If switching from audio-only to video
+  if (profile.constraints && (!localVideo.style.display || localVideo.style.display === 'none')) {
+    localVideo.style.display = 'block';
+  }
+  
   const vTrack = localStream?.getVideoTracks?.()[0];
-  if(!vTrack) throw new Error("No video track to apply constraints to.");
-  await vTrack.applyConstraints(profile.constraints);
-
-  const s = vTrack.getSettings ? vTrack.getSettings() : {};
-  logDiag("Video track settings now: " + JSON.stringify({
-    width: s.width, height: s.height, frameRate: s.frameRate
-  }));
+  
+  if (!vTrack && profile.constraints) {
+    // Need to add video track (was audio-only)
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: profile.constraints,
+        audio: true
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      
+      // Stop old audio track if exists
+      const audioTracks = localStream?.getAudioTracks?.() || [];
+      audioTracks.forEach(track => track.stop());
+      
+      // Create new stream with video
+      const newLocalStream = new MediaStream();
+      newLocalStream.addTrack(newVideoTrack);
+      if (newStream.getAudioTracks().length > 0) {
+        newLocalStream.addTrack(newStream.getAudioTracks()[0]);
+      }
+      
+      // Replace local stream
+      localStream = newLocalStream;
+      localVideo.srcObject = localStream;
+      
+      // Update peer connection if in call
+      if (pc && isInCall) {
+        // Replace all tracks
+        const senders = pc.getSenders();
+        senders.forEach(sender => {
+          const track = sender.track;
+          if (track) {
+            if (track.kind === 'video') {
+              sender.replaceTrack(newVideoTrack);
+            } else if (track.kind === 'audio' && newStream.getAudioTracks().length > 0) {
+              sender.replaceTrack(newStream.getAudioTracks()[0]);
+            }
+          }
+        });
+        logDiag("Updated peer connection with new video track");
+      }
+      
+      logDiag("Added video track");
+    } catch (e) {
+      logDiag("Failed to add video: " + e.message);
+      throw e;
+    }
+  } else if (vTrack && profile.constraints) {
+    // Apply new constraints to existing track
+    try {
+      await vTrack.applyConstraints(profile.constraints);
+      
+      const s = vTrack.getSettings ? vTrack.getSettings() : {};
+      logDiag("Video track updated: " + JSON.stringify({
+        width: s.width, height: s.height, frameRate: s.frameRate
+      }));
+    } catch (e) {
+      logDiag("Failed to apply constraints: " + e.message);
+      throw e;
+    }
+  }
 }
-
 
 /* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
@@ -1676,25 +1790,156 @@ async function ensurePeer() {
     remoteVideo.muted = false;
     remoteVideo.play().catch(() => {});
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
-   updateMediaConnectionStatus("Connected ✓");
+    updateMediaConnectionStatus("Connected ✓");
+    // Start bandwidth monitoring when media starts flowing
+    startBandwidthMonitoring();
   };
 
-pc.onconnectionstatechange = () => { 
-  if (pc) {
-    logDiag("pc.connectionState=" + pc.connectionState);
-    
-    if (pc.connectionState === "connected") {
-      updateMediaConnectionStatus("Connected ✓");
-    } else if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
-      updateMediaConnectionStatus("Disconnected");
+  // ===== FIXED: Enhanced connection state handler =====
+  pc.onconnectionstatechange = () => { 
+    if (pc) {
+      logDiag("pc.connectionState=" + pc.connectionState);
+      
+      if (pc.connectionState === "connected") {
+        updateMediaConnectionStatus("Connected ✓");
+        // Update dirCallStatus when connected
+        setStatus(dirCallStatus, "Answered. Connected.");
+        // Stop listening to Firestore updates when connected
+        if (unsubCallDoc) {
+          unsubCallDoc();
+          unsubCallDoc = null;
+        }
+        // Start bandwidth monitoring
+        startBandwidthMonitoring();
+      } else if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+        updateMediaConnectionStatus("Disconnected");
+        // Stop bandwidth monitoring
+        stopBandwidthMonitoring();
+        updateBandwidthDisplay(null);
+      }
     }
-  }
-};
+  };
  
- pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
+  pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
 
   if (!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+}
+
+/* ================== BANDWIDTH MONITORING ================== */
+async function detectBandwidth() {
+  if (!pc || pc.connectionState !== 'connected') return null;
+  
+  try {
+    const stats = await pc.getStats();
+    let bandwidth = null;
+    
+    stats.forEach(report => {
+      if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+        if (report.availableOutgoingBitrate) {
+          bandwidth = report.availableOutgoingBitrate;
+        }
+      }
+    });
+    
+    return bandwidth;
+  } catch (e) {
+    logDiag("Bandwidth detection error: " + e.message);
+    return null;
+  }
+}
+
+function updateBandwidthDisplay(bandwidth) {
+  if (bandwidthInfo) {
+    if (bandwidth === null) {
+      bandwidthInfo.textContent = "Bandwidth: -- kbps";
+      bandwidthInfo.style.color = "#666";
+    } else {
+      const kbps = Math.round(bandwidth / 1000);
+      let color = "#1976d2"; // Blue for normal
+      let status = "";
+      
+      if (kbps < 100) {
+        color = "#f44336"; // Red for poor
+        status = " (Poor)";
+      } else if (kbps < 300) {
+        color = "#ff9800"; // Orange for fair
+        status = " (Fair)";
+      } else if (kbps < 1000) {
+        color = "#4caf50"; // Green for good
+        status = " (Good)";
+      } else {
+        color = "#1976d2"; // Blue for excellent
+        status = " (Excellent)";
+      }
+      
+      bandwidthInfo.textContent = `Bandwidth: ${kbps} kbps${status}`;
+      bandwidthInfo.style.color = color;
+      lastBandwidth = kbps;
+    }
+  }
+}
+
+function startBandwidthMonitoring() {
+  if (bandwidthCheckInterval) {
+    clearInterval(bandwidthCheckInterval);
+    bandwidthCheckInterval = null;
+  }
+  
+  bandwidthCheckInterval = setInterval(async () => {
+    if (isInCall && pc && pc.connectionState === 'connected') {
+      const bandwidth = await detectBandwidth();
+      updateBandwidthDisplay(bandwidth);
+      
+      // Optional: Auto-adjust quality based on bandwidth
+      if (bandwidth && isInCall) {
+        await autoAdjustQuality(bandwidth);
+      }
+    } else {
+      updateBandwidthDisplay(null);
+      stopBandwidthMonitoring();
+    }
+  }, 5000); // Check every 5 seconds
+}
+
+function stopBandwidthMonitoring() {
+  if (bandwidthCheckInterval) {
+    clearInterval(bandwidthCheckInterval);
+    bandwidthCheckInterval = null;
+  }
+  updateBandwidthDisplay(null);
+}
+
+async function autoAdjustQuality(bandwidth) {
+  if (!isInCall || !bandwidth) return;
+  
+  let newQuality = selectedVideoQuality;
+  
+  if (bandwidth < 100000) { // < 100 kbps
+    newQuality = 'ultra-low';
+  } else if (bandwidth < 300000) { // < 300 kbps
+    newQuality = 'low';
+  } else if (bandwidth < 1000000) { // < 1 Mbps
+    newQuality = 'medium';
+  } else { // >= 1 Mbps
+    newQuality = 'high';
+  }
+  
+  if (newQuality !== selectedVideoQuality) {
+    logDiag(`Auto-adjusting quality: ${bandwidth} bps -> ${newQuality}`);
+    selectedVideoQuality = newQuality;
+    updateVideoQualityUi();
+    
+    // Don't auto-switch to audio-only, but allow switching from audio-only
+    if (newQuality !== 'no-video') {
+      try {
+        await applyVideoQualityToCurrentStream(newQuality);
+        logDiag("Auto-adjusted video quality to: " + newQuality);
+      } catch (e) {
+        logDiag("Auto-adjust failed: " + e.message);
+      }
+    }
+  }
 }
 
 /* ================== FIRESTORE HELPERS ================== */
@@ -1735,20 +1980,23 @@ async function startMedia(opts={skipAutoJoin:false}){
     logDiag("Requesting getUserMedia…");
 
     // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
-const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES['medium'];
+    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES['medium'];
 
-// Unified constraints - 'no-video' has profile.constraints = false
-const constraints = {
-  audio: true,
-  video: profile.constraints
-};
+    // Unified constraints - 'no-video' has profile.constraints = false
+    const constraints = {
+      audio: true,
+      video: profile.constraints
+    };
 
     localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
     localVideo.srcObject = localStream;
 
+    // Show video element if it was hidden
+    localVideo.style.display = 'block';
+
     // Only apply video constraints if video is enabled
-    if (selectedVideoQuality === "video") {
+    if (selectedVideoQuality !== "no-video") {
       try{
         await applyVideoQualityToCurrentStream(selectedVideoQuality);
       }catch(e){
@@ -1832,18 +2080,20 @@ function stopListeners(){
 
 /* ================== STOP ================== */
 function stopAll(){
- updateMediaConnectionStatus("Not connected");
+  updateMediaConnectionStatus("Not connected");
   stopListeners();
   closePeer();
   stopCallListeners();
   stopIncomingUI();
- stopRingback();
+  stopRingback();
+  stopBandwidthMonitoring();
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
     localStream=null;
   }
   localVideo.srcObject=null;
+  localVideo.style.display = 'block'; // Reset display
 
   startBtn.disabled = !isAuthed;
   createBtn.disabled = true;
@@ -1864,7 +2114,6 @@ function stopAll(){
 
   pinnedRoomId = null;
   
-   
   // NEW: Reset current callee when stopping all
   currentCalleeUid = null;
   isInCall = false;
@@ -2003,7 +2252,7 @@ async function joinRoom(){
   suppressAutoJoin = false;
   await startMedia({ skipAutoJoin:true });
   
-   isInCall = true; // Set call state
+  isInCall = true; // Set call state
 
   const myAttempt = ++joinAttemptB;
   stopListeners();
@@ -2323,8 +2572,8 @@ async function catchUpMissedRingingCall() {
     const d = snap.docs[0];
     const callId = d.id;
     const call = d.data() || {};
-if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
-if (currentIncomingCall?.id === callId) return;
+    if (pendingIncomingCallWhileLoggedOut?.id === callId) return;
+    if (currentIncomingCall?.id === callId) return;
 
     // 2) Derive created time (ms) safely
     const createdMs =
@@ -2339,10 +2588,10 @@ if (currentIncomingCall?.id === callId) return;
     incomingOverlay.style.display = "flex";
     startRingtone();
 
-// Update Person B title with caller's name for the UI
-if (call.fromName) {
-  updatePersonBTitle(call.fromName);
-}
+    // Update Person B title with caller's name for the UI
+    if (call.fromName) {
+      updatePersonBTitle(call.fromName);
+    }
    
     // 4) Optional: also show a system notification (if permission granted)
     if ("Notification" in window && Notification.permission === "granted") {
@@ -2494,56 +2743,63 @@ function cleanupCallUI(){
   pinnedRoomId = null;
 }
 
-function listenActiveCall(callId){
-if(dirCallStatus.textContent === "Answered. Connected." || 
-   dirCallStatus.textContent.includes("Connected")) {
-  return; // Don't process any more Firestore updates
-}
- 
- if(pc && pc.connectionState === "connected"){
+/* ===== FIXED: Enhanced listenActiveCall function ===== */
+function listenActiveCall(callId) {
+  // Don't start if we're already connected
+  if (pc && pc.connectionState === "connected") {
     setStatus(dirCallStatus, "Answered. Connected.");
     return;
   }
   
-  // Add this new check:
-  if(dirCallStatus.textContent === "Answered. Connected." || 
-     dirCallStatus.textContent.includes("Connected")) {
-    return; // Don't process any more Firestore updates
+  // Early exit if already connected
+  if (dirCallStatus.textContent.includes("Connected") || 
+      dirCallStatus.textContent === "Answered. Connected.") {
+    return;
   }
-  if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
+  
+  if (unsubCallDoc) {
+    unsubCallDoc();
+    unsubCallDoc = null;
+  }
 
-  unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
-    if(!s.exists()) return;
+  unsubCallDoc = onSnapshot(doc(db, "calls", callId), (s) => {
+    if (!s.exists()) return;
     const d = s.data();
-    if(!d) return;
+    if (!d) return;
+
+    // STOP PROCESSING if WebRTC is connected
+    if (pc && pc.connectionState === "connected") {
+      setStatus(dirCallStatus, "Answered. Connected.");
+      return;
+    }
 
     // If the other side ends the call, clean everything up locally
-// If the other side ends the call, clean everything up locally
-if(d.status === "ended"){
-  stopRingback();
-  setStatus(dirCallStatus, "Ended.");
-  logDiag("Call ended (remote).");
-  cleanupCallUI();
-  stopAll(); // full local cleanup
-  // Reset Person B title
-  updatePersonBTitle('Other');
-  // Reset current callee
-  currentCalleeUid = null;
-  isInCall = false;
-  // Update user list to show green Call buttons
-  if (isAuthed) {
-    renderUsersList(userSearchInput.value);
-  }
-  return;
-}
+    if (d.status === "ended") {
+      stopRingback();
+      setStatus(dirCallStatus, "Ended.");
+      logDiag("Call ended (remote).");
+      cleanupCallUI();
+      stopAll(); // full local cleanup
+      // Reset Person B title
+      updatePersonBTitle('Other');
+      // Reset current callee
+      currentCalleeUid = null;
+      isInCall = false;
+      // Update user list to show green Call buttons
+      if (isAuthed) {
+        renderUsersList(userSearchInput.value);
+      }
+      return;
+    }
 
     // Optional: keep your existing status feedback
-    if(d.status === "accepted"){
+    if (d.status === "accepted") {
       stopRingback();
       setStatus(dirCallStatus, "Answered. Connecting…");
       return;
     }
-    if(d.status === "declined"){
+    
+    if (d.status === "declined") {
       stopRingback();
       setStatus(dirCallStatus, "Declined.");
       logDiag("Call declined.");
@@ -2557,76 +2813,83 @@ if(d.status === "ended"){
       }
       return;
     }
-if(d.status === "missed"){
-  stopRingback();
-  setStatus(dirCallStatus, "Missed.");
-  logDiag("Call missed.");
-  cleanupCallUI();
-  // Reset current callee
-  currentCalleeUid = null;
-  isInCall = false;
-  // Update user list to show green Call buttons
-  if (isAuthed) {
-    renderUsersList(userSearchInput.value);
-  }
-  return;
-}
+    
+    if (d.status === "missed") {
+      stopRingback();
+      setStatus(dirCallStatus, "Missed.");
+      logDiag("Call missed.");
+      cleanupCallUI();
+      // Reset current callee
+      currentCalleeUid = null;
+      isInCall = false;
+      // Update user list to show green Call buttons
+      if (isAuthed) {
+        renderUsersList(userSearchInput.value);
+      }
+      return;
+    }
 
     if (d.deliveredAt) {
       setStatus(dirCallStatus, "Delivered (callee page open).");
       return;
     }
 
-// Only check push stage if call is still ringing
-if (stage === "sent" && d.status === "ringing") { 
-  setStatus(dirCallStatus, "Push sent (waiting for answer)..."); 
-  return; 
-}
-    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
-    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
-    if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
+    // Only check push stage if call is still ringing
+    if (d.push?.stage === "sent" && d.status === "ringing") { 
+      setStatus(dirCallStatus, "Push sent (waiting for answer)..."); 
+      return; 
+    }
+    
+    if (d.push?.stage === "no_tokens") { 
+      setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); 
+      return; 
+    }
+    
+    if (d.push?.stage === "error") { 
+      setStatus(dirCallStatus, "Push error (see call doc push.error)."); 
+      return; 
+    }
 
+    // Default status
     setStatus(dirCallStatus, "Ringing…");
   });
 }
 
 async function hangup(){
- updateMediaConnectionStatus("Not connected");
- stopRingback();
-// Reset Person B title
+  updateMediaConnectionStatus("Not connected");
+  stopRingback();
+  // Reset Person B title
   updatePersonBTitle('Other');
   
-   isInCall = false;
+  isInCall = false;
  
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
-    try{
+    try {
       const callRef = doc(db, "calls", activeCallId);
-const snap = await getDoc(callRef);
+      const snap = await getDoc(callRef);
 
-if (snap.exists()) {
-  const call = snap.data() || {};
+      if (snap.exists()) {
+        const call = snap.data() || {};
 
-  // If caller hangs up BEFORE callee answered/declined → MISSED
-  if (call.status === "ringing") {
-    await updateDoc(callRef, {
-      status: "missed",
-      missedAt: serverTimestamp(),
-      endedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  } else {
-    // Normal hangup after answer
-    await updateDoc(callRef, {
-      status: "ended",
-      endedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-  }
-}
-
-    }catch(e){
-      // If rules block it, you'll see it in the error box (we fix rules below)
+        // If caller hangs up BEFORE callee answered/declined → MISSED
+        if (call.status === "ringing") {
+          await updateDoc(callRef, {
+            status: "missed",
+            missedAt: serverTimestamp(),
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // Normal hangup after answer
+          await updateDoc(callRef, {
+            status: "ended",
+            endedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+    } catch(e) {
       showError(e);
     }
   }
@@ -2667,8 +2930,8 @@ answerBtn.onclick = async ()=>{
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
 
-    // NEW: Disable call mode radio buttons
-       isInCall = true;
+    // Set call state
+    isInCall = true;
 
     // NEW: Set current callee when accepting incoming call
     currentCalleeUid = data.fromUid || null;
@@ -2707,8 +2970,8 @@ declineBtn.onclick = async ()=>{
     // Reset Person B title
     updatePersonBTitle('Other');
     
-    // NEW: Enable call mode radio buttons
-        isInCall = false;
+    // Set call state
+    isInCall = false;
     
     // If there's an active call ID, update it to "declined" in Firestore
     if (activeCallId) {
@@ -2790,6 +3053,7 @@ declineBtn.onclick = async ()=>{
     showError(e);
   }
 };
+
 /* ================== USER DIRECTORY (C-lite) ================== */
 let myDisplayName = "";
 let allUsersCache = []; // [{uid, displayName}]
@@ -3198,15 +3462,15 @@ await sendIncomingCallNotification(messagePayload);
   listenActiveCall(activeCallId);
 
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
- startRingback();
- logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
- sendIncomingCallNotification({
-  callId: callRef.id,    // the unique call identifier
-  fromName: myDisplayName, // the caller's name
-  toUid: toUid,           // the recipient's UID
-  note: note,             // the optional note/message
-  roomId: created.roomId, // the unique room ID
-});
+  startRingback();
+  logDiag(`Outgoing call created: ${callRef.id} roomId=${created.roomId}`);
+  sendIncomingCallNotification({
+    callId: callRef.id,    // the unique call identifier
+    fromName: myDisplayName, // the caller's name
+    toUid: toUid,           // the recipient's UID
+    note: note,             // the optional note/message
+    roomId: created.roomId, // the unique room ID
+  });
    // Refresh calls list to show the new outgoing call
   try { await loadRecentCalls(); } catch {};
 
@@ -3370,11 +3634,8 @@ if(prev.uid && prev.uid !== myUid){
     if (!resp.ok) throw new Error("SW fetch failed: " + resp.status);
 
     // Reuse bootstrap SW registration (do NOT register again)
-swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
-if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
-
-await navigator.serviceWorker.ready;
-try { await swReg.update(); } catch {}
+    swReg = swBootstrapReg || await navigator.serviceWorker.getRegistration("/easosunov/");
+    if (!swReg) throw new Error("Service worker not installed (bootstrap failed).");
 
     await navigator.serviceWorker.ready;
     try { await swReg.update(); } catch {}
@@ -3403,57 +3664,58 @@ try { await swReg.update(); } catch {}
       ua: navigator.userAgent,
       enabled: true
     }, { merge:true });
-// Remember that THIS browser token now belongs to THIS uid
-savePushBinding(myUid, tokenId);
+    
+    // Remember that THIS browser token now belongs to THIS uid
+    savePushBinding(myUid, tokenId);
 
     setStatus(pushStatus, "Push: enabled.");
     logDiag("FCM token stored (users/{uid}/fcmTokens).");
 
-   onMessage(messaging, async (payload)=>{
-  try{
-    logDiag("FCM foreground message: " + JSON.stringify(payload));
-    const data = payload?.data || {};
+    onMessage(messaging, async (payload)=>{
+      try{
+        logDiag("FCM foreground message: " + JSON.stringify(payload));
+        const data = payload?.data || {};
 
-    // Must be signed in to react
-    if(!isAuthed || !myUid) {
-      logDiag("Ignoring FCM: not authed");
-      return;
-    }
+        // Must be signed in to react
+        if(!isAuthed || !myUid) {
+          logDiag("Ignoring FCM: not authed");
+          return;
+        }
 
-    // If this is a call, verify it is REALLY for me by reading the call doc
-    if (data.callId) {
-      const callRef = doc(db, "calls", data.callId);
-      const callSnap = await getDoc(callRef);
-      if(!callSnap.exists()){
-        logDiag("Ignoring FCM: call doc missing");
-        return;
+        // If this is a call, verify it is REALLY for me by reading the call doc
+        if (data.callId) {
+          const callRef = doc(db, "calls", data.callId);
+          const callSnap = await getDoc(callRef);
+          if(!callSnap.exists()){
+            logDiag("Ignoring FCM: call doc missing");
+            return;
+          }
+          const call = callSnap.data() || {};
+
+          if(call.toUid !== myUid){
+            logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
+            return;
+          }
+
+          // OK - it is for me
+          if (call.roomId) roomIdInput.value = call.roomId;
+          currentIncomingCall = { id: data.callId, data: call };
+
+          incomingText.textContent =
+            payload?.notification?.body ||
+            (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
+
+          incomingOverlay.style.display = "flex";
+          startRingtone();
+          return;
+        }
+
+        // Non-call pushes: ignore (or handle if you want)
+        logDiag("Ignoring FCM: not a callId payload");
+      }catch(e){
+        logDiag("onMessage handler error: " + (e?.message || e));
       }
-      const call = callSnap.data() || {};
-
-      if(call.toUid !== myUid){
-        logDiag(`Ignoring FCM: call toUid=${call.toUid} does not match myUid=${myUid}`);
-        return;
-      }
-
-      // OK - it is for me
-      if (call.roomId) roomIdInput.value = call.roomId;
-      currentIncomingCall = { id: data.callId, data: call };
-
-      incomingText.textContent =
-        payload?.notification?.body ||
-        (call.fromName ? `Call from ${call.fromName}` : "Incoming call…");
-
-      incomingOverlay.style.display = "flex";
-      startRingtone();
-      return;
-    }
-
-    // Non-call pushes: ignore (or handle if you want)
-    logDiag("Ignoring FCM: not a callId payload");
-  }catch(e){
-    logDiag("onMessage handler error: " + (e?.message || e));
-  }
-});
+    });
 
   } catch (e) {
     setStatus(pushStatus, "Push: failed (see diagnostics).");
@@ -3607,7 +3869,7 @@ onAuthStateChanged(auth, async (user)=>{
     updateVideoQualityUi();
 
     // ===== NEW: enable call mode radio buttons once authed =====
-        testSoundBtn.disabled = false;
+    testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
 
     await rotateFcmTokenIfUserChanged();
@@ -3616,15 +3878,12 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
-/* ADD THIS LINE: Show utility logout button when signed in */
+    /* ADD THIS LINE: Show utility logout button when signed in */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "inline-block";
         logoutUtilityBtn.disabled = false;
     }
     
-    hangupBtn.disabled = true;
-    hangupBtn.className = "hangup-btn-inactive";
-   
     hangupBtn.disabled = true;
     hangupBtn.className = "hangup-btn-inactive";
 
@@ -3669,14 +3928,12 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
-/* ADD THIS LINE: Hide utility logout button when signed out */
+    /* ADD THIS LINE: Hide utility logout button when signed out */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "none";
         logoutUtilityBtn.disabled = true;
     }
     
-    setStatus(pushStatus, "Push: not enabled.");
-   
     setStatus(pushStatus, "Push: not enabled.");
     setStatus(dirCallStatus, "Idle.");
     myNameStatus.textContent = "Not set.";
