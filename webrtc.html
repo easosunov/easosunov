@@ -349,6 +349,16 @@ select{
   <div class="bottomGrid">
 
     <!-- Status / Push -->
+<!-- Status / Push card - find this section -->
+<div class="bottomCard">
+  <b>Status</b>
+  <div class="status" id="myNameStatus">Not set.</div>
+  <div class="status" id="pushStatus">Push: not enabled.</div>
+  <div class="status" id="dirCallStatus">Idle.</div>
+  <!-- ADD THIS NEW LINE -->
+  <div class="status" id="mediaConnectionStatus">Media: Not connected.</div>
+</div>
+   
     <div class="bottomCard">
       <b>Status</b>
       <div class="status" id="myNameStatus">Not set.</div>
@@ -790,6 +800,12 @@ let isInCall = false;
 let currentCalleeUid = null; // Track who we're calling (or who called us)
  
 const setStatus = (el,msg)=> el.textContent = msg;
+ 
+ function updateMediaConnectionStatus(status) {
+  const el = document.getElementById("mediaConnectionStatus");
+  if (el) el.textContent = "Media: " + status;
+}
+ 
 async function notifyCall(callId){
   try{
     if(!callId) throw new Error("notifyCall: missing callId");
@@ -1708,10 +1724,22 @@ async function ensurePeer() {
     remoteVideo.muted = false;
     remoteVideo.play().catch(() => {});
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
+   updateMediaConnectionStatus("Connected ✓");
   };
 
-  pc.onconnectionstatechange = () => { if (pc) logDiag("pc.connectionState=" + pc.connectionState); };
-  pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
+pc.onconnectionstatechange = () => { 
+  if (pc) {
+    logDiag("pc.connectionState=" + pc.connectionState);
+    
+    if (pc.connectionState === "connected") {
+      updateMediaConnectionStatus("Connected ✓");
+    } else if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+      updateMediaConnectionStatus("Disconnected");
+    }
+  }
+};
+ 
+ pc.oniceconnectionstatechange = () => { if (pc) logDiag("pc.iceConnectionState=" + pc.iceConnectionState); };
 
   if (!localStream) throw new Error("Local media not started.");
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
@@ -1852,6 +1880,7 @@ function stopListeners(){
 
 /* ================== STOP ================== */
 function stopAll(){
+ updateMediaConnectionStatus("Not connected");
   stopListeners();
   closePeer();
   stopCallListeners();
@@ -2516,6 +2545,11 @@ function cleanupCallUI(){
 }
 
 function listenActiveCall(callId){
+if(dirCallStatus.textContent === "Answered. Connected." || 
+   dirCallStatus.textContent.includes("Connected")) {
+  return; // Don't process any more Firestore updates
+}
+ 
  if(pc && pc.connectionState === "connected"){
     setStatus(dirCallStatus, "Answered. Connected.");
     return;
@@ -2607,6 +2641,7 @@ if (stage === "sent" && d.status === "ringing") {
 }
 
 async function hangup(){
+ updateMediaConnectionStatus("Not connected");
  stopRingback();
 // Reset Person B title
   updatePersonBTitle('Other');
