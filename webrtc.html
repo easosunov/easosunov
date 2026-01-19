@@ -2523,7 +2523,6 @@ function cleanupCallUI(){
   pinnedRoomId = null;
 }
 
-function listenActiveCall(callId){
  function listenActiveCall(callId){
   if(pc && pc.connectionState === "connected"){
     setStatus(dirCallStatus, "Answered. Connected.");
@@ -3221,6 +3220,10 @@ await sendIncomingCallNotification(messagePayload);
 
   // Watch the call doc for accepted/declined/ended/delivery/push status
   listenActiveCall(activeCallId);
+ // Check if we already have a connection
+if(pc && pc.connectionState === "connected"){
+  setStatus(dirCallStatus, "Answered. Connected.");
+}
 
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
  startRingback();
