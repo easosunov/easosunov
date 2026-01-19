@@ -2516,6 +2516,16 @@ function cleanupCallUI(){
 }
 
 function listenActiveCall(callId){
+ if(pc && pc.connectionState === "connected"){
+    setStatus(dirCallStatus, "Answered. Connected.");
+    return;
+  }
+  
+  // Add this new check:
+  if(dirCallStatus.textContent === "Answered. Connected." || 
+     dirCallStatus.textContent.includes("Connected")) {
+    return; // Don't process any more Firestore updates
+  }
   if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
 
   unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
