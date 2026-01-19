@@ -120,7 +120,7 @@ select{
 
 .bottomGrid{
   display:grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap:12px;
 }
 
@@ -772,7 +772,7 @@ let myUid = null;
 let wasManualLogin = false;
 let pendingIncomingCallWhileLoggedOut = null;
 // Set initial state to hide login overlay until auth check completes
-loginOverlay.style.display = "none";
+loginOverlay.style.display = "flex";
 appRoot.classList.add("locked");
 
 let isInCall = false;
@@ -1593,7 +1593,7 @@ function saveVideoQuality(v){
 let selectedVideoQuality = getSavedVideoQuality();
 
 function updateVideoQualityUi(){
-  if(videoModeSelect){
+  if(videoQualitySelect){  // <-- FIX: Use the correct element name
     videoModeSelect.value = selectedVideoQuality;
   }
   const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
@@ -1609,7 +1609,7 @@ function updateVideoQualityUi(){
 updateVideoQualityUi();
 
 // Change handler
-videoModeSelect?.addEventListener("change", async ()=>{
+videoQualitySelect?.addEventListener("change", async ()=>{
   const v = String(videoModeSelect.value || "medium");
   selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
   saveVideoQuality(selectedVideoQuality);
@@ -3607,9 +3607,7 @@ onAuthStateChanged(auth, async (user)=>{
     updateVideoQualityUi();
 
     // ===== NEW: enable call mode radio buttons once authed =====
-    ensureCallModeRadioState();
-
-    testSoundBtn.disabled = false;
+        testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
 
     await rotateFcmTokenIfUserChanged();
@@ -3664,9 +3662,7 @@ onAuthStateChanged(auth, async (user)=>{
     // ===== NEW: lock quality selector when signed out =====
     if(videoQualitySelect) videoQualitySelect.disabled = true;
 
-    // ===== NEW: lock call mode radio buttons when signed out =====
-    ensureCallModeRadioState();
-
+    
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
 
