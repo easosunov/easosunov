@@ -1594,7 +1594,7 @@ let selectedVideoQuality = getSavedVideoQuality();
 
 function updateVideoQualityUi(){
   if(videoQualitySelect){  // <-- FIX: Use the correct element name
-    videoModeSelect.value = selectedVideoQuality;
+    videoQualitySelect.value = selectedVideoQuality;
   }
   const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
   if(videoQualityStatus) {
@@ -1610,7 +1610,7 @@ updateVideoQualityUi();
 
 // Change handler
 videoQualitySelect?.addEventListener("change", async ()=>{
-  const v = String(videoModeSelect.value || "medium");
+  const v = String(videoQualitySelect.value || "medium");
   selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
   saveVideoQuality(selectedVideoQuality);
   updateVideoQualityUi();
