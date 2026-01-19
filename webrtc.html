@@ -2106,6 +2106,11 @@ async function joinRoom(){
       pc.onconnectionstatechange = async ()=>{
         if(myAttempt !== joinAttemptB || !pc) return;
         setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
+       if(pc.connectionState === "connected"){
+  setStatus(dirCallStatus, "Answered. Connected.");
+  clearBRetry();
+  return;
+}
         if(pc.connectionState === "connected"){ clearBRetry(); }
         if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
           setStatus(callStatus, "Connection lost — requesting new offer…");
