@@ -1,4 +1,5 @@
-=ml lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -181,6 +182,30 @@ select{
   font-size: 10px;
   margin-top: 2px;
 }
+
+/* ===== NEW: Call mode radio buttons ===== */
+.call-mode-options {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0;
+  align-items: center;
+}
+
+.call-mode-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.call-mode-options input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.call-mode-options label span {
+  font-size: 14px;
+}
 </style>
 </head>
 
@@ -320,6 +345,19 @@ select{
     <!-- Call / Room -->
     <div class="bottomCard">
       <b>Call controls</b>
+      
+      <!-- NEW: Video/Audio mode radio buttons -->
+      <div class="call-mode-options">
+        <label>
+          <input type="radio" id="videoModeRadio" name="callMode" value="video" checked>
+          <span>Video</span>
+        </label>
+        <label>
+          <input type="radio" id="audioModeRadio" name="callMode" value="audio">
+          <span>Audio only</span>
+        </label>
+      </div>
+      
       <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
         <button id="startBtn" disabled>Start</button>
         <button id="createBtn" disabled>Create Room</button>
@@ -547,7 +585,7 @@ const appRoot = document.getElementById("app");
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
- /* ================== VIDEO SCREEN TOGGLE ================== */
+/* ================== VIDEO SCREEN TOGGLE ================== */
 let videoMode = {
     local: 'normal',  // 'normal', 'fullscreen', 'small'
     remote: 'normal'
@@ -696,6 +734,10 @@ const bgStatus = document.getElementById('bgStatus');
 const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
+
+/* ===== NEW: call mode elements ===== */
+const videoModeRadio = document.getElementById("videoModeRadio");
+const audioModeRadio = document.getElementById("audioModeRadio");
  
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -705,6 +747,10 @@ let pendingIncomingCallWhileLoggedOut = null;
 // Set initial state to hide login overlay until auth check completes
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
+
+/* ===== NEW: call mode state ===== */
+let callMode = "video"; // "video" or "audio"
+let isInCall = false;
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -1553,6 +1599,45 @@ async function applyVideoQualityToCurrentStream(quality){
   }));
 }
 
+/* ===== NEW: Call mode functions ===== */
+function updateCallModeState() {
+  if (videoModeRadio.checked) {
+    callMode = "video";
+  } else if (audioModeRadio.checked) {
+    callMode = "audio";
+  }
+  logDiag(`Call mode set to: ${callMode}`);
+}
+
+function disableCallModeRadio() {
+  videoModeRadio.disabled = true;
+  audioModeRadio.disabled = true;
+  isInCall = true;
+  logDiag("Call mode radio buttons disabled (call active)");
+}
+
+function enableCallModeRadio() {
+  videoModeRadio.disabled = false;
+  audioModeRadio.disabled = false;
+  isInCall = false;
+  logDiag("Call mode radio buttons enabled");
+}
+
+function ensureCallModeRadioState() {
+  // Enable/disable based on auth state
+  if (isAuthed && !isInCall) {
+    videoModeRadio.disabled = false;
+    audioModeRadio.disabled = false;
+  } else {
+    videoModeRadio.disabled = true;
+    audioModeRadio.disabled = true;
+  }
+}
+
+// Event listeners for radio buttons
+videoModeRadio.addEventListener("change", updateCallModeState);
+audioModeRadio.addEventListener("change", updateCallModeState);
+
 /* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
 
@@ -1635,26 +1720,31 @@ async function startMedia(opts={skipAutoJoin:false}){
     // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
     const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
 
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: profile.constraints,
-      audio: true
-    });
+    // ===== NEW: Respect call mode (video or audio only) =====
+    const constraints = {
+      audio: true,
+      video: callMode === "video" ? profile.constraints : false
+    };
+
+    localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
     localVideo.srcObject = localStream;
 
-    // Also try to apply constraints again (some cameras ignore initial ideals)
-    try{
-      await applyVideoQualityToCurrentStream(selectedVideoQuality);
-    }catch(e){
-      logDiag("Initial applyConstraints failed (non-fatal): " + (e?.message || e));
+    // Only apply video constraints if video is enabled
+    if (callMode === "video") {
+      try{
+        await applyVideoQualityToCurrentStream(selectedVideoQuality);
+      }catch(e){
+        logDiag("Initial applyConstraints failed (non-fatal): " + (e?.message || e));
+      }
     }
 
-    setStatus(mediaStatus,"Camera/mic started.");
-    logDiag("Camera/mic started (stream attached).");
+    setStatus(mediaStatus, callMode === "video" ? "Camera/mic started." : "Mic started (audio only).");
+    logDiag(`${callMode === "video" ? "Camera/mic" : "Mic"} started (stream attached).`);
 
     localVideo.onloadedmetadata = async () => {
       try { await localVideo.play(); } catch {}
-      setStatus(mediaStatus,"Camera/mic started.");
+      setStatus(mediaStatus, callMode === "video" ? "Camera/mic started." : "Mic started (audio only).");
       logDiag("Local video playing.");
     };
 
@@ -1754,6 +1844,9 @@ function stopAll(){
   setStatus(dirCallStatus, "Idle.");
 
   pinnedRoomId = null;
+  
+  // NEW: Enable call mode radio buttons when everything is stopped
+  enableCallModeRadio();
 }
 
 /* ================== REJOIN SUPPORT ================== */
@@ -1785,6 +1878,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
   clearBRetry();
 
   await startMedia({ skipAutoJoin:true });
+  disableCallModeRadio(); // <-- NEW: Disable radio buttons during call
 
   const myAttempt = ++createAttemptA;
 
@@ -1881,6 +1975,7 @@ async function joinRoom(){
 
   suppressAutoJoin = false;
   await startMedia({ skipAutoJoin:true });
+  disableCallModeRadio(); // <-- NEW: Disable radio buttons during call
 
   const myAttempt = ++joinAttemptB;
   stopListeners();
@@ -2430,6 +2525,9 @@ async function hangup(){
  stopRingback();
 // Reset Person B title
   updatePersonBTitle('Other');
+  
+  // NEW: Enable call mode radio buttons
+  enableCallModeRadio();
  
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
@@ -2494,6 +2592,9 @@ answerBtn.onclick = async ()=>{
     webPageShowedNotification = false;
     localStorage.removeItem('pendingNotificationCall');
 
+    // NEW: Disable call mode radio buttons
+    disableCallModeRadio();
+
     // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
     hangupBtn.disabled = false;
@@ -2523,6 +2624,9 @@ declineBtn.onclick = async ()=>{
     stopRingback();
     // Reset Person B title
     updatePersonBTitle('Other');
+    
+    // NEW: Enable call mode radio buttons
+    enableCallModeRadio();
     
     // If there's an active call ID, update it to "declined" in Firestore
     if (activeCallId) {
@@ -3390,6 +3494,9 @@ onAuthStateChanged(auth, async (user)=>{
     videoQualitySelect.disabled = false;
     updateVideoQualityUi();
 
+    // ===== NEW: enable call mode radio buttons once authed =====
+    ensureCallModeRadioState();
+
     testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
 
@@ -3442,6 +3549,9 @@ onAuthStateChanged(auth, async (user)=>{
    
     // ===== NEW: lock quality selector when signed out =====
     if(videoQualitySelect) videoQualitySelect.disabled = true;
+
+    // ===== NEW: lock call mode radio buttons when signed out =====
+    ensureCallModeRadioState();
 
     testSoundBtn.disabled = true;
     resetPushBtn.disabled = true;
