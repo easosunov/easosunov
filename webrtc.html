@@ -787,7 +787,7 @@ appRoot.classList.add("locked");
 /* ===== NEW: call mode state ===== */
 let callMode = "video"; // "video" or "audio"
 let isInCall = false;
-let currentCalleeUid = null; // Track who we're calling
+let currentCalleeUid = null; // Track who we're calling (or who called us)
  
 const setStatus = (el,msg)=> el.textContent = msg;
 async function notifyCall(callId){
@@ -1888,6 +1888,7 @@ function stopAll(){
   
   // NEW: Reset current callee when stopping all
   currentCalleeUid = null;
+  isInCall = false;
   
   // NEW: Update user list to show green Call buttons again
   if (isAuthed) {
@@ -1925,6 +1926,7 @@ async function createRoom(options={updateHash:true, reuseRoomIdInput:true, fixed
 
   await startMedia({ skipAutoJoin:true });
   disableCallModeRadio(); // <-- NEW: Disable radio buttons during call
+  isInCall = true; // Set call state
 
   const myAttempt = ++createAttemptA;
 
@@ -2022,6 +2024,7 @@ async function joinRoom(){
   suppressAutoJoin = false;
   await startMedia({ skipAutoJoin:true });
   disableCallModeRadio(); // <-- NEW: Disable radio buttons during call
+  isInCall = true; // Set call state
 
   const myAttempt = ++joinAttemptB;
   stopListeners();
@@ -2532,6 +2535,7 @@ if(d.status === "ended"){
   updatePersonBTitle('Other');
   // Reset current callee
   currentCalleeUid = null;
+  isInCall = false;
   // Update user list to show green Call buttons
   if (isAuthed) {
     renderUsersList(userSearchInput.value);
@@ -2552,6 +2556,7 @@ if(d.status === "ended"){
       cleanupCallUI();
       // Reset current callee
       currentCalleeUid = null;
+      isInCall = false;
       // Update user list to show green Call buttons
       if (isAuthed) {
         renderUsersList(userSearchInput.value);
@@ -2565,6 +2570,7 @@ if(d.status === "missed"){
   cleanupCallUI();
   // Reset current callee
   currentCalleeUid = null;
+  isInCall = false;
   // Update user list to show green Call buttons
   if (isAuthed) {
     renderUsersList(userSearchInput.value);
@@ -2593,6 +2599,7 @@ async function hangup(){
   
   // NEW: Enable call mode radio buttons
   enableCallModeRadio();
+  isInCall = false;
  
   // NEW: works for BOTH caller and callee
   if (activeCallId) {
@@ -2665,6 +2672,10 @@ answerBtn.onclick = async ()=>{
 
     // NEW: Disable call mode radio buttons
     disableCallModeRadio();
+    isInCall = true;
+
+    // NEW: Set current callee when accepting incoming call
+    currentCalleeUid = data.fromUid || null;
 
     // NEW: Callee now has an active call id and can hang up
     activeCallId = id;
@@ -2680,6 +2691,9 @@ answerBtn.onclick = async ()=>{
     if (data.fromName) {
       updatePersonBTitle(data.fromName);
     }
+
+    // Update user list to show white Call buttons (call is active)
+    renderUsersList(userSearchInput.value);
 
     await joinRoom();
 
@@ -2699,6 +2713,7 @@ declineBtn.onclick = async ()=>{
     
     // NEW: Enable call mode radio buttons
     enableCallModeRadio();
+    isInCall = false;
     
     // If there's an active call ID, update it to "declined" in Firestore
     if (activeCallId) {
@@ -2893,8 +2908,8 @@ function renderUsersList(filterText=""){
     btn.disabled = !isAuthed;
     
     // Apply button color classes
-    if (!isAuthed || activeCallId) {
-      // If not authenticated OR there's an active call, buttons are white
+    if (!isAuthed || isInCall) {
+      // If not authenticated OR there's an active call (isInCall = true), buttons are white
       btn.className = "call-btn-inactive-other";
     } else if (currentCalleeUid && u.uid === currentCalleeUid) {
       // If this is the person we're currently calling (or who called us)
