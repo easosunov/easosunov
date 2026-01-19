@@ -1707,9 +1707,6 @@ async function ensurePeer() {
     e.streams[0].getTracks().forEach(t => rs.addTrack(t));
     remoteVideo.muted = false;
     remoteVideo.play().catch(() => {});
-   if(dirCallStatus.textContent.includes("Answered") && !dirCallStatus.textContent.includes("Connected")){
-  setStatus(dirCallStatus, "Answered. Connected.");
-}
     logDiag(`ontrack: ${e.streams[0].getTracks().map(t=>t.kind).join(",")}`);
   };
 
@@ -2109,13 +2106,6 @@ async function joinRoom(){
       pc.onconnectionstatechange = async ()=>{
         if(myAttempt !== joinAttemptB || !pc) return;
         setStatus(callStatus, `B: ${pc.connectionState} (session ${session})`);
-      // STOP the Firestore call listener since we're connected
-  if(unsubCallDoc){ 
-    unsubCallDoc(); 
-    unsubCallDoc=null; 
-  }
-  return;
-}
         if(pc.connectionState === "connected"){ clearBRetry(); }
         if(pc.connectionState === "failed" || pc.connectionState === "disconnected"){
           setStatus(callStatus, "Connection lost — requesting new offer…");
@@ -2525,11 +2515,7 @@ function cleanupCallUI(){
   pinnedRoomId = null;
 }
 
- function listenActiveCall(callId){
-  if(pc && pc.connectionState === "connected"){
-    setStatus(dirCallStatus, "Answered. Connected.");
-    return;
-  }
+function listenActiveCall(callId){
   if(unsubCallDoc){ unsubCallDoc(); unsubCallDoc=null; }
 
   unsubCallDoc = onSnapshot(doc(db,"calls", callId), (s)=>{
@@ -2558,11 +2544,11 @@ if(d.status === "ended"){
 }
 
     // Optional: keep your existing status feedback
-if(d.status === "accepted"){
-  stopRingback();
-  // Status will be set by pc.onconnectionstatechange when connection is established
-  return;
-}
+    if(d.status === "accepted"){
+      stopRingback();
+      setStatus(dirCallStatus, "Answered. Connecting…");
+      return;
+    }
     if(d.status === "declined"){
       stopRingback();
       setStatus(dirCallStatus, "Declined.");
@@ -2597,15 +2583,9 @@ if(d.status === "missed"){
       return;
     }
 
-const stage = d.push?.stage || "";
-if (stage === "sent") { 
-  // Don't override status if we're already connected
-  if(!dirCallStatus.textContent.includes("Connected")) {
-    setStatus(dirCallStatus, "Push sent (waiting for answer)..."); 
-  }
-  return; 
-}
-   if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
+    const stage = d.push?.stage || "";
+    if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
+    if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
     if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
 
     setStatus(dirCallStatus, "Ringing…");
@@ -2705,7 +2685,7 @@ answerBtn.onclick = async ()=>{
 
     roomIdInput.value = data.roomId;
 
-    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Connected.`);
+    setStatus(dirCallStatus, `Answered ${data.fromName || ""}. Joining room…`);
     
     // Update Person B title with caller's name
     if (data.fromName) {
@@ -3221,10 +3201,6 @@ await sendIncomingCallNotification(messagePayload);
 
   // Watch the call doc for accepted/declined/ended/delivery/push status
   listenActiveCall(activeCallId);
- // Check if we already have a connection
-if(pc && pc.connectionState === "connected"){
-  setStatus(dirCallStatus, "Answered. Connected.");
-}
 
   setStatus(dirCallStatus, `Calling ${toName || "user"}…`);
  startRingback();
