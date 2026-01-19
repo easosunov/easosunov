@@ -2593,7 +2593,11 @@ if(d.status === "missed"){
       return;
     }
 
-    const stage = d.push?.stage || "";
+// Only check push stage if call is still ringing
+if (stage === "sent" && d.status === "ringing") { 
+  setStatus(dirCallStatus, "Push sent (waiting for answer)..."); 
+  return; 
+}
     if (stage === "sent") { setStatus(dirCallStatus, "Push sent (waiting for answer)..."); return; }
     if (stage === "no_tokens") { setStatus(dirCallStatus, "No push tokens for callee (tab must be open)."); return; }
     if (stage === "error") { setStatus(dirCallStatus, "Push error (see call doc push.error)."); return; }
