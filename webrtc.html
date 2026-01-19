@@ -1702,132 +1702,161 @@ videoQualitySelect?.addEventListener("change", async () => {
 });
 
 
-/* ===== COMPLETELY REVISED: applyVideoQualityToCurrentStream ===== */
-/* ===== SIMPLIFIED: applyVideoQualityToCurrentStream ===== */
+/* ===== FIXED: applyVideoQualityToCurrentStream - Working version ===== */
 async function applyVideoQualityToCurrentStream(quality) {
   const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
   
-  // Get current tracks
-  const currentVideoTrack = localStream?.getVideoTracks?.()[0];
-  const currentAudioTrack = localStream?.getAudioTracks?.()[0];
+  // Get current state
+  const hasVideoTrack = localStream?.getVideoTracks?.().length > 0;
+  const hasAudioTrack = localStream?.getAudioTracks?.().length > 0;
   
-  logDiag(`Applying quality: ${quality}, Has video track: ${!!currentVideoTrack}`);
+  logDiag(`applyVideoQualityToCurrentStream: ${quality}, hasVideo: ${hasVideoTrack}, hasAudio: ${hasAudioTrack}`);
   
   // CASE 1: Switching TO audio-only (no video)
   if (quality === 'no-video') {
-    if (currentVideoTrack) {
-      logDiag("Stopping video track for audio-only mode");
+    if (hasVideoTrack) {
+      logDiag("Switching to audio-only mode");
       
-      // Stop the video track
-      currentVideoTrack.stop();
-      localStream.removeTrack(currentVideoTrack);
+      // Get and stop all video tracks
+      const videoTracks = localStream.getVideoTracks();
+      videoTracks.forEach(track => {
+        track.stop();
+        localStream.removeTrack(track);
+      });
       
       // Update peer connection if in call
       if (pc && isInCall) {
         const senders = pc.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          logDiag("Removing video from peer connection");
-          await videoSender.replaceTrack(null);
-        }
+        senders.forEach(sender => {
+          if (sender.track && sender.track.kind === 'video') {
+            logDiag("Removing video track from peer connection sender");
+            sender.replaceTrack(null).catch(e => {
+              logDiag("Error removing video track: " + e.message);
+            });
+          }
+        });
       }
       
-      // Hide local video element
+      // Hide and clear local video
       localVideo.classList.remove('video-visible');
       localVideo.classList.add('video-hidden');
-      localVideo.srcObject = null; // Clear srcObject
+      localVideo.srcObject = null;
       
       logDiag("Successfully switched to audio-only");
     }
     return;
   }
   
-  // CASE 2: Switching FROM audio-only TO video (or changing video quality)
-  if (!currentVideoTrack) {
-    // Need to get a new video track
-    logDiag("Getting new video track");
-    
-    try {
-      const constraints = {
-        video: profile.constraints,
-        audio: false // We'll keep the existing audio track
-      };
+  // CASE 2: We need video (either adding or changing quality)
+  logDiag(`Setting video quality to: ${quality}`);
+  
+  try {
+    // Step 1: Stop any existing video track
+    if (hasVideoTrack) {
+      const oldVideoTracks = localStream.getVideoTracks();
+      oldVideoTracks.forEach(track => {
+        track.stop();
+        localStream.removeTrack(track);
+      });
       
-      const newVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const newVideoTrack = newVideoStream.getVideoTracks()[0];
-      
-      // Add the new video track to our stream
-      localStream.addTrack(newVideoTrack);
-      localVideo.srcObject = localStream;
-      
-      // Show video
-      localVideo.classList.remove('video-hidden');
-      localVideo.classList.add('video-visible');
-      
-      // Update peer connection
+      // Also remove from peer connection
       if (pc && isInCall) {
         const senders = pc.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        
-        if (videoSender) {
-          // Replace null with new track
-          await videoSender.replaceTrack(newVideoTrack);
-        } else {
-          // Add new sender
-          pc.addTrack(newVideoTrack, localStream);
-        }
+        senders.forEach(sender => {
+          if (sender.track && sender.track.kind === 'video') {
+            sender.replaceTrack(null).catch(e => {
+              logDiag("Error clearing old video track: " + e.message);
+            });
+          }
+        });
+      }
+    }
+    
+    // Step 2: Get new video track with desired quality
+    logDiag("Requesting new video track with constraints:", profile.constraints);
+    
+    const constraints = {
+      video: profile.constraints,
+      audio: hasAudioTrack ? false : true // Only request audio if we don't have it
+    };
+    
+    const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const newVideoTrack = newStream.getVideoTracks()[0];
+    
+    if (!newVideoTrack) {
+      throw new Error("No video track returned from getUserMedia");
+    }
+    
+    // Step 3: Add audio track if needed
+    if (!hasAudioTrack && newStream.getAudioTracks().length > 0) {
+      const audioTrack = newStream.getAudioTracks()[0];
+      localStream.addTrack(audioTrack);
+      logDiag("Added audio track from new stream");
+    }
+    
+    // Step 4: Add video track to local stream
+    localStream.addTrack(newVideoTrack);
+    localVideo.srcObject = localStream;
+    
+    // Show video
+    localVideo.classList.remove('video-hidden');
+    localVideo.classList.add('video-visible');
+    
+    // Step 5: Update peer connection
+    if (pc && isInCall) {
+      const senders = pc.getSenders();
+      const videoSender = senders.find(s => s.track?.kind === 'video' || !s.track);
+      
+      if (videoSender) {
+        logDiag("Replacing track in existing video sender");
+        await videoSender.replaceTrack(newVideoTrack);
+      } else {
+        logDiag("Adding new video sender to peer connection");
+        pc.addTrack(newVideoTrack, localStream);
       }
       
-      logDiag("Added new video track successfully");
-      
-    } catch (error) {
-      logDiag("Failed to get video: " + error.message);
-      throw error;
-    }
-  } else {
-    // We already have a video track, just change its constraints
-    logDiag("Changing constraints on existing video track");
-    
-    try {
-      await currentVideoTrack.applyConstraints(profile.constraints);
-      logDiag("Constraints applied successfully");
-      
-      // Make sure video is visible
-      localVideo.classList.remove('video-hidden');
-      localVideo.classList.add('video-visible');
-      
-    } catch (error) {
-      logDiag("Failed to apply constraints: " + error.message);
-      
-      // If constraints fail, recreate the track
-      logDiag("Recreating video track");
-      
-      // Stop old track
-      currentVideoTrack.stop();
-      localStream.removeTrack(currentVideoTrack);
-      
-      // Get new track
-      const constraints = {
-        video: profile.constraints,
-        audio: false
-      };
-      
-      const newVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
-      const newVideoTrack = newVideoStream.getVideoTracks()[0];
-      
-      // Add new track
-      localStream.addTrack(newVideoTrack);
-      localVideo.srcObject = localStream;
-      
-      // Update peer connection
-      if (pc && isInCall) {
-        const senders = pc.getSenders();
-        const videoSender = senders.find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          await videoSender.replaceTrack(newVideoTrack);
+      // Also update audio if needed
+      if (!hasAudioTrack) {
+        const audioSender = senders.find(s => s.track?.kind === 'audio');
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioSender && audioTrack) {
+          await audioSender.replaceTrack(audioTrack);
         }
       }
     }
+    
+    logDiag(`Successfully applied video quality: ${quality}`);
+    
+    // Verify the track is working
+    setTimeout(() => {
+      const currentVideoTrack = localStream.getVideoTracks()[0];
+      if (currentVideoTrack) {
+        const settings = currentVideoTrack.getSettings();
+        logDiag("Video track settings:", {
+          width: settings.width,
+          height: settings.height,
+          frameRate: settings.frameRate,
+          readyState: currentVideoTrack.readyState
+        });
+      }
+    }, 500);
+    
+  } catch (error) {
+    logDiag("Failed to apply video quality: " + error.message);
+    
+    // If we failed to get video, revert to audio-only
+    if (quality !== 'no-video') {
+      logDiag("Reverting to audio-only due to error");
+      selectedVideoQuality = 'no-video';
+      updateVideoQualityUi();
+      
+      // Hide video
+      localVideo.classList.remove('video-visible');
+      localVideo.classList.add('video-hidden');
+      localVideo.srcObject = null;
+    }
+    
+    throw error;
   }
 }
 
@@ -2075,6 +2104,35 @@ let autoJoinDone = false;
 let autoJoinScheduled = false;
 let autoJoinTimer = null;
 
+/* ===== Emergency video reset function ===== */
+async function resetVideoTrack() {
+  logDiag("Force resetting video track...");
+  
+  // Stop all video tracks
+  if (localStream) {
+    const videoTracks = localStream.getVideoTracks();
+    videoTracks.forEach(track => {
+      track.stop();
+      localStream.removeTrack(track);
+    });
+  }
+  
+  // Clear video display
+  localVideo.classList.remove('video-visible');
+  localVideo.classList.add('video-hidden');
+  localVideo.srcObject = null;
+  
+  // If we're supposed to have video, recreate it
+  if (selectedVideoQuality !== 'no-video') {
+    try {
+      await applyVideoQualityToCurrentStream(selectedVideoQuality);
+    } catch (e) {
+      logDiag("Failed to recreate video: " + e.message);
+    }
+  }
+}
+
+ 
 async function startMedia(opts={skipAutoJoin:false}){
   if(!requireAuthOrPrompt()) return;
 
@@ -2090,18 +2148,26 @@ async function startMedia(opts={skipAutoJoin:false}){
     setStatus(mediaStatus,"Requesting camera/mic…");
     logDiag("Requesting getUserMedia…");
 
-    // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
-    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES['medium'];
+   // In startMedia() function, replace the constraints section:
+const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES['medium'];
 
-    // Unified constraints - 'no-video' has profile.constraints = false
-    const constraints = {
-      audio: true,
-      video: profile.constraints
-    };
+// Unified constraints - 'no-video' has profile.constraints = false
+const constraints = {
+  audio: true,
+  video: selectedVideoQuality === 'no-video' ? false : profile.constraints
+};
 
-    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+localStream = await navigator.mediaDevices.getUserMedia(constraints);
+localVideo.srcObject = localStream;
 
-    localVideo.srcObject = localStream;
+// Show/hide video based on selection
+if (selectedVideoQuality === 'no-video') {
+  localVideo.classList.remove('video-visible');
+  localVideo.classList.add('video-hidden');
+} else {
+  localVideo.classList.remove('video-hidden');
+  localVideo.classList.add('video-visible');
+}
 
     // Show video element if it was hidden
     localVideo.style.display = 'block';
