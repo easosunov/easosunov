@@ -389,27 +389,25 @@ select{
     </div>
 
     <!-- Call / Room -->
-    <div class="bottomCard">
-      <b>Call controls</b>
-      
-      <!-- NEW: Video/Audio mode radio buttons -->
-      <div class="call-mode-options">
-        <label>
-          <input type="radio" id="videoModeRadio" name="callMode" value="video" checked>
-          <span>Video</span>
-        </label>
-        <label>
-          <input type="radio" id="audioModeRadio" name="callMode" value="audio">
-          <span>Audio only</span>
-        </label>
-      </div>
-      
-      <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
-        <button id="startBtn" disabled>Start</button>
-        <button id="createBtn" disabled>Create Room</button>
-        <button id="joinBtn" disabled>Join Room</button>
-      </div>
-      <div class="status" id="mediaStatus">Not started.</div>
+<div class="bottomCard">
+  <b>Call controls</b>
+  
+  <!-- Unified Video Quality + No Video option -->
+  <div class="small">Video quality (choose before Start)</div>
+  <select id="videoModeSelect" disabled>
+    <option value="no-video">No video (audio only)</option>
+    <option value="ultra-low">Ultra Low (240p)</option>
+    <option value="low">Low (360p)</option>
+    <option value="medium" selected>Medium (720p)</option>
+    <option value="high">High (1080p)</option>
+  </select>
+  
+  <div style="margin-top:8px;display:flex;gap:10px;flex-wrap:wrap">
+    <button id="startBtn" disabled>Start</button>
+    <button id="createBtn" disabled>Create Room</button>
+    <button id="joinBtn" disabled>Join Room</button>
+  </div>
+  <div class="status" id="mediaStatus">Not started.</div>
 
       <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
 
@@ -781,9 +779,6 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
 
-/* ===== NEW: call mode elements ===== */
-const videoModeRadio = document.getElementById("videoModeRadio");
-const audioModeRadio = document.getElementById("audioModeRadio");
  
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -794,8 +789,6 @@ let pendingIncomingCallWhileLoggedOut = null;
 loginOverlay.style.display = "none";
 appRoot.classList.add("locked");
 
-/* ===== NEW: call mode state ===== */
-let callMode = "video"; // "video" or "audio"
 let isInCall = false;
 let currentCalleeUid = null; // Track who we're calling (or who called us)
  
@@ -1590,11 +1583,13 @@ let pc = null;
    High:   1920x1080 @ 30fps
 */
 const VIDEO_PROFILES = {
-  low:    { label: "Low (360p)",    constraints: { width:{ideal:640},  height:{ideal:360},  frameRate:{ideal:15, max:15} } },
-  medium: { label: "Medium (720p)", constraints: { width:{ideal:1280}, height:{ideal:720},  frameRate:{ideal:30, max:30} } },
-  high:   { label: "High (1080p)",  constraints: { width:{ideal:1920}, height:{ideal:1080}, frameRate:{ideal:30, max:30} } },
+  'no-video':   { label: "Audio only",   constraints: false }, // false = no video track
+  'ultra-low':  { label: "Ultra Low (240p)", constraints: { width:{ideal:424, max:424}, height:{ideal:240, max:240}, frameRate:{ideal:10, max:10} } },
+  'low':        { label: "Low (360p)",    constraints: { width:{ideal:640, max:640}, height:{ideal:360, max:360}, frameRate:{ideal:15, max:15} } },
+  'medium':     { label: "Medium (720p)", constraints: { width:{ideal:1280, max:1280}, height:{ideal:720, max:720}, frameRate:{ideal:30, max:30} } },
+  'high':       { label: "High (1080p)",  constraints: { width:{ideal:1920, max:1920}, height:{ideal:1080, max:1080}, frameRate:{ideal:30, max:30} } },
 };
-
+ 
 // Persist selection
 const LS_VIDEO_QUALITY = "webrtc_video_quality";
 function getSavedVideoQuality(){
@@ -1612,22 +1607,28 @@ function saveVideoQuality(v){
 let selectedVideoQuality = getSavedVideoQuality();
 
 function updateVideoQualityUi(){
-  if(videoQualitySelect){
-    videoQualitySelect.value = selectedVideoQuality;
+  if(videoModeSelect){
+    videoModeSelect.value = selectedVideoQuality;
   }
   const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
-  if(videoQualityStatus) videoQualityStatus.textContent = `Video: ${label}.`;
+  if(videoQualityStatus) {
+    if (selectedVideoQuality === 'no-video') {
+      videoQualityStatus.textContent = "Audio only";
+    } else {
+      videoQualityStatus.textContent = `Video: ${label}.`;
+    }
+  }
 }
 
 updateVideoQualityUi();
 
 // Change handler
-videoQualitySelect?.addEventListener("change", async ()=>{
-  const v = String(videoQualitySelect.value || "medium");
+videoModeSelect?.addEventListener("change", async ()=>{
+  const v = String(videoModeSelect.value || "medium");
   selectedVideoQuality = VIDEO_PROFILES[v] ? v : "medium";
   saveVideoQuality(selectedVideoQuality);
   updateVideoQualityUi();
-
+ 
   // If camera already started, apply immediately
   if(localStream){
     try{
@@ -1652,44 +1653,6 @@ async function applyVideoQualityToCurrentStream(quality){
   }));
 }
 
-/* ===== NEW: Call mode functions ===== */
-function updateCallModeState() {
-  if (videoModeRadio.checked) {
-    callMode = "video";
-  } else if (audioModeRadio.checked) {
-    callMode = "audio";
-  }
-  logDiag(`Call mode set to: ${callMode}`);
-}
-
-function disableCallModeRadio() {
-  videoModeRadio.disabled = true;
-  audioModeRadio.disabled = true;
-  isInCall = true;
-  logDiag("Call mode radio buttons disabled (call active)");
-}
-
-function enableCallModeRadio() {
-  videoModeRadio.disabled = false;
-  audioModeRadio.disabled = false;
-  isInCall = false;
-  logDiag("Call mode radio buttons enabled");
-}
-
-function ensureCallModeRadioState() {
-  // Enable/disable based on auth state
-  if (isAuthed && !isInCall) {
-    videoModeRadio.disabled = false;
-    audioModeRadio.disabled = false;
-  } else {
-    videoModeRadio.disabled = true;
-    audioModeRadio.disabled = true;
-  }
-}
-
-// Event listeners for radio buttons
-videoModeRadio.addEventListener("change", updateCallModeState);
-audioModeRadio.addEventListener("change", updateCallModeState);
 
 /* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
@@ -1783,20 +1746,20 @@ async function startMedia(opts={skipAutoJoin:false}){
     logDiag("Requesting getUserMedia…");
 
     // ===== NEW: use selectedVideoQuality in getUserMedia (best place for quality) =====
-    const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES.medium;
+const profile = VIDEO_PROFILES[selectedVideoQuality] || VIDEO_PROFILES['medium'];
 
-    // ===== NEW: Respect call mode (video or audio only) =====
-    const constraints = {
-      audio: true,
-      video: callMode === "video" ? profile.constraints : false
-    };
+// Unified constraints - 'no-video' has profile.constraints = false
+const constraints = {
+  audio: true,
+  video: profile.constraints
+};
 
     localStream = await navigator.mediaDevices.getUserMedia(constraints);
 
     localVideo.srcObject = localStream;
 
     // Only apply video constraints if video is enabled
-    if (callMode === "video") {
+    if (selectedVideoQuality === "video") {
       try{
         await applyVideoQualityToCurrentStream(selectedVideoQuality);
       }catch(e){
@@ -1804,12 +1767,12 @@ async function startMedia(opts={skipAutoJoin:false}){
       }
     }
 
-    setStatus(mediaStatus, callMode === "video" ? "Camera/mic started." : "Mic started (audio only).");
+    setStatus(mediaStatus, selectedVideoQuality === 'no-video' ? "Mic started (audio only)." : "Camera/mic started.");
     logDiag(`${callMode === "video" ? "Camera/mic" : "Mic"} started (stream attached).`);
 
     localVideo.onloadedmetadata = async () => {
       try { await localVideo.play(); } catch {}
-      setStatus(mediaStatus, callMode === "video" ? "Camera/mic started." : "Mic started (audio only).");
+      setStatus(mediaStatus, selectedVideoQuality === 'no-video' ? "Mic started (audio only)." : "Camera/mic started.");
       logDiag("Local video playing.");
     };
 
