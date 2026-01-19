@@ -274,6 +274,23 @@ video#localVideo.video-visible {
   filter: grayscale(50%);
 }
  
+/* Phone badge styles */
+.phone-badge {
+  background: #4CAF50;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 10px;
+}
+.email-badge {
+  background: #2196F3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 10px;
+}
 </style>
 </head>
 
@@ -801,6 +818,10 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
 
+/* ================== PHONE AUTHENTICATION VARIABLES ================== */
+let isAutoLoginAttempted = false;
+let isAndroidPhoneLogin = false;
+let userPhone = '';
  
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -927,596 +948,133 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-
- /* UID allowlist */
-async function enforceAllowlist(user){
-  const uid = user.uid;
-  logDiag("Allowlist check uid=" + uid);
-
-  try{
-    const ref = doc(db, "allowlistUids", uid);
-    const snap = await getDoc(ref);
-
-    if(!snap.exists()){
-      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist missing for UID: " + uid);
-    }
-
-    const enabled = snap.data()?.enabled === true;
-    if(!enabled){
-      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist disabled for UID: " + uid);
-    }
-
-    return true;
-  }catch(e){
-    if(String(e?.code || "").includes("permission-denied")){
-      loginStatus.textContent =
-        "Allowlist check blocked by Firestore rules (permission-denied).";
-    }
-    throw e;
-  }
+/* ================== PHONE NUMBER AUTHENTICATION ================== */
+// Platform detection
+function isAndroidDevice() {
+  return /android/i.test(navigator.userAgent);
 }
 
- 
-/* ================== BACKGROUND SERVICE ================== */
-// Test if background service is running
-async function checkBackgroundService() {
+// Get phone number from URL parameters (sent by Android APK)
+function getPhoneNumberFromURL() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const phone = urlParams.get('phone');
+  return phone ? phone.replace(/[^0-9+]/g, '') : null;
+}
+
+// Check if phone number exists in user's allowlist
+async function isPhoneNumberAllowed(phoneNumber) {
   try {
-    const response = await fetch('http://localhost:3000/status', { 
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await response.json();
-    return data;
+    if (!phoneNumber) return { allowed: false };
+    
+    // Check users collection for phone number match
+    const usersSnapshot = await getDocs(query(
+      collection(db, 'users'),
+      where('phone', '==', phoneNumber),
+      limit(1)
+    ));
+    
+    if (!usersSnapshot.empty) {
+      const userData = usersSnapshot.docs[0].data();
+      return {
+        allowed: true,
+        email: userData.email || '',
+        displayName: userData.displayName || phoneNumber,
+        uid: usersSnapshot.docs[0].id
+      };
+    }
+    
+    return { allowed: false };
   } catch (error) {
-    // Service is not running or not reachable
-    return { isRunning: false, uid: null };
+    console.error("Error checking phone number:", error);
+    return { allowed: false };
   }
 }
 
-// Start background service
-async function startBackgroundService() {
-  if (!isAuthed || !myUid) {
-    alert('Please sign in first');
+// Phone number auto-login for Android
+async function attemptPhoneNumberAutoLogin() {
+  if (!isAndroidDevice() || isAutoLoginAttempted) return;
+  
+  isAutoLoginAttempted = true;
+  const phoneNumber = getPhoneNumberFromURL();
+  
+  if (!phoneNumber) {
+    console.log("No phone number detected in URL");
     return;
   }
   
-  try {
-    bgStatus.textContent = 'Connecting to background service...';
-    
-    const response = await fetch('http://localhost:3000/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: myUid
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = '✅ Background service active';
-      startBgBtn.disabled = true;
-      stopBgBtn.disabled = false;
-      logDiag('Background service started for UID: ' + myUid);
-    } else {
-      throw new Error(data.error || 'Failed to start');
-    }
-  } catch (error) {
-    bgStatus.textContent = '❌ Failed to connect';
-    logDiag('Background service error: ' + error.message);
-    
-    // Show helpful message
-    if (error.message.includes('fetch') || error.message.includes('network')) {
-      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
-    }
-  }
-}
-
-// Stop background service
-async function stopBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = 'Background service stopped';
-      startBgBtn.disabled = false;
-      stopBgBtn.disabled = true;
-      logDiag('Background service stopped');
-    }
-  } catch (error) {
-    logDiag('Error stopping background service: ' + error.message);
-  }
-}
-
-// Update service status
-async function updateServiceStatus() {
-  if (isAuthed) {
-    startBgBtn.disabled = false;
-    
-    try {
-      const status = await checkBackgroundService();
-      if (status.isRunning && status.uid === myUid) {
-        bgStatus.textContent = '✅ Background service active';
-        startBgBtn.disabled = true;
-        stopBgBtn.disabled = false;
-      } else {
-        bgStatus.textContent = 'Background service ready';
-        stopBgBtn.disabled = true;
-      }
-    } catch (error) {
-      bgStatus.textContent = 'Background app not detected';
-      stopBgBtn.disabled = true;
-    }
-  } else {
-    startBgBtn.disabled = true;
-    stopBgBtn.disabled = true;
-    bgStatus.textContent = 'Sign in required';
-  }
-}
-
-// Event listeners
-startBgBtn.onclick = startBackgroundService;
-stopBgBtn.onclick = stopBackgroundService;
-
-// Download link
-// Download link - remove onclick handler since href is already set
-// Or update to use your GitHub URL
-downloadBgLink.onclick = (e) => {
-  // Optional: Add analytics or confirmation
-  console.log('Downloading background app...');
-  // Let the default link behavior happen (browser will download)
-};
-
-/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
-const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
-const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
-
-const hasBroadcastChannel = ("BroadcastChannel" in window);
-const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
-
-function nowMs(){ return Date.now(); }
-
-function setDeviceOwner(uid){
-  try{
-    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
-    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
-  }catch{}
-}
-
-function clearDeviceOwner(){
-  try{
-    localStorage.removeItem(DEVICE_OWNER_KEY);
-    localStorage.removeItem(DEVICE_OWNER_AT);
-  }catch{}
-}
-
-function getDeviceOwner(){
-  try{
-    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
-  }catch{
-    return null;
-  }
-}
-
-async function forceSignOutBecauseDifferentUser(newUid){
-  // If this tab is signed in as someone else, sign out immediately.
-  const currentUid = auth.currentUser?.uid || null;
-  if (currentUid && newUid && currentUid !== newUid){
-    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
-    try{
-      stopAll(); // stop listeners/media before auth changes
-    }catch{}
-    try{
-      await signOut(auth);
-    }catch(e){
-      // If signOut fails, still show why
-      showError(e);
-    }
-  }
-}
-
-function broadcastNewOwner(uid){
-  if(authBC){
-    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
-  }
-}
-
-// Listen for owner changes via BroadcastChannel
-if(authBC){
-  authBC.onmessage = (ev)=>{
-    const msg = ev?.data || {};
-    if(msg.type === "NEW_OWNER" && msg.uid){
-      forceSignOutBecauseDifferentUser(String(msg.uid));
-    }
-    if(msg.type === "OWNER_CLEARED"){
-      // nothing required
-    }
-  };
-}
-// Listen for focus requests from duplicate tabs
-if (hasBroadcastChannel) {
-  const focusChannel = new BroadcastChannel("webrtc_focus_request");
-  focusChannel.onmessage = (ev) => {
-    const msg = ev?.data || {};
-    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
-      // This is the original tab - bring it to front
-      window.focus();
-      if (document.hidden) {
-        // Try to make browser bring tab to front (may not work due to browser restrictions)
-        console.log("Focus requested by duplicate tab");
-      }
-    }
-  };
-}
-/* ================== SINGLE PAGE INSTANCE LOCK ================== */
-const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
-const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
-const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
-
-// Generate unique tab ID
-const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-let hasLock = false;
-let lockCheckInterval = null;
-let isDisabled = false;
-
-// Function to IMMEDIATELY disable the app
-function disableAppImmediately() {
-  if (isDisabled) return;
-  isDisabled = true;
+  console.log("Detected phone number:", phoneNumber);
+  logDiag("Detected Android device. Attempting phone number login...");
   
-  logDiag("IMMEDIATE DISABLE: Another instance detected");
+  // Check if phone number is allowed
+  const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
   
-  // Stop all media and connections
-  stopAll();
-  
-  // Disable UI
-  if (appRoot) {
-    appRoot.classList.add('locked');
-    appRoot.style.pointerEvents = 'none';
-    appRoot.style.opacity = '0.5';
-  }
-  
-  // Hide login overlay if visible
-  if (loginOverlay) {
-    loginOverlay.style.display = 'none';
-  }
-  
-  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
-  // by closing this tab/window and focusing the original one
-  
-  // Try to close this tab/window
-  try {
-    // Try to find and focus the original tab by broadcasting a message
-    if (hasBroadcastChannel) {
-      const focusChannel = new BroadcastChannel("webrtc_focus_request");
-      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
-      setTimeout(() => {
-        focusChannel.close();
-      }, 1000);
-    }
-    
-    // Close this tab after a short delay
-    setTimeout(() => {
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.close();
-      }
-    }, 100);
-    
-  } catch (e) {
-    // If we can't close, show a minimal message and redirect to about:blank
-    console.log("Another instance is already running");
-    window.location.href = "about:blank";
-  }
-  
-  // Add button hover effects
-  const buttons = blocker.querySelectorAll('button');
-  buttons.forEach(btn => {
-    btn.addEventListener('mouseenter', () => {
-      if (btn.id === 'closePageBtn') {
-        btn.style.background = '#ff5252';
-      } else if (btn.id === 'goBackBtn') {
-        btn.style.background = '#5a6573';
-      } else if (btn.id === 'reloadBtn') {
-        btn.style.background = 'rgba(255, 255, 255, 0.1)';
-        btn.style.color = '#ddd';
-      }
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (btn.id === 'closePageBtn') {
-        btn.style.background = '#ff6b6b';
-      } else if (btn.id === 'goBackBtn') {
-        btn.style.background = '#4a5568';
-      } else if (btn.id === 'reloadBtn') {
-        btn.style.background = 'transparent';
-        btn.style.color = '#aaa';
-      }
-    });
-  });
-  
-  // Add button handlers
-  document.getElementById('goBackBtn')?.addEventListener('click', () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      // If no history, redirect to a blank page or previous page
-      window.location.href = 'about:blank';
-    }
-  });
-  
-  document.getElementById('closePageBtn')?.addEventListener('click', () => {
-    // Try multiple methods to close or navigate away
-    try {
-      // Method 1: Try to close (works for popup windows)
-      if (window.opener || window.history.length <= 1) {
-        window.close();
-      } else {
-        // Method 2: For regular tabs, navigate to blank page
-        window.location.href = 'about:blank';
-        // Method 3: Try to close after a delay
-        setTimeout(() => {
-          try { window.close(); } catch(e) {}
-        }, 100);
-      }
-    } catch (e) {
-      // Method 4: If close fails, navigate to previous page or blank
-      if (window.history.length > 1) {
-        window.history.go(-1);
-      } else {
-        window.location.href = 'about:blank';
-      }
-    }
-  });
-  
-  document.getElementById('reloadBtn')?.addEventListener('click', () => {
-    // First clear the lock so we can try to acquire it again
-    try {
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-    } catch (e) {}
-    
-    // Remove blocker and reload
-    blocker.remove();
-    isDisabled = false;
-    setTimeout(() => {
-      window.location.reload();
-    }, 300);
-  });
-}
-
-// Function to check and acquire lock - STRICTER VERSION
-function checkAndAcquireLock() {
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
-    const lockAge = now - lockTime;
-    
-    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
-    if (storedLock && storedLock !== tabId && lockAge < 10000) {
-      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
-      return false;
-    }
-    
-    // Clear any stale lock (older than 10 seconds)
-    if (lockAge >= 10000) {
-      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-    }
-    
-    // Acquire the lock
-    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    hasLock = true;
-    
-    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock acquisition error: " + e.message);
-    return false; // Be strict if localStorage fails
-  }
-}
-
-// Function to renew our lock and check for conflicts
-function renewAndCheckLock() {
-  if (!hasLock || isDisabled) return false;
-  
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
-    
-    // If we don't own the lock anymore, DISABLE IMMEDIATELY
-    if (storedLock !== tabId) {
-      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
-      disableAppImmediately();
-      return false;
-    }
-    
-    // If lock is stale (older than 30 seconds), someone else might have taken it
-    const lockAge = now - lockTime;
-    if (lockAge > 30000) {
-      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
-      // Try to reacquire
-      if (!checkAndAcquireLock()) {
-        disableAppImmediately();
-        return false;
-      }
-    }
-    
-    // Renew our lock
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock renewal error: " + e.message);
-    return false;
-  }
-}
-
-// Function to release our lock
-function releaseLock() {
-  if (hasLock) {
-    try {
-      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-      if (currentLock === tabId) {
-        localStorage.removeItem(PAGE_INSTANCE_KEY);
-        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-        logDiag(`Lock released by tab ${tabId}`);
-      }
-    } catch (e) {
-      // Ignore errors
-    }
-    hasLock = false;
-  }
-}
-
-// Initialize lock on page load - DO THIS EARLY
-(function initializeLock() {
-  // Try to acquire lock immediately
-  if (!checkAndAcquireLock()) {
-    logDiag("Failed to acquire lock on initialization");
-    setTimeout(disableAppImmediately, 100);
+  if (!phoneCheck.allowed) {
+    console.log("Phone number not found in allowlist");
+    logDiag("Phone number not registered. Please use email login.");
     return;
   }
   
-  // Start aggressive lock checking
-  lockCheckInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      if (!renewAndCheckLock()) {
-        clearInterval(lockCheckInterval);
-      }
-    }
-  }, 1000); // Check every second when visible
-  
-  // Also check when page becomes visible
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      // Page hidden - reduce checking frequency
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-        lockCheckInterval = setInterval(() => {
-          if (!renewAndCheckLock()) {
-            clearInterval(lockCheckInterval);
-          }
-        }, 3000); // Check every 3 seconds when hidden
-      }
-    } else {
-      // Page visible - check immediately and frequently
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-      }
-      if (!renewAndCheckLock()) {
-        return;
-      }
-      lockCheckInterval = setInterval(() => {
-        if (!renewAndCheckLock()) {
-          clearInterval(lockCheckInterval);
-        }
-      }, 1000);
-    }
-  });
-  
-  // Listen for storage events (other tabs changing localStorage)
-  window.addEventListener('storage', (event) => {
-    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
-      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
-      setTimeout(() => {
-        if (!renewAndCheckLock()) {
-          disableAppImmediately();
-        }
-      }, 100);
-    }
-  });
-  
-  // Beforeunload cleanup
-  window.addEventListener('beforeunload', () => {
-    if (lockCheckInterval) {
-      clearInterval(lockCheckInterval);
-      lockCheckInterval = null;
-    }
-    releaseLock();
-  });
-  
-  // Double-check after a short delay
-  setTimeout(() => {
-    if (!renewAndCheckLock()) {
-      disableAppImmediately();
-    }
-  }, 2000);
-})();
-
-// Also add a pre-check before any significant action
- /*
-const originalStartMedia = window.startMedia;
-if (originalStartMedia) {
-  window.startMedia = function(...args) {
-    if (!hasLock || isDisabled) {
-      logDiag("Blocked startMedia - no lock or disabled");
-      disableAppImmediately();
-      return Promise.reject(new Error("Another instance is running"));
-    }
-    return originalStartMedia.apply(this, args);
-  };
-}
- */
- /* ================== AUTH GATE ================== */
-function requireAuthOrPrompt(){
-  if (isAuthed) return true;
-  // Don't show login overlay here - let the auth state handler manage it
-  return false;
-}
-
-loginBtn.onclick = async () => {
-  hideErrorBox();
-  loginStatus.textContent = "Signing in…";
-  wasManualLogin = true;  // <-- Add this line
+  // Phone number is allowed - attempt authentication
   try {
-    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-    loginStatus.textContent = "Signed in. Checking allowlist…";
+    logDiag(`Phone login authorized for: ${phoneCheck.displayName}`);
+    
+    // Store phone number info globally
+    userPhone = phoneNumber;
+    isAndroidPhoneLogin = true;
+    
+    // For now, we'll set a flag and let the normal auth flow continue
+    // In the auth state listener, we'll handle this specially
+    
+  } catch (error) {
+    console.error("Phone auto-login error:", error);
+    logDiag("Auto-login failed: " + error.message);
+    isAndroidPhoneLogin = false;
+  }
+}
 
-    // Claim device owner immediately (forces other tabs with different UID to sign out)
-    const uid = auth.currentUser?.uid;
-    if(uid){
-      setDeviceOwner(uid);
-      broadcastNewOwner(uid);
+// Handle Android phone authentication
+async function handleAndroidPhoneAuthentication() {
+  try {
+    const phoneNumber = userPhone;
+    if (!phoneNumber) {
+      showLoginUI();
+      return;
     }
-
-  } catch (e) {
-    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
-    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
-    showError(e);
+    
+    logDiag("Verifying phone number...");
+    
+    // Check phone number again
+    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+    
+    if (!phoneCheck.allowed) {
+      logDiag("Phone number not registered");
+      showLoginUI();
+      return;
+    }
+    
+    // If we have an email associated with the phone, try to pre-fill it
+    if (phoneCheck.email) {
+      logDiag(`Attempting email login for Android user: ${phoneCheck.email}`);
+      emailInput.value = phoneCheck.email;
+      // Focus on password field for manual login
+      passInput.focus();
+    } else {
+      // No email associated - show standard login
+      showLoginUI();
+    }
+    
+  } catch (error) {
+    console.error("Android phone auth error:", error);
+    logDiag("Phone authentication failed: " + error.message);
+    showLoginUI();
   }
-};
+}
 
-logoutBtn.onclick = async () => {
-  try{
-    stopAll();                 // stop listeners/media/UI
-    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
-    await signOut(auth);
-  }catch(e){
-    showError(e);
-  }
-};
+// Show login UI with optional pre-filled email
+function showLoginUI() {
+  loginOverlay.style.display = "flex";
+  appRoot.classList.add("locked");
+}
 
 /* ================== PROCESS PENDING NOTIFICATIONS ================== */
 // Process pending notifications after authentication
@@ -3290,6 +2848,19 @@ function updatePersonBTitle(username = 'Other') {
   }
 }
 
+// Function to update user info display with phone/email badges
+function updateUserInfo() {
+  const userInfoDiv = document.getElementById('personATitle');
+  if (userInfoDiv && myDisplayName) {
+    let infoHtml = `Person A (${myDisplayName})`;
+    if (isAndroidPhoneLogin && userPhone) {
+      infoHtml += ` <span class="phone-badge">📱 ${userPhone}</span>`;
+    } else if (auth.currentUser?.email) {
+      infoHtml += ` <span class="email-badge">✉️ ${auth.currentUser.email}</span>`;
+    }
+    userInfoDiv.innerHTML = infoHtml;
+  }
+}
  
 async function saveMyName(){
   if(!requireAuthOrPrompt()) return;
@@ -3309,6 +2880,7 @@ async function saveMyName(){
   
   // Update Person A title with new username
   updatePersonATitle();
+  updateUserInfo();
 }
 
 function chunk(arr, n){
@@ -4003,9 +3575,603 @@ userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.v
 /* Calls list button */
 refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
 
+/* ================== UID allowlist ================== */
+async function enforceAllowlist(user){
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
+
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
+
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
+    }
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
+    }
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
+  }
+}
+
  
+/* ================== BACKGROUND SERVICE ================== */
+// Test if background service is running
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Service is not running or not reachable
+    return { isRunning: false, uid: null };
+  }
+}
+
+// Start background service
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
+    return;
+  }
+  
+  try {
+    bgStatus.textContent = 'Connecting to background service...';
+    
+    const response = await fetch('http://localhost:3000/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: myUid
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = '✅ Background service active';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
+    }
+  } catch (error) {
+    bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    // Show helpful message
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
+
+// Stop background service
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = 'Background service stopped';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
+    }
+  } catch (error) {
+    logDiag('Error stopping background service: ' + error.message);
+  }
+}
+
+// Update service status
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        bgStatus.textContent = '✅ Background service active';
+        startBgBtn.disabled = true;
+        stopBgBtn.disabled = false;
+      } else {
+        bgStatus.textContent = 'Background service ready';
+        stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      bgStatus.textContent = 'Background app not detected';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// Event listeners
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+// Download link
+// Download link - remove onclick handler since href is already set
+// Or update to use your GitHub URL
+downloadBgLink.onclick = (e) => {
+  // Optional: Add analytics or confirmation
+  console.log('Downloading background app...');
+  // Let the default link behavior happen (browser will download)
+};
+
+/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
+const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
+const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
+
+const hasBroadcastChannel = ("BroadcastChannel" in window);
+const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
+
+function nowMs(){ return Date.now(); }
+
+function setDeviceOwner(uid){
+  try{
+    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
+    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
+  }catch{}
+}
+
+function clearDeviceOwner(){
+  try{
+    localStorage.removeItem(DEVICE_OWNER_KEY);
+    localStorage.removeItem(DEVICE_OWNER_AT);
+  }catch{}
+}
+
+function getDeviceOwner(){
+  try{
+    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
+  }catch{
+    return null;
+  }
+}
+
+async function forceSignOutBecauseDifferentUser(newUid){
+  // If this tab is signed in as someone else, sign out immediately.
+  const currentUid = auth.currentUser?.uid || null;
+  if (currentUid && newUid && currentUid !== newUid){
+    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
+    try{
+      stopAll(); // stop listeners/media before auth changes
+    }catch{}
+    try{
+      await signOut(auth);
+    }catch(e){
+      // If signOut fails, still show why
+      showError(e);
+    }
+  }
+}
+
+function broadcastNewOwner(uid){
+  if(authBC){
+    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
+  }
+}
+
+// Listen for owner changes via BroadcastChannel
+if(authBC){
+  authBC.onmessage = (ev)=>{
+    const msg = ev?.data || {};
+    if(msg.type === "NEW_OWNER" && msg.uid){
+      forceSignOutBecauseDifferentUser(String(msg.uid));
+    }
+    if(msg.type === "OWNER_CLEARED"){
+      // nothing required
+    }
+  };
+}
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front
+      window.focus();
+      if (document.hidden) {
+        // Try to make browser bring tab to front (may not work due to browser restrictions)
+        console.log("Focus requested by duplicate tab");
+      }
+    }
+  };
+}
+/* ================== SINGLE PAGE INSTANCE LOCK ================== */
+const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
+const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
+const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
+
+// Generate unique tab ID
+const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+let hasLock = false;
+let lockCheckInterval = null;
+let isDisabled = false;
+
+// Function to IMMEDIATELY disable the app
+function disableAppImmediately() {
+  if (isDisabled) return;
+  isDisabled = true;
+  
+  logDiag("IMMEDIATE DISABLE: Another instance detected");
+  
+  // Stop all media and connections
+  stopAll();
+  
+  // Disable UI
+  if (appRoot) {
+    appRoot.classList.add('locked');
+    appRoot.style.pointerEvents = 'none';
+    appRoot.style.opacity = '0.5';
+  }
+  
+  // Hide login overlay if visible
+  if (loginOverlay) {
+    loginOverlay.style.display = 'none';
+  }
+  
+  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
+  // by closing this tab/window and focusing the original one
+  
+  // Try to close this tab/window
+  try {
+    // Try to find and focus the original tab by broadcasting a message
+    if (hasBroadcastChannel) {
+      const focusChannel = new BroadcastChannel("webrtc_focus_request");
+      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
+      setTimeout(() => {
+        focusChannel.close();
+      }, 1000);
+    }
+    
+    // Close this tab after a short delay
+    setTimeout(() => {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    }, 100);
+    
+  } catch (e) {
+    // If we can't close, show a minimal message and redirect to about:blank
+    console.log("Another instance is already running");
+    window.location.href = "about:blank";
+  }
+  
+  // Add button hover effects
+  const buttons = blocker.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff5252';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#5a6573';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.color = '#ddd';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff6b6b';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#4a5568';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'transparent';
+        btn.style.color = '#aaa';
+      }
+    });
+  });
+  
+  // Add button handlers
+  document.getElementById('goBackBtn')?.addEventListener('click', () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      // If no history, redirect to a blank page or previous page
+      window.location.href = 'about:blank';
+    }
+  });
+  
+  document.getElementById('closePageBtn')?.addEventListener('click', () => {
+    // Try multiple methods to close or navigate away
+    try {
+      // Method 1: Try to close (works for popup windows)
+      if (window.opener || window.history.length <= 1) {
+        window.close();
+      } else {
+        // Method 2: For regular tabs, navigate to blank page
+        window.location.href = 'about:blank';
+        // Method 3: Try to close after a delay
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+      }
+    } catch (e) {
+      // Method 4: If close fails, navigate to previous page or blank
+      if (window.history.length > 1) {
+        window.history.go(-1);
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    // First clear the lock so we can try to acquire it again
+    try {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    } catch (e) {}
+    
+    // Remove blocker and reload
+    blocker.remove();
+    isDisabled = false;
+    setTimeout(() => {
+      window.location.reload();
+    }, 300);
+  });
+}
+
+// Function to check and acquire lock - STRICTER VERSION
+function checkAndAcquireLock() {
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    const lockAge = now - lockTime;
+    
+    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
+    if (storedLock && storedLock !== tabId && lockAge < 10000) {
+      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
+      return false;
+    }
+    
+    // Clear any stale lock (older than 10 seconds)
+    if (lockAge >= 10000) {
+      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    }
+    
+    // Acquire the lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    hasLock = true;
+    
+    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock acquisition error: " + e.message);
+    return false; // Be strict if localStorage fails
+  }
+}
+
+// Function to renew our lock and check for conflicts
+function renewAndCheckLock() {
+  if (!hasLock || isDisabled) return false;
+  
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    
+    // If we don't own the lock anymore, DISABLE IMMEDIATELY
+    if (storedLock !== tabId) {
+      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
+      disableAppImmediately();
+      return false;
+    }
+    
+    // If lock is stale (older than 30 seconds), someone else might have taken it
+    const lockAge = now - lockTime;
+    if (lockAge > 30000) {
+      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
+      // Try to reacquire
+      if (!checkAndAcquireLock()) {
+        disableAppImmediately();
+        return false;
+      }
+    }
+    
+    // Renew our lock
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock renewal error: " + e.message);
+    return false;
+  }
+}
+
+// Function to release our lock
+function releaseLock() {
+  if (hasLock) {
+    try {
+      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+      if (currentLock === tabId) {
+        localStorage.removeItem(PAGE_INSTANCE_KEY);
+        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+        logDiag(`Lock released by tab ${tabId}`);
+      }
+    } catch (e) {
+      // Ignore errors if already updated above
+    }
+    hasLock = false;
+  }
+}
+
+// Initialize lock on page load - DO THIS EARLY
+(function initializeLock() {
+  // Try to acquire lock immediately
+  if (!checkAndAcquireLock()) {
+    logDiag("Failed to acquire lock on initialization");
+    setTimeout(disableAppImmediately, 100);
+    return;
+  }
+  
+  // Start aggressive lock checking
+  lockCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      if (!renewAndCheckLock()) {
+        clearInterval(lockCheckInterval);
+      }
+    }
+  }, 1000); // Check every second when visible
+  
+  // Also check when page becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Page hidden - reduce checking frequency
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+        lockCheckInterval = setInterval(() => {
+          if (!renewAndCheckLock()) {
+            clearInterval(lockCheckInterval);
+          }
+        }, 3000); // Check every 3 seconds when hidden
+      }
+    } else {
+      // Page visible - check immediately and frequently
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+      }
+      if (!renewAndCheckLock()) {
+        return;
+      }
+      lockCheckInterval = setInterval(() => {
+        if (!renewAndCheckLock()) {
+          clearInterval(lockCheckInterval);
+        }
+      }, 1000);
+    }
+  });
+  
+  // Listen for storage events (other tabs changing localStorage)
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
+      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
+      setTimeout(() => {
+        if (!renewAndCheckLock()) {
+          disableAppImmediately();
+        }
+      }, 100);
+    }
+  });
+  
+  // Beforeunload cleanup
+  window.addEventListener('beforeunload', () => {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+    }
+    releaseLock();
+  });
+  
+  // Double-check after a short delay
+  setTimeout(() => {
+    if (!renewAndCheckLock()) {
+      disableAppImmediately();
+    }
+  }, 2000);
+})();
+
+// Also add a pre-check before any significant action
+ /*
+const originalStartMedia = window.startMedia;
+if (originalStartMedia) {
+  window.startMedia = function(...args) {
+    if (!hasLock || isDisabled) {
+      logDiag("Blocked startMedia - no lock or disabled");
+      disableAppImmediately();
+      return Promise.reject(new Error("Another instance is running"));
+    }
+    return originalStartMedia.apply(this, args);
+  };
+}
+ */
+ /* ================== AUTH GATE ================== */
+function requireAuthOrPrompt(){
+  if (isAuthed) return true;
+  // Don't show login overlay here - let the auth state handler manage it
+  return false;
+}
+
+loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Signing in…";
+  wasManualLogin = true;  // <-- Add this line
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    loginStatus.textContent = "Signed in. Checking allowlist…";
+
+    // Claim device owner immediately (forces other tabs with different UID to sign out)
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+
+  } catch (e) {
+    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
+  }
+};
+
+logoutBtn.onclick = async () => {
+  try{
+    stopAll();                 // stop listeners/media/UI
+    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
+    await signOut(auth);
+  }catch(e){
+    showError(e);
+  }
+};
+
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
+  // First, attempt Android phone auto-login before processing auth state
+  if (!isAutoLoginAttempted) {
+    await attemptPhoneNumberAutoLogin();
+  }
+  
   isAuthed = !!user;
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
@@ -4078,6 +4244,9 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
     // Process any pending notifications after auth
     await processPendingNotifications();
+    
+    // Update user info with phone/email badge
+    updateUserInfo();
 
     if (pendingIncomingCallWhileLoggedOut?.id) {
       const callId = pendingIncomingCallWhileLoggedOut.id;
@@ -4094,6 +4263,12 @@ onAuthStateChanged(auth, async (user)=>{
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
+    // If we have Android phone login but no Firebase user, handle it
+    if (isAndroidPhoneLogin && !user) {
+      await handleAndroidPhoneAuthentication();
+      return;
+    }
+    
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
@@ -4127,6 +4302,8 @@ onAuthStateChanged(auth, async (user)=>{
     allUsersCache = [];
     myDisplayName = "";
     currentCalleeUid = null;
+    userPhone = '';
+    isAndroidPhoneLogin = false;
   }
 });
 
