@@ -1651,184 +1651,171 @@ updateVideoQualityUi();
 // ===== NEW: Enhanced video quality change handler =====
 // ===== FIXED: Video quality change handler =====
 videoQualitySelect?.addEventListener("change", async () => {
-  const v = String(videoQualitySelect.value || "medium");
+  const newQuality = String(videoQualitySelect.value || "medium");
+  
+  // Don't do anything if quality didn't change
+  if (newQuality === selectedVideoQuality) return;
+  
+  // Save old quality in case we need to revert
   const oldQuality = selectedVideoQuality;
   
-  // Don't do anything if selection didn't change
-  if (v === selectedVideoQuality) return;
-  
-  // Update UI immediately to show user's choice
-  selectedVideoQuality = v;
+  // Update UI immediately
+  selectedVideoQuality = newQuality;
   saveVideoQuality(selectedVideoQuality);
   updateVideoQualityUi();
   
+  // Show loading state
+  const originalStatus = videoQualityStatus.textContent;
+  videoQualityStatus.textContent = "Changing...";
+  
   try {
-    if (isInCall || localStream) {
-      logDiag(`Changing video quality: ${oldQuality} → ${selectedVideoQuality}`);
-      
-      // Show loading state
-      const originalText = videoQualityStatus.textContent;
-      videoQualityStatus.textContent = "Changing quality...";
-      
-      // Apply the quality change
-      await applyVideoQualityToCurrentStream(selectedVideoQuality);
-      
-      // Show success message
-      const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+    // Apply the quality change
+    await applyVideoQualityToCurrentStream(selectedVideoQuality);
+    
+    // Update status with new quality
+    const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
+    if (selectedVideoQuality === 'no-video') {
+      videoQualityStatus.textContent = "Audio only";
+    } else {
       videoQualityStatus.textContent = `Video: ${label}`;
-      
-      // Set a timeout to revert UI if change fails
-      setTimeout(() => {
-        // Verify the actual track state matches the UI
-        const videoTrack = localStream?.getVideoTracks?.()[0];
-        if (selectedVideoQuality === 'no-video' && videoTrack) {
-          // UI says no-video but we still have a video track - fix it
-          logDiag("UI mismatch: no-video selected but video track exists");
-          selectedVideoQuality = oldQuality;
-          updateVideoQualityUi();
-        } else if (selectedVideoQuality !== 'no-video' && !videoTrack) {
-          // UI says video but no video track exists - fix it
-          logDiag("UI mismatch: video selected but no video track");
-          selectedVideoQuality = 'no-video';
-          updateVideoQualityUi();
-        }
-      }, 3000);
     }
-  } catch (e) {
-    logDiag("applyVideoQuality error: " + (e?.message || e));
-    showError(e);
+    
+    logDiag(`Quality changed to: ${selectedVideoQuality}`);
+    
+  } catch (error) {
+    logDiag("Failed to change quality: " + error.message);
     
     // Revert UI on error
     selectedVideoQuality = oldQuality;
     updateVideoQualityUi();
     
-    // Show error in status
-    videoQualityStatus.textContent = "Failed to change quality";
+    videoQualityStatus.textContent = "Failed to change";
     setTimeout(() => {
       const label = VIDEO_PROFILES[selectedVideoQuality]?.label || "Medium (720p)";
-      videoQualityStatus.textContent = `Video: ${label}`;
+      if (selectedVideoQuality === 'no-video') {
+        videoQualityStatus.textContent = "Audio only";
+      } else {
+        videoQualityStatus.textContent = `Video: ${label}`;
+      }
     }, 2000);
   }
 });
 
 
 /* ===== COMPLETELY REVISED: applyVideoQualityToCurrentStream ===== */
+/* ===== SIMPLIFIED: applyVideoQualityToCurrentStream ===== */
 async function applyVideoQualityToCurrentStream(quality) {
   const profile = VIDEO_PROFILES[quality] || VIDEO_PROFILES.medium;
   
-  // Helper function to safely get tracks
-  function getVideoTrack() {
-    return localStream?.getVideoTracks?.()[0];
-  }
+  // Get current tracks
+  const currentVideoTrack = localStream?.getVideoTracks?.()[0];
+  const currentAudioTrack = localStream?.getAudioTracks?.()[0];
   
-  function getAudioTrack() {
-    return localStream?.getAudioTracks?.()[0];
-  }
+  logDiag(`Applying quality: ${quality}, Has video track: ${!!currentVideoTrack}`);
   
   // CASE 1: Switching TO audio-only (no video)
   if (quality === 'no-video') {
-    const videoTrack = getVideoTrack();
-    
-    if (videoTrack) {
-      logDiag("Switching to audio-only mode");
+    if (currentVideoTrack) {
+      logDiag("Stopping video track for audio-only mode");
       
-      // Stop and remove video track from local stream
-      videoTrack.stop();
-      localStream.removeTrack(videoTrack);
+      // Stop the video track
+      currentVideoTrack.stop();
+      localStream.removeTrack(currentVideoTrack);
       
       // Update peer connection if in call
       if (pc && isInCall) {
         const senders = pc.getSenders();
         const videoSender = senders.find(s => s.track?.kind === 'video');
         if (videoSender) {
-          logDiag("Removing video track from peer connection");
+          logDiag("Removing video from peer connection");
           await videoSender.replaceTrack(null);
         }
       }
       
       // Hide local video element
-      localVideo.style.display = 'none';
+      localVideo.classList.remove('video-visible');
+      localVideo.classList.add('video-hidden');
+      localVideo.srcObject = null; // Clear srcObject
+      
       logDiag("Successfully switched to audio-only");
-    } else {
-      logDiag("Already in audio-only mode");
     }
     return;
   }
   
-  // CASE 2: Switching FROM audio-only TO video
-  const videoTrack = getVideoTrack();
-  
-  if (!videoTrack) {
-    logDiag("Adding video track (was audio-only)");
+  // CASE 2: Switching FROM audio-only TO video (or changing video quality)
+  if (!currentVideoTrack) {
+    // Need to get a new video track
+    logDiag("Getting new video track");
     
     try {
-      // Get new video track with desired constraints
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      const constraints = {
         video: profile.constraints,
-        audio: false // Keep existing audio track
-      });
+        audio: false // We'll keep the existing audio track
+      };
       
-      const newVideoTrack = newStream.getVideoTracks()[0];
+      const newVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
       
-      // Add to local stream
+      // Add the new video track to our stream
       localStream.addTrack(newVideoTrack);
       localVideo.srcObject = localStream;
-      localVideo.style.display = 'block';
       
-      // Update peer connection if in call
+      // Show video
+      localVideo.classList.remove('video-hidden');
+      localVideo.classList.add('video-visible');
+      
+      // Update peer connection
       if (pc && isInCall) {
         const senders = pc.getSenders();
         const videoSender = senders.find(s => s.track?.kind === 'video');
         
         if (videoSender) {
-          // Replace null track with new video track
-          logDiag("Replacing null video track in peer connection");
+          // Replace null with new track
           await videoSender.replaceTrack(newVideoTrack);
         } else {
-          // Add new video sender
-          logDiag("Adding new video sender to peer connection");
+          // Add new sender
           pc.addTrack(newVideoTrack, localStream);
         }
       }
       
-      logDiag("Successfully added video track");
-    } catch (e) {
-      logDiag("Failed to get video track: " + e.message);
-      throw new Error("Could not access camera: " + e.message);
+      logDiag("Added new video track successfully");
+      
+    } catch (error) {
+      logDiag("Failed to get video: " + error.message);
+      throw error;
     }
-  } 
-  // CASE 3: Changing quality of existing video track
-  else if (videoTrack && profile.constraints) {
-    logDiag("Changing video track constraints");
+  } else {
+    // We already have a video track, just change its constraints
+    logDiag("Changing constraints on existing video track");
     
     try {
-      // Apply new constraints to existing track
-      await videoTrack.applyConstraints(profile.constraints);
+      await currentVideoTrack.applyConstraints(profile.constraints);
+      logDiag("Constraints applied successfully");
       
-      const s = videoTrack.getSettings ? videoTrack.getSettings() : {};
-      logDiag("Video track updated: " + JSON.stringify({
-        width: s.width, height: s.height, frameRate: s.frameRate
-      }));
+      // Make sure video is visible
+      localVideo.classList.remove('video-hidden');
+      localVideo.classList.add('video-visible');
       
-      // Show video if it was hidden
-      localVideo.style.display = 'block';
-    } catch (e) {
-      logDiag("Failed to apply constraints: " + e.message);
+    } catch (error) {
+      logDiag("Failed to apply constraints: " + error.message);
       
-      // If constraints fail, try recreating the track
-      logDiag("Attempting to recreate video track with new constraints");
+      // If constraints fail, recreate the track
+      logDiag("Recreating video track");
       
       // Stop old track
-      videoTrack.stop();
-      localStream.removeTrack(videoTrack);
+      currentVideoTrack.stop();
+      localStream.removeTrack(currentVideoTrack);
       
-      // Get new track with constraints
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      // Get new track
+      const constraints = {
         video: profile.constraints,
         audio: false
-      });
+      };
       
-      const newVideoTrack = newStream.getVideoTracks()[0];
+      const newVideoStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
+      
+      // Add new track
       localStream.addTrack(newVideoTrack);
       localVideo.srcObject = localStream;
       
@@ -1844,55 +1831,6 @@ async function applyVideoQualityToCurrentStream(quality) {
   }
 }
 
- /* ===== NEW: Function to sync UI with actual media state ===== */
-function syncVideoQualityUI() {
-  if (!localStream) return;
-  
-  const videoTrack = localStream.getVideoTracks()[0];
-  const audioTrack = localStream.getAudioTracks()[0];
-  
-  // Determine current quality from actual track
-  if (!videoTrack) {
-    // Audio-only mode
-    if (selectedVideoQuality !== 'no-video') {
-      selectedVideoQuality = 'no-video';
-      updateVideoQualityUi();
-      logDiag("UI synced: No video track found, set to audio-only");
-    }
-  } else {
-    // We have video - try to determine quality from constraints
-    const settings = videoTrack.getSettings ? videoTrack.getSettings() : {};
-    const height = settings.height || 0;
-    
-    let detectedQuality = 'medium'; // Default
-    
-    if (height <= 240) detectedQuality = 'ultra-low';
-    else if (height <= 360) detectedQuality = 'low';
-    else if (height <= 720) detectedQuality = 'medium';
-    else if (height >= 1080) detectedQuality = 'high';
-    
-    if (selectedVideoQuality !== detectedQuality) {
-      selectedVideoQuality = detectedQuality;
-      updateVideoQualityUi();
-      logDiag(`UI synced: Video track height ${height}p -> ${detectedQuality}`);
-    }
-  }
-}
-
-// Call this periodically during calls
-let uiSyncInterval = null;
-
-function startUISync() {
-  if (uiSyncInterval) clearInterval(uiSyncInterval);
-  uiSyncInterval = setInterval(syncVideoQualityUI, 2000);
-}
-
-function stopUISync() {
-  if (uiSyncInterval) {
-    clearInterval(uiSyncInterval);
-    uiSyncInterval = null;
-  }
-}
 
 /* for call sessions, pin the room id so restarts never jump rooms */
 let pinnedRoomId = null;
@@ -2067,13 +2005,8 @@ function startBandwidthMonitoring() {
   bandwidthCheckInterval = setInterval(async () => {
     if (isInCall && pc && pc.connectionState === 'connected') {
       const bandwidth = await detectBandwidth();
-      updateBandwidthDisplay(bandwidth);
-      
-      // Optional: Auto-adjust quality based on bandwidth
-      if (bandwidth && isInCall) {
-        await autoAdjustQuality(bandwidth);
-      }
-    } else {
+      updateBandwidthDisplay(bandwidth);      
+     } else {
       updateBandwidthDisplay(null);
       stopBandwidthMonitoring();
     }
@@ -2269,7 +2202,7 @@ function stopAll(){
   stopIncomingUI();
   stopRingback();
   stopBandwidthMonitoring();
- stopUISync(); // Add this line
+ 
 
   if(localStream){
     localStream.getTracks().forEach(t=>t.stop());
@@ -3088,7 +3021,6 @@ async function hangup(){
     renderUsersList(userSearchInput.value);
   }
   try { await loadRecentCalls(); } catch {} // Refresh calls list
- stopUISync();
 }
 
 /* Answer / Decline buttons for incoming */
@@ -3145,7 +3077,6 @@ answerBtn.onclick = async ()=>{
   }catch(e){
     showError(e);
   }
-startUISync();
 };
 
 declineBtn.onclick = async ()=>{
@@ -3237,7 +3168,6 @@ declineBtn.onclick = async ()=>{
   } catch(e) {
     showError(e);
   }
- startUISync();
 };
 
 /* ================== USER DIRECTORY (C-lite) ================== */
@@ -3681,7 +3611,6 @@ async function sendIncomingCallNotification(message) {
     console.error("Error sending incoming call notification:", error);
   }
 }
-startUISync(); 
 }
 
 /* ================== PUSH (optional) ================== */
