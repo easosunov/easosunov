@@ -2549,11 +2549,11 @@ if(d.status === "ended"){
 }
 
     // Optional: keep your existing status feedback
-    if(d.status === "accepted"){
-      stopRingback();
-      setStatus(dirCallStatus, "Answered. Connecting…");
-      return;
-    }
+if(d.status === "accepted"){
+  stopRingback();
+  setStatus(dirCallStatus, "Answered. Connected.");
+  return;
+}
     if(d.status === "declined"){
       stopRingback();
       setStatus(dirCallStatus, "Declined.");
