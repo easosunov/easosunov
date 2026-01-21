@@ -795,6 +795,10 @@ const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
 
+
+
+
+ 
 /* ================== PHONE DIAL EVENT LISTENERS ================== */
 // Initialize phone dial functionality
 function initializePhoneDial() {
@@ -810,16 +814,20 @@ function initializePhoneDial() {
     phoneDisplay.textContent = dialedNumber;
   }
   
-  // Dial button clicks
-  if (dialButtons) {
-    dialButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const number = btn.getAttribute('data-number');
+  // Dial button clicks - FIXED: Use event delegation
+  if (dialPad) {
+    dialPad.addEventListener('click', (e) => {
+      const target = e.target;
+      // Check if clicked element or its parent has data-number attribute
+      const numberBtn = target.closest('.dial-btn');
+      if (numberBtn) {
+        const number = numberBtn.getAttribute('data-number');
         if (number) {
           dialedNumber += number;
           updatePhoneDisplay();
+          console.log('Dialed:', dialedNumber);
         }
-      });
+      }
     });
   }
   
@@ -840,7 +848,65 @@ function initializePhoneDial() {
       updatePhoneDisplay();
     });
   }
+  
+  // Show email login button
+  if (showEmailLoginBtn) {
+    showEmailLoginBtn.addEventListener('click', () => {
+      if (!document.querySelector('#loginCard')) return;
+      
+      document.querySelector('#loginCard').innerHTML = `
+        <button id="logoutBtn" style="display:none;">Logout</button>
+        <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
+        <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">For administrators and email users</div>
+        
+        <div style="margin:20px 0;">
+          <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
+          <input id="emailInput" type="email" placeholder="your.email@example.com" autocomplete="username" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+        </div>
+        
+        <div style="margin:20px 0;">
+          <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+          <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+        </div>
+        
+        <button id="loginBtn" style="font-size:24px;padding:18px;background:#1976d2;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+          Sign In with Email
+        </button>
+        
+        <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+          Enter your email and password
+        </div>
+        
+        <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+          <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+            ← Back to Phone Dial
+          </button>
+        </div>
+      `;
+      
+      setTimeout(() => {
+        const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
+        const loginBtn = document.getElementById('loginBtn');
+        const emailInput = document.getElementById('emailInput');
+        
+        if (showPhoneLoginBtn) {
+          showPhoneLoginBtn.addEventListener('click', () => {
+            location.reload();
+          });
+        }
+        
+        if (loginBtn) {
+          loginBtn.addEventListener('click', handleEmailLogin);
+        }
+        
+        if (emailInput) {
+          emailInput.focus();
+        }
+      }, 100);
+    });
+  }
 }
+
 
 // Call this function when the page loads
 document.addEventListener('DOMContentLoaded', () => {
