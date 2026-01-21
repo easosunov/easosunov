@@ -106,6 +106,42 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   margin-top: 12px !important;
   min-height: 24px;
 }
+
+/* PHONE DIAL INTERFACE STYLES */
+#dialPad {
+  margin: 20px 0;
+}
+
+.dial-btn {
+  font-size: 24px !important;
+  padding: 20px 10px !important;
+  background: #fff !important;
+  border: 2px solid #1976d2 !important;
+  color: #1976d2 !important;
+  border-radius: 12px !important;
+  min-height: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dial-btn:hover {
+  background: #1976d2 !important;
+  color: white !important;
+}
+
+.dial-btn:active {
+  transform: scale(0.95);
+}
+
+#phoneDisplay {
+  font-family: monospace;
+  font-weight: bold;
+  user-select: none;
+} 
  
 #loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
@@ -351,23 +387,65 @@ video#localVideo.video-visible {
 </div>
 
 <!-- LOGIN -->
+<!-- LOGIN - PHONE DIAL INTERFACE -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
-    <div class="small">Only approved users can access this communicator.</div>
-
-    <label class="small">Email</label>
-    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
-
-    <label class="small">Password</label>
-    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
-
-    <div id="loginRow">
-      <button id="loginBtn">Login</button>
+    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Your Phone Number</h2>
+    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">Dial your registered phone number to sign in</div>
+    
+    <!-- Phone number display -->
+    <div id="phoneDisplay" style="font-size:32px;text-align:center;margin:20px 0;padding:15px;background:#f5f5f5;border-radius:12px;border:2px solid #ddd;min-height:60px;letter-spacing:2px;">
+      +1
     </div>
-    <div id="loginStatus" class="status">Please sign in.</div>
-    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
+    
+    <!-- Dial pad -->
+    <div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
+      <button class="dial-btn" data-number="1">1</button>
+      <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
+      <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
+      <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
+      <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
+      <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
+      <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
+      <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
+      <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
+      <button class="dial-btn" data-number="*">*</button>
+      <button class="dial-btn" data-number="0">0<div style="font-size:12px;color:#666;">+</div></button>
+      <button class="dial-btn" data-number="#">#</button>
+    </div>
+    
+    <!-- Control buttons -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0;">
+      <button id="backspaceBtn" style="font-size:18px;padding:15px;background:#ffebee;border-color:#f44336;color:#c62828;">
+        ⌫ Backspace
+      </button>
+      <button id="clearBtn" style="font-size:18px;padding:15px;background:#fff8e1;border-color:#ffc107;color:#ff8f00;">
+        ✕ Clear
+      </button>
+    </div>
+    
+    <!-- Login button -->
+    <button id="loginBtn" style="font-size:22px;padding:18px;background:#e8f5e9;border-color:#4caf50;color:#2e7d32;width:100%;margin:10px 0;">
+      📞 Dial to Sign In
+    </button>
+    
+    <!-- Status display -->
+    <div id="loginStatus" class="status" style="font-size:18px;text-align:center;margin:15px 0;min-height:30px;">
+      Please dial your phone number
+    </div>
+    
+    <!-- Info text -->
+    <div class="small" style="font-size:16px;text-align:center;color:#666;margin-top:20px;">
+      Your phone number must be registered with the administrator
+    </div>
+    
+    <!-- Traditional login fallback -->
+    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:15px;">
+      <button id="showEmailLoginBtn" style="font-size:16px;padding:12px;background:#f5f5f5;border-color:#ddd;color:#666;width:100%;">
+        Use Email Login Instead
+      </button>
+    </div>
   </div>
 </div>
 
@@ -702,6 +780,15 @@ const loginStatus = document.getElementById("loginStatus");
 const emailInput = document.getElementById("emailInput");
 const passInput = document.getElementById("passInput");
 const appRoot = document.getElementById("app");
+ 
+ /* ================== PHONE DIAL ELEMENTS ================== */
+const phoneDisplay = document.getElementById("phoneDisplay");
+const dialButtons = document.querySelectorAll(".dial-btn");
+const backspaceBtn = document.getElementById("backspaceBtn");
+const clearBtn = document.getElementById("clearBtn");
+const showEmailLoginBtn = document.getElementById("showEmailLoginBtn");
+
+let dialedNumber = "+1"; // Start with country code
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
@@ -972,7 +1059,7 @@ import { getMessaging, getToken, onMessage, deleteToken }
 
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
-  setPersistence, inMemoryPersistence
+  setPersistence, inMemoryPersistence, signInWithCustomToken
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp({
@@ -1004,7 +1091,7 @@ async function isPhoneNumberAllowed(phoneNumber) {
   try {
     if (!phoneNumber) return { allowed: false };
     
-    // Check users collection for phone number match
+    // First check users collection for phone number match
     const usersSnapshot = await getDocs(query(
       collection(db, 'users'),
       where('phone', '==', phoneNumber),
@@ -1013,11 +1100,17 @@ async function isPhoneNumberAllowed(phoneNumber) {
     
     if (!usersSnapshot.empty) {
       const userData = usersSnapshot.docs[0].data();
+      const uid = usersSnapshot.docs[0].id;
+      
+      // Also check if this UID is in the allowlist
+      const allowlistSnapshot = await getDoc(doc(db, 'allowlistUids', uid));
+      const isAllowed = allowlistSnapshot.exists() && allowlistSnapshot.data()?.enabled === true;
+      
       return {
-        allowed: true,
+        allowed: isAllowed,
         email: userData.email || '',
         displayName: userData.displayName || phoneNumber,
-        uid: usersSnapshot.docs[0].id
+        uid: uid
       };
     }
     
@@ -1070,6 +1163,113 @@ async function attemptPhoneNumberAutoLogin() {
   }
 }
 
+// Direct phone number authentication (for dial interface)
+async function authenticateWithPhoneNumber(phoneNumber) {
+  try {
+    logDiag(`Attempting direct phone auth for: ${phoneNumber}`);
+    
+    // Check if phone number is allowed
+    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+    
+    if (!phoneCheck.allowed) {
+      return { 
+        success: false, 
+        message: "Phone number not registered",
+        requiresEmail: false 
+      };
+    }
+    
+    // If we have an email, we need password for Firebase Auth
+    // For now, we'll use a custom token approach or direct Firestore verification
+    // This is a simplified approach - in production, you'd use Firebase Custom Auth
+    
+    // For this demo, we'll simulate authentication by setting global state
+    // and letting the user in (if they have email/password, we'll ask for it)
+    
+    if (phoneCheck.email) {
+      return {
+        success: true,
+        message: "Phone verified",
+        requiresEmail: true,
+        email: phoneCheck.email,
+        uid: phoneCheck.uid,
+        displayName: phoneCheck.displayName
+      };
+    } else {
+      // No email associated - can't use Firebase Auth directly
+      return {
+        success: false,
+        message: "No email associated with this phone number",
+        requiresEmail: false
+      };
+    }
+    
+  } catch (error) {
+    logDiag("Phone authentication error: " + error.message);
+    return {
+      success: false,
+      message: "Authentication error: " + error.message,
+      requiresEmail: false
+    };
+  }
+}
+
+ // Passwordless phone authentication using custom tokens
+async function signInWithPhoneCustomToken(phoneNumber) {
+  try {
+    logDiag(`Attempting custom token auth for: ${phoneNumber}`);
+    
+    // First verify the phone number is allowed
+    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+    
+    if (!phoneCheck.allowed) {
+      return { 
+        success: false, 
+        message: "Phone number not registered"
+      };
+    }
+    
+    // Call the Cloud Function to generate a custom token
+    const response = await fetch('https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        phoneNumber: phoneNumber,
+        uid: phoneCheck.uid
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error('Custom token generation failed');
+    }
+    
+    const data = await response.json();
+    
+    if (data.customToken) {
+      // Sign in with the custom token
+      const userCredential = await signInWithCustomToken(auth, data.customToken);
+      logDiag(`Custom token auth successful for UID: ${userCredential.user.uid}`);
+      
+      return {
+        success: true,
+        message: "Signed in successfully",
+        user: userCredential.user
+      };
+    } else {
+      throw new Error('No custom token received');
+    }
+    
+  } catch (error) {
+    logDiag("Custom token auth error: " + error.message);
+    return {
+      success: false,
+      message: "Authentication failed: " + error.message
+    };
+  }
+}
+ 
 // Handle Android phone authentication
 async function handleAndroidPhoneAuthentication() {
   try {
@@ -3609,6 +3809,53 @@ myNameInput.addEventListener("input", ()=>{
 });
 userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
+ /* ===== NEW: Phone dial restore handler ===== */
+// This will be called from the dynamically created button
+window.restorePhoneDial = function() {
+  location.reload();
+};
+
+// Update the showEmailLoginBtn handler if it exists
+if (showEmailLoginBtn) {
+  showEmailLoginBtn.addEventListener('click', () => {
+    document.querySelector('#loginCard').innerHTML = `
+      <button id="logoutBtn" style="display:none;">Logout</button>
+      <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
+      <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">For administrators and email users</div>
+      
+      <div style="margin:20px 0;">
+        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
+        <input id="emailInput" type="email" placeholder="your.email@example.com" autocomplete="username" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+      </div>
+      
+      <div style="margin:20px 0;">
+        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+        <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+      </div>
+      
+      <button id="loginBtn" style="font-size:24px;padding:18px;background:#1976d2;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+        Sign In with Email
+      </button>
+      
+      <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+        Enter your email and password
+      </div>
+      
+      <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+        <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+          ← Back to Phone Dial
+        </button>
+      </div>
+    `;
+    
+    setTimeout(() => {
+      document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
+        location.reload();
+      });
+      document.getElementById('emailInput').focus();
+    }, 100);
+  });
+}
 
 /* Calls list button */
 refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
@@ -4171,25 +4418,207 @@ function requireAuthOrPrompt(){
   return false;
 }
 
-loginBtn.onclick = async () => {
+
+ loginBtn.onclick = async () => {
   hideErrorBox();
-  loginStatus.textContent = "Signing in…";
-  wasManualLogin = true;  // <-- Add this line
-  try {
-    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-    loginStatus.textContent = "Signed in. Checking allowlist…";
-
-    // Claim device owner immediately (forces other tabs with different UID to sign out)
-    const uid = auth.currentUser?.uid;
-    if(uid){
-      setDeviceOwner(uid);
-      broadcastNewOwner(uid);
+  
+  // Check if we're in phone dial mode or email mode
+  const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
+  
+  if (isPhoneDialMode) {
+    // PHONE DIAL LOGIN
+    loginStatus.textContent = "Checking phone number…";
+    wasManualLogin = true;
+    
+    try {
+      // Get the dialed number (remove +1 prefix if it's just +1)
+      const phoneNumber = dialedNumber;
+      
+      // Use the new direct phone authentication
+      loginStatus.textContent = "Verifying phone number…";
+      
+      // First check if phone number is allowed
+      const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+      
+      if (!phoneCheck.allowed) {
+        loginStatus.textContent = "Phone number not registered";
+        logDiag(`Phone auth failed: ${phoneNumber} not in allowlist`);
+        return;
+      }
+      
+      // Try custom token authentication first
+      loginStatus.textContent = "Signing in with phone…";
+      
+      try {
+        const authResult = await signInWithPhoneCustomToken(phoneNumber);
+        
+        if (authResult.success) {
+          // Success! Custom token authentication worked
+          loginStatus.textContent = "Signed in successfully!";
+          logDiag(`Phone authentication successful for: ${phoneNumber}`);
+          
+          // Claim device owner
+          const uid = auth.currentUser?.uid;
+          if (uid) {
+            setDeviceOwner(uid);
+            broadcastNewOwner(uid);
+          }
+          
+          return; // Authentication complete
+        }
+        
+        // If custom token auth failed, fall back to email/password
+        loginStatus.textContent = "Phone verified. Enter password…";
+        
+        if (phoneCheck.email) {
+          // Show email/password form with pre-filled email
+          document.querySelector('#loginCard').innerHTML = `
+            <button id="logoutBtn" style="display:none;">Logout</button>
+            <h2 style="margin:0 0 20px;font-size:28px;">Enter Password</h2>
+            <div class="small" style="font-size:18px;margin-bottom:20px;">
+              Phone: <strong>${phoneNumber}</strong><br>
+              Email: <strong>${phoneCheck.email}</strong>
+            </div>
+            
+            <div style="margin:20px 0;">
+              <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
+              <input id="emailInput" type="email" value="${phoneCheck.email}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
+            </div>
+            
+            <div style="margin:20px 0;">
+              <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+              <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+            </div>
+            
+            <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+              Sign In
+            </button>
+            
+            <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+              Enter password for ${phoneCheck.email}
+            </div>
+            
+            <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+              <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+                ← Use Different Phone Number
+              </button>
+            </div>
+          `;
+          
+          // Re-attach event listeners
+          setTimeout(() => {
+            document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
+              location.reload();
+            });
+            document.getElementById('passInput').focus();
+          }, 100);
+          
+        } else {
+          loginStatus.textContent = "No email associated with this phone number";
+        }
+        
+      } catch (error) {
+        loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
+        logDiag("Phone login error: " + (error?.message || error));
+        showError(error);
+      }
+          
+          <div style="margin:20px 0;">
+            <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
+            <input id="emailInput" type="email" value="${authResult.email}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
+          </div>
+          
+          <div style="margin:20px 0;">
+            <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+            <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+          </div>
+          
+          <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+            Sign In
+          </button>
+          
+          <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+            Enter password for ${authResult.email}
+          </div>
+          
+          <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+            <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+              ← Use Different Phone Number
+            </button>
+          </div>
+        `;
+        
+        // Re-attach event listeners
+        setTimeout(() => {
+          document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
+            location.reload();
+          });
+          document.getElementById('passInput').focus();
+        }, 100);
+        
+      } else {
+        // Should not happen with current implementation
+        loginStatus.textContent = "Authentication method not available";
+      }
+        
+        // Switch to email login mode with pre-filled email
+        document.querySelector('#loginCard').innerHTML = `
+          <button id="logoutBtn" style="display:none;">Logout</button>
+          <h2 style="margin:0 0 20px;font-size:28px;">Sign in required</h2>
+          <div class="small" style="font-size:18px;margin-bottom:20px;">Phone verified: ${phoneNumber}</div>
+          <label style="font-size:18px;display:block;margin-bottom:8px;">Email</label>
+          <input id="emailInput" type="email" value="${phoneCheck.email}" readonly style="font-size:18px;padding:14px;margin-bottom:20px;width:100%;background:#f5f5f5;"/>
+          <label style="font-size:18px;display:block;margin-bottom:8px;">Password</label>
+          <input id="passInput" type="password" placeholder="Enter password" autocomplete="current-password" style="font-size:18px;padding:14px;margin-bottom:20px;width:100%;"/>
+          <div style="margin-top:20px;">
+            <button id="loginBtn" style="font-size:18px;padding:14px 24px;width:100%;">Login</button>
+          </div>
+          <div id="loginStatus" style="font-size:16px;margin-top:15px;text-align:center;"></div>
+          <div style="margin-top:20px;border-top:1px solid #eee;padding-top:15px;">
+            <button id="showPhoneLoginBtn" style="font-size:16px;padding:12px;background:#f5f5f5;border-color:#ddd;color:#666;width:100%;">
+              Use Different Phone Number
+            </button>
+          </div>
+        `;
+        
+        // Re-attach event listeners
+        document.getElementById('showPhoneLoginBtn').onclick = () => {
+          location.reload(); // Reload to show phone dial again
+        };
+        
+        document.getElementById('passInput').focus();
+        
+      } else {
+        loginStatus.textContent = "No email associated with this phone number";
+      }
+      
+    } catch (e) {
+      loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
+      logDiag("Phone login error: " + (e?.message || e));
+      showError(e);
     }
+    
+  } else {
+    // EMAIL/PASSWORD LOGIN (fallback mode)
+    loginStatus.textContent = "Signing in…";
+    wasManualLogin = true;
+    
+    try {
+      await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+      loginStatus.textContent = "Signed in. Checking allowlist…";
 
-  } catch (e) {
-    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
-    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
-    showError(e);
+      // Claim device owner immediately
+      const uid = auth.currentUser?.uid;
+      if(uid){
+        setDeviceOwner(uid);
+        broadcastNewOwner(uid);
+      }
+
+    } catch (e) {
+      loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+      try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+      showError(e);
+    }
   }
 };
 
@@ -4307,6 +4736,7 @@ onAuthStateChanged(auth, async (user)=>{
       return;
     }
     
+    // Show phone dial interface by default for elderly users
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
@@ -4322,7 +4752,7 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
-    /* ADD THIS LINE: Hide utility logout button when signed out */
+    /* Hide utility logout button when signed out */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "none";
         logoutUtilityBtn.disabled = true;
@@ -4342,7 +4772,16 @@ onAuthStateChanged(auth, async (user)=>{
     currentCalleeUid = null;
     userPhone = '';
     isAndroidPhoneLogin = false;
+    
+    // ===== NEW: Initialize phone dial interface =====
+    // Ensure phone dial elements are properly initialized
+    setTimeout(() => {
+      if (phoneDisplay && dialedNumber) {
+        phoneDisplay.textContent = dialedNumber;
+      }
+    }, 100);
   }
+   
 });
 
 window.addEventListener("beforeunload", ()=>{
