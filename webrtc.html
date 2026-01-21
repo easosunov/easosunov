@@ -4534,7 +4534,8 @@ function releaseLock() {
           disableAppImmediately();
         }
       }, 100);
-  });
+    }
+  });  // <-- This should be just one closing brace and one closing parenthesis
   
   // Beforeunload cleanup
   window.addEventListener('beforeunload', () => {
@@ -4551,22 +4552,8 @@ function releaseLock() {
       disableAppImmediately();
     }
   }, 2000);
-})();
+})();  // <-- This closes the entire IIFE
 
-// Also add a pre-check before any significant action
- /*
-const originalStartMedia = window.startMedia;
-if (originalStartMedia) {
-  window.startMedia = function(...args) {
-    if (!hasLock || isDisabled) {
-      logDiag("Blocked startMedia - no lock or disabled");
-      disableAppImmediately();
-      return Promise.reject(new Error("Another instance is running"));
-    }
-    return originalStartMedia.apply(this, args);
-  };
-}
- */
  /* ================== AUTH GATE ================== */
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
