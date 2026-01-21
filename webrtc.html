@@ -800,42 +800,79 @@ const remoteVideo = document.getElementById("remoteVideo");
 
  
 /* ================== PHONE DIAL EVENT LISTENERS ================== */
+/* ================== PHONE DIAL EVENT LISTENERS ================== */
 // Initialize phone dial functionality
 function initializePhoneDial() {
+  console.log('=== initializePhoneDial() called ===');
+  
+  // Get elements fresh each time
+  const dialPad = document.getElementById('dialPad');
+  const phoneDisplay = document.getElementById('phoneDisplay');
+  const backspaceBtn = document.getElementById('backspaceBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  
+  console.log('Elements found:', {
+    dialPad: !!dialPad,
+    phoneDisplay: !!phoneDisplay,
+    backspaceBtn: !!backspaceBtn,
+    clearBtn: !!clearBtn
+  });
+  
+  if (!dialPad || !phoneDisplay) {
+    console.error('Required elements missing!');
+    return;
+  }
+  
+  // Reset to ensure we're using the global variable
+  window.dialedNumber = "+1";
+  
   // Update phone display
   function updatePhoneDisplay() {
-    if (phoneDisplay) {
-      phoneDisplay.textContent = dialedNumber;
-    }
+    phoneDisplay.textContent = window.dialedNumber;
+    console.log('Display updated:', window.dialedNumber);
   }
   
   // Initialize display
-  if (phoneDisplay) {
-    phoneDisplay.textContent = dialedNumber;
-  }
+  phoneDisplay.textContent = window.dialedNumber;
+  console.log('Initial display set');
   
-  // Dial button clicks - FIXED: Use event delegation
-  if (dialPad) {
-    dialPad.addEventListener('click', (e) => {
-      const target = e.target;
-      // Check if clicked element or its parent has data-number attribute
-      const numberBtn = target.closest('.dial-btn');
-      if (numberBtn) {
-        const number = numberBtn.getAttribute('data-number');
-        if (number) {
-          dialedNumber += number;
-          updatePhoneDisplay();
-          console.log('Dialed:', dialedNumber);
-        }
+  // Clear any existing event listeners first
+  const newDialPad = dialPad.cloneNode(true);
+  dialPad.parentNode.replaceChild(newDialPad, dialPad);
+  
+  // Get fresh reference
+  const freshDialPad = document.getElementById('dialPad');
+  
+  // Use event delegation on the fresh dial pad
+  freshDialPad.addEventListener('click', (e) => {
+    console.log('Dial pad clicked, target:', e.target);
+    
+    // Find the dial button that was clicked
+    const dialBtn = e.target.closest('.dial-btn');
+    if (dialBtn) {
+      const number = dialBtn.getAttribute('data-number');
+      console.log('Dial button clicked:', number);
+      
+      if (number) {
+        window.dialedNumber += number;
+        updatePhoneDisplay();
       }
-    });
-  }
+    }
+  });
   
   // Backspace button
   if (backspaceBtn) {
-    backspaceBtn.addEventListener('click', () => {
-      if (dialedNumber.length > 2) { // Keep "+1" minimum
-        dialedNumber = dialedNumber.slice(0, -1);
+    // Clone to remove old listeners
+    const newBackspace = backspaceBtn.cloneNode(true);
+    backspaceBtn.parentNode.replaceChild(newBackspace, backspaceBtn);
+    
+    // Get fresh reference and add listener
+    document.getElementById('backspaceBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      console.log('Backspace clicked');
+      
+      if (window.dialedNumber.length > 2) {
+        window.dialedNumber = window.dialedNumber.slice(0, -1);
         updatePhoneDisplay();
       }
     });
@@ -843,80 +880,46 @@ function initializePhoneDial() {
   
   // Clear button
   if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      dialedNumber = "+1";
+    // Clone to remove old listeners
+    const newClear = clearBtn.cloneNode(true);
+    clearBtn.parentNode.replaceChild(newClear, clearBtn);
+    
+    // Get fresh reference and add listener
+    document.getElementById('clearBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      console.log('Clear clicked');
+      
+      window.dialedNumber = "+1";
       updatePhoneDisplay();
     });
   }
   
-  // Show email login button
-  if (showEmailLoginBtn) {
-    showEmailLoginBtn.addEventListener('click', () => {
-      if (!document.querySelector('#loginCard')) return;
-      
-      document.querySelector('#loginCard').innerHTML = `
-        <button id="logoutBtn" style="display:none;">Logout</button>
-        <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
-        <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">For administrators and email users</div>
-        
-        <div style="margin:20px 0;">
-          <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
-          <input id="emailInput" type="email" placeholder="your.email@example.com" autocomplete="username" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-        </div>
-        
-        <div style="margin:20px 0;">
-          <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-          <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-        </div>
-        
-        <button id="loginBtn" style="font-size:24px;padding:18px;background:#1976d2;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-          Sign In with Email
-        </button>
-        
-        <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-          Enter your email and password
-        </div>
-        
-        <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-          <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-            ← Back to Phone Dial
-          </button>
-        </div>
-      `;
-      
-      setTimeout(() => {
-        const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-        const loginBtn = document.getElementById('loginBtn');
-        const emailInput = document.getElementById('emailInput');
-        
-        if (showPhoneLoginBtn) {
-          showPhoneLoginBtn.addEventListener('click', () => {
-            location.reload();
-          });
-        }
-        
-        if (loginBtn) {
-          loginBtn.addEventListener('click', handleEmailLogin);
-        }
-        
-        if (emailInput) {
-          emailInput.focus();
-        }
-      }, 100);
+  // Add direct click handlers to buttons as backup
+  setTimeout(() => {
+    const buttons = document.querySelectorAll('.dial-btn');
+    console.log('Adding direct handlers to', buttons.length, 'buttons');
+    
+    buttons.forEach(btn => {
+      const number = btn.getAttribute('data-number');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        console.log('DIRECT: Button', number, 'clicked');
+        window.dialedNumber += number;
+        updatePhoneDisplay();
+      });
     });
-  }
-   // Debug: Log all dial buttons
-  const dialButtons = document.querySelectorAll('.dial-btn');
-  console.log(`Found ${dialButtons.length} dial buttons`);
-  dialButtons.forEach((btn, i) => {
-    console.log(`Button ${i}:`, btn.getAttribute('data-number'), btn.textContent);
-  });
+  }, 100);
+  
+  console.log('Phone dial initialized');
 }
 
 
-// Call this function when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('DOM loaded, initializing phone dial...');
+// Initialize phone dial immediately when script loads
+console.log('Script loaded, checking DOM...');
+
+// Use setTimeout to ensure DOM is ready since we're in a module
+setTimeout(() => {
+  console.log('Initializing phone dial (delayed)...');
   
   // Debug: Check if dial pad elements exist
   console.log('Dial pad element:', document.getElementById('dialPad'));
@@ -924,18 +927,35 @@ document.addEventListener('DOMContentLoaded', () => {
   console.log('Phone display:', document.getElementById('phoneDisplay'));
   console.log('Backspace button:', document.getElementById('backspaceBtn'));
   console.log('Clear button:', document.getElementById('clearBtn'));
+  console.log('Login button:', document.getElementById('loginBtn'));
   
-  // Test: Manually add click handler to first dial button
-  const firstButton = document.querySelector('.dial-btn');
-  if (firstButton) {
-    console.log('First button data-number:', firstButton.getAttribute('data-number'));
-    firstButton.addEventListener('click', () => {
-      console.log('TEST: First button clicked manually!');
-    });
-  }
+  // Check if app is locked
+  console.log('App root element:', appRoot);
+  console.log('App locked?', appRoot?.classList?.contains('locked'));
+  console.log('Login overlay display:', loginOverlay?.style?.display);
   
+  // Initialize
   initializePhoneDial();
-});
+  
+  // Test: Try to add a global function for testing
+  window.testDialPad = function() {
+    console.log('=== TESTING DIAL PAD ===');
+    console.log('dialedNumber:', dialedNumber);
+    console.log('phoneDisplay text:', phoneDisplay?.textContent);
+    
+    // Simulate a button click
+    const testBtn = document.querySelector('.dial-btn[data-number="5"]');
+    if (testBtn) {
+      console.log('Found button 5, clicking...');
+      testBtn.click();
+    }
+    
+    return 'Test complete';
+  };
+  
+  console.log('Test function available: window.testDialPad()');
+}, 500);
+ 
  
 /* ================== VIDEO SCREEN TOGGLE ================== */
 let videoMode = {
@@ -4666,7 +4686,7 @@ loginBtn.onclick = async () => {
     
     try {
       // Get the dialed number
-      const phoneNumber = dialedNumber;
+      const phoneNumber = window.dialedNumber || dialedNumber;
       
       if (loginStatus) loginStatus.textContent = "Verifying phone number…";
       
