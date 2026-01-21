@@ -4482,7 +4482,7 @@ function requireAuthOrPrompt(){
   return false;
 }
 
-
+/*
  loginBtn.onclick = async () => {
   hideErrorBox();
   
@@ -4587,7 +4587,21 @@ function requireAuthOrPrompt(){
         showError(error);
       }
     }
+*/
 
+ loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Login clicked - debug mode";
+  console.log("Login button clicked");
+  
+  // For now, just show a simple message
+  alert("Login functionality is being debugged. Please check console.");
+  
+  // Don't execute the rest of the login logic
+  return;
+};
+
+ 
        
           <div style="margin:20px 0;">
             <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
