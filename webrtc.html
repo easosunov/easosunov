@@ -147,45 +147,6 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
-// Update phone display
-function updatePhoneDisplay() {
-  if (phoneDisplay) {
-    phoneDisplay.textContent = dialedNumber;
-  }
-}
-
-// Initialize display
-updatePhoneDisplay();
-
-// Dial button clicks
-if (dialButtons) {
-  dialButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const number = btn.getAttribute('data-number');
-      dialedNumber += number;
-      updatePhoneDisplay();
-    });
-  });
-}
-
-// Backspace button
-if (backspaceBtn) {
-  backspaceBtn.addEventListener('click', () => {
-    if (dialedNumber.length > 2) { // Keep "+1" minimum
-      dialedNumber = dialedNumber.slice(0, -1);
-      updatePhoneDisplay();
-    }
-  });
-}
-
-// Clear button
-if (clearBtn) {
-  clearBtn.addEventListener('click', () => {
-    dialedNumber = "+1";
-    updatePhoneDisplay();
-  });
-}
  
 /* DIAGNOSTICS */
 #diagBox{
@@ -832,6 +793,70 @@ let dialedNumber = "+1"; // Start with country code
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
+
+
+/* ================== PHONE DIAL EVENT LISTENERS ================== */
+// Initialize phone dial functionality
+function initializePhoneDial() {
+  // Get phone dial elements
+  const phoneDisplay = document.getElementById("phoneDisplay");
+  const dialButtons = document.querySelectorAll(".dial-btn");
+  const backspaceBtn = document.getElementById("backspaceBtn");
+  const clearBtn = document.getElementById("clearBtn");
+  let dialedNumber = "+1"; // Start with country code
+  
+  // Update phone display
+  function updatePhoneDisplay() {
+    if (phoneDisplay) {
+      phoneDisplay.textContent = dialedNumber;
+    }
+  }
+  
+  // Initialize display
+  if (phoneDisplay) {
+    phoneDisplay.textContent = dialedNumber;
+  }
+  
+  // Dial button clicks
+  if (dialButtons) {
+    dialButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const number = btn.getAttribute('data-number');
+        if (number) {
+          dialedNumber += number;
+          updatePhoneDisplay();
+        }
+      });
+    });
+  }
+  
+  // Backspace button
+  if (backspaceBtn) {
+    backspaceBtn.addEventListener('click', () => {
+      if (dialedNumber.length > 2) { // Keep "+1" minimum
+        dialedNumber = dialedNumber.slice(0, -1);
+        updatePhoneDisplay();
+      }
+    });
+  }
+  
+  // Clear button
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      dialedNumber = "+1";
+      updatePhoneDisplay();
+    });
+  }
+  
+  // Make dialedNumber accessible globally for login function
+  window.dialedNumber = dialedNumber;
+}
+
+// Call this function when the page loads
+document.addEventListener('DOMContentLoaded', () => {
+  initializePhoneDial();
+});
+ 
 /* ================== VIDEO SCREEN TOGGLE ================== */
 let videoMode = {
     local: 'normal',  // 'normal', 'fullscreen', 'small'
