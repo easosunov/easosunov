@@ -789,6 +789,8 @@ const backspaceBtn = document.getElementById("backspaceBtn");
 const clearBtn = document.getElementById("clearBtn");
 const showEmailLoginBtn = document.getElementById("showEmailLoginBtn");
 
+let dialedNumber = "+1"; // Start with country code
+
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
@@ -796,27 +798,16 @@ const remoteVideo = document.getElementById("remoteVideo");
 /* ================== PHONE DIAL EVENT LISTENERS ================== */
 // Initialize phone dial functionality
 function initializePhoneDial() {
-  // Get phone dial elements
-  const phoneDisplay = document.getElementById("phoneDisplay");
-  const dialButtons = document.querySelectorAll(".dial-btn");
-  const backspaceBtn = document.getElementById("backspaceBtn");
-  const clearBtn = document.getElementById("clearBtn");
-  
-  // Initialize dialedNumber as a global variable
-  if (!window.dialedNumber) {
-    window.dialedNumber = "+1"; // Start with country code
-  }
-  
   // Update phone display
   function updatePhoneDisplay() {
     if (phoneDisplay) {
-      phoneDisplay.textContent = window.dialedNumber;
+      phoneDisplay.textContent = dialedNumber;
     }
   }
   
   // Initialize display
   if (phoneDisplay) {
-    phoneDisplay.textContent = window.dialedNumber;
+    phoneDisplay.textContent = dialedNumber;
   }
   
   // Dial button clicks
@@ -825,7 +816,7 @@ function initializePhoneDial() {
       btn.addEventListener('click', () => {
         const number = btn.getAttribute('data-number');
         if (number) {
-          window.dialedNumber += number;
+          dialedNumber += number;
           updatePhoneDisplay();
         }
       });
@@ -835,8 +826,8 @@ function initializePhoneDial() {
   // Backspace button
   if (backspaceBtn) {
     backspaceBtn.addEventListener('click', () => {
-      if (window.dialedNumber.length > 2) { // Keep "+1" minimum
-        window.dialedNumber = window.dialedNumber.slice(0, -1);
+      if (dialedNumber.length > 2) { // Keep "+1" minimum
+        dialedNumber = dialedNumber.slice(0, -1);
         updatePhoneDisplay();
       }
     });
@@ -845,7 +836,7 @@ function initializePhoneDial() {
   // Clear button
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
-      window.dialedNumber = "+1";
+      dialedNumber = "+1";
       updatePhoneDisplay();
     });
   }
@@ -1107,8 +1098,8 @@ function hideErrorBox(){
 }
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
-passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+emailInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
+passInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
 
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -1357,9 +1348,8 @@ async function handleAndroidPhoneAuthentication() {
     // If we have an email associated with the phone, try to pre-fill it
     if (phoneCheck.email) {
       logDiag(`Attempting email login for Android user: ${phoneCheck.email}`);
-      emailInput.value = phoneCheck.email;
-      // Focus on password field for manual login
-      passInput.focus();
+      // We'll show the email login form with pre-filled email
+      showEmailLoginForm(phoneCheck.email, phoneNumber);
     } else {
       // No email associated - show standard login
       showLoginUI();
@@ -1376,6 +1366,92 @@ async function handleAndroidPhoneAuthentication() {
 function showLoginUI() {
   loginOverlay.style.display = "flex";
   appRoot.classList.add("locked");
+}
+
+// Show email login form with pre-filled email
+function showEmailLoginForm(email, phoneNumber) {
+  if (!document.querySelector('#loginCard')) return;
+  
+  document.querySelector('#loginCard').innerHTML = `
+    <button id="logoutBtn" style="display:none;">Logout</button>
+    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Password</h2>
+    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">
+      Phone: <strong>${phoneNumber || ''}</strong><br>
+      Email: <strong>${email || ''}</strong>
+    </div>
+    
+    <div style="margin:20px 0;">
+      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
+      <input id="emailInput" type="email" value="${email || ''}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
+    </div>
+    
+    <div style="margin:20px 0;">
+      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+      <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+    </div>
+    
+    <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+      Sign In
+    </button>
+    
+    <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+      Enter password for ${email || ''}
+    </div>
+    
+    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+      <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+        ← Use Different Phone Number
+      </button>
+    </div>
+  `;
+  
+  // Re-attach event listeners
+  setTimeout(() => {
+    const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const passInput = document.getElementById('passInput');
+    
+    if (showPhoneLoginBtn) {
+      showPhoneLoginBtn.addEventListener('click', () => {
+        location.reload();
+      });
+    }
+    
+    if (loginBtn) {
+      loginBtn.addEventListener('click', handleEmailLogin);
+    }
+    
+    if (passInput) {
+      passInput.focus();
+    }
+  }, 100);
+}
+
+// Handle email login
+async function handleEmailLogin() {
+  const emailInput = document.getElementById('emailInput');
+  const passInput = document.getElementById('passInput');
+  const loginStatus = document.getElementById('loginStatus');
+  
+  if (!emailInput || !passInput || !loginStatus) return;
+  
+  const email = emailInput.value.trim();
+  const password = passInput.value;
+  
+  if (!email || !password) {
+    loginStatus.textContent = "Please enter email and password";
+    return;
+  }
+  
+  loginStatus.textContent = "Signing in...";
+  
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    loginStatus.textContent = "Signed in successfully!";
+  } catch (error) {
+    loginStatus.textContent = `Login failed: ${error.code || "unknown error"}`;
+    logDiag("Email login error: " + error.message);
+  }
 }
 
 /* ================== PROCESS PENDING NOTIFICATIONS ================== */
@@ -3462,7 +3538,7 @@ async function startCallToUid(toUid, toName=""){
   const callRef = await addDoc(collection(db,"calls"), {
   fromUid: myUid,
   toUid,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
+  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value) || "(unknown)",
   toName: toName || "",
   roomId: created.roomId,
   note,
@@ -3499,7 +3575,7 @@ try {
   const messagePayload = {
   toUid,          // Callee's UID
   callId: callRef.id,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
+  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value),
   note: note,
   timestamp: new Date().toLocaleString(), // Adding timestamp
   sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
@@ -3879,9 +3955,11 @@ window.restorePhoneDial = function() {
   location.reload();
 };
 
-// Update the showEmailLoginBtn handler if it exists
+// Update the showEmailLoginBtn handler
 if (showEmailLoginBtn) {
   showEmailLoginBtn.addEventListener('click', () => {
+    if (!document.querySelector('#loginCard')) return;
+    
     document.querySelector('#loginCard').innerHTML = `
       <button id="logoutBtn" style="display:none;">Logout</button>
       <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
@@ -3913,10 +3991,23 @@ if (showEmailLoginBtn) {
     `;
     
     setTimeout(() => {
-      document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
-        location.reload();
-      });
-      document.getElementById('emailInput').focus();
+      const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
+      const loginBtn = document.getElementById('loginBtn');
+      const emailInput = document.getElementById('emailInput');
+      
+      if (showPhoneLoginBtn) {
+        showPhoneLoginBtn.addEventListener('click', () => {
+          location.reload();
+        });
+      }
+      
+      if (loginBtn) {
+        loginBtn.addEventListener('click', handleEmailLogin);
+      }
+      
+      if (emailInput) {
+        emailInput.focus();
+      }
     }, 100);
   });
 }
@@ -3934,14 +4025,14 @@ async function enforceAllowlist(user){
     const snap = await getDoc(ref);
 
     if(!snap.exists()){
-      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      if(loginStatus) loginStatus.textContent = "Not approved yet. Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist missing for UID: " + uid);
     }
 
     const enabled = snap.data()?.enabled === true;
     if(!enabled){
-      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      if(loginStatus) loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist disabled for UID: " + uid);
     }
@@ -3949,8 +4040,10 @@ async function enforceAllowlist(user){
     return true;
   }catch(e){
     if(String(e?.code || "").includes("permission-denied")){
-      loginStatus.textContent =
-        "Allowlist check blocked by Firestore rules (permission-denied).";
+      if(loginStatus) {
+        loginStatus.textContent =
+          "Allowlist check blocked by Firestore rules (permission-denied).";
+      }
     }
     throw e;
   }
@@ -4441,7 +4534,6 @@ function releaseLock() {
           disableAppImmediately();
         }
       }, 100);
-    }
   });
   
   // Beforeunload cleanup
@@ -4482,8 +4574,9 @@ function requireAuthOrPrompt(){
   return false;
 }
 
-/*
- loginBtn.onclick = async () => {
+
+// SIMPLIFIED LOGIN BUTTON HANDLER - FIXED VERSION
+loginBtn.onclick = async () => {
   hideErrorBox();
   
   // Check if we're in phone dial mode or email mode
@@ -4491,34 +4584,33 @@ function requireAuthOrPrompt(){
   
   if (isPhoneDialMode) {
     // PHONE DIAL LOGIN
-    loginStatus.textContent = "Checking phone number…";
+    if (loginStatus) loginStatus.textContent = "Checking phone number…";
     wasManualLogin = true;
     
     try {
-      // Get the dialed number (remove +1 prefix if it's just +1)
-     const phoneNumber = window.dialedNumber || "+1";
+      // Get the dialed number
+      const phoneNumber = dialedNumber;
       
-      // Use the new direct phone authentication
-      loginStatus.textContent = "Verifying phone number…";
+      if (loginStatus) loginStatus.textContent = "Verifying phone number…";
       
       // First check if phone number is allowed
       const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
       
       if (!phoneCheck.allowed) {
-        loginStatus.textContent = "Phone number not registered";
+        if (loginStatus) loginStatus.textContent = "Phone number not registered";
         logDiag(`Phone auth failed: ${phoneNumber} not in allowlist`);
         return;
       }
       
       // Try custom token authentication first
-      loginStatus.textContent = "Signing in with phone…";
+      if (loginStatus) loginStatus.textContent = "Signing in with phone…";
       
       try {
         const authResult = await signInWithPhoneCustomToken(phoneNumber);
         
         if (authResult.success) {
           // Success! Custom token authentication worked
-          loginStatus.textContent = "Signed in successfully!";
+          if (loginStatus) loginStatus.textContent = "Signed in successfully!";
           logDiag(`Phone authentication successful for: ${phoneNumber}`);
           
           // Claim device owner
@@ -4532,160 +4624,43 @@ function requireAuthOrPrompt(){
         }
         
         // If custom token auth failed, fall back to email/password
-        loginStatus.textContent = "Phone verified. Enter password…";
+        if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
         
         if (phoneCheck.email) {
           // Show email/password form with pre-filled email
-          document.querySelector('#loginCard').innerHTML = `
-            <button id="logoutBtn" style="display:none;">Logout</button>
-            <h2 style="margin:0 0 20px;font-size:28px;">Enter Password</h2>
-            <div class="small" style="font-size:18px;margin-bottom:20px;">
-              Phone: <strong>${phoneNumber}</strong><br>
-              Email: <strong>${phoneCheck.email}</strong>
-            </div>
-            
-            <div style="margin:20px 0;">
-              <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
-              <input id="emailInput" type="email" value="${phoneCheck.email}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
-            </div>
-            
-            <div style="margin:20px 0;">
-              <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-              <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-            </div>
-            
-            <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-              Sign In
-            </button>
-            
-            <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-              Enter password for ${phoneCheck.email}
-            </div>
-            
-            <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-              <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-                ← Use Different Phone Number
-              </button>
-            </div>
-          `;
-          
-          // Re-attach event listeners
-          setTimeout(() => {
-            document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
-              location.reload();
-            });
-            document.getElementById('passInput').focus();
-          }, 100);
-          
+          showEmailLoginForm(phoneCheck.email, phoneNumber);
         } else {
-          loginStatus.textContent = "No email associated with this phone number";
+          if (loginStatus) loginStatus.textContent = "No email associated with this phone number";
         }
         
       } catch (error) {
-        loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
+        if (loginStatus) loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
         logDiag("Phone login error: " + (error?.message || error));
         showError(error);
       }
-    }
-*/
-
- loginBtn.onclick = async () => {
-  hideErrorBox();
-  loginStatus.textContent = "Login clicked - debug mode";
-  console.log("Login button clicked");
-  
-  // For now, just show a simple message
-  alert("Login functionality is being debugged. Please check console.");
-  
-  // Don't execute the rest of the login logic
-  return;
-};
-
- 
-       
-          <div style="margin:20px 0;">
-            <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
-            <input id="emailInput" type="email" value="${authResult.email}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
-          </div>
-          
-          <div style="margin:20px 0;">
-            <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-            <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-          </div>
-          
-          <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-            Sign In
-          </button>
-          
-          <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-            Enter password for ${authResult.email}
-          </div>
-          
-          <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-            <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-              ← Use Different Phone Number
-            </button>
-          </div>
-        `;
-        
-        // Re-attach event listeners
-        setTimeout(() => {
-          document.getElementById('showPhoneLoginBtn').addEventListener('click', () => {
-            location.reload();
-          });
-          document.getElementById('passInput').focus();
-        }, 100);
-        
-      } else {
-        // Should not happen with current implementation
-        loginStatus.textContent = "Authentication method not available";
-      }
-        
-        // Switch to email login mode with pre-filled email
-        document.querySelector('#loginCard').innerHTML = `
-          <button id="logoutBtn" style="display:none;">Logout</button>
-          <h2 style="margin:0 0 20px;font-size:28px;">Sign in required</h2>
-          <div class="small" style="font-size:18px;margin-bottom:20px;">Phone verified: ${phoneNumber}</div>
-          <label style="font-size:18px;display:block;margin-bottom:8px;">Email</label>
-          <input id="emailInput" type="email" value="${phoneCheck.email}" readonly style="font-size:18px;padding:14px;margin-bottom:20px;width:100%;background:#f5f5f5;"/>
-          <label style="font-size:18px;display:block;margin-bottom:8px;">Password</label>
-          <input id="passInput" type="password" placeholder="Enter password" autocomplete="current-password" style="font-size:18px;padding:14px;margin-bottom:20px;width:100%;"/>
-          <div style="margin-top:20px;">
-            <button id="loginBtn" style="font-size:18px;padding:14px 24px;width:100%;">Login</button>
-          </div>
-          <div id="loginStatus" style="font-size:16px;margin-top:15px;text-align:center;"></div>
-          <div style="margin-top:20px;border-top:1px solid #eee;padding-top:15px;">
-            <button id="showPhoneLoginBtn" style="font-size:16px;padding:12px;background:#f5f5f5;border-color:#ddd;color:#666;width:100%;">
-              Use Different Phone Number
-            </button>
-          </div>
-        `;
-        
-        // Re-attach event listeners
-        document.getElementById('showPhoneLoginBtn').onclick = () => {
-          location.reload(); // Reload to show phone dial again
-        };
-        
-        document.getElementById('passInput').focus();
-        
-      } else {
-        loginStatus.textContent = "No email associated with this phone number";
-      }
       
     } catch (e) {
-      loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
+      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
       logDiag("Phone login error: " + (e?.message || e));
       showError(e);
     }
     
   } else {
     // EMAIL/PASSWORD LOGIN (fallback mode)
-    loginStatus.textContent = "Signing in…";
+    if (loginStatus) loginStatus.textContent = "Signing in…";
     wasManualLogin = true;
     
     try {
-      await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
-      loginStatus.textContent = "Signed in. Checking allowlist…";
+      const email = emailInput?.value.trim();
+      const password = passInput?.value;
+      
+      if (!email || !password) {
+        if (loginStatus) loginStatus.textContent = "Please enter email and password";
+        return;
+      }
+      
+      await signInWithEmailAndPassword(auth, email, password);
+      if (loginStatus) loginStatus.textContent = "Signed in. Checking allowlist…";
 
       // Claim device owner immediately
       const uid = auth.currentUser?.uid;
@@ -4695,7 +4670,7 @@ function requireAuthOrPrompt(){
       }
 
     } catch (e) {
-      loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
       try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
       showError(e);
     }
@@ -4753,7 +4728,7 @@ onAuthStateChanged(auth, async (user)=>{
     }
     
     logoutBtn.style.display = "inline-block";
-    loginStatus.textContent = "Signed in.";
+    if (loginStatus) loginStatus.textContent = "Signed in.";
 
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
