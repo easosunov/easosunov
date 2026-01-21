@@ -916,6 +916,24 @@ function initializePhoneDial() {
 
 // Call this function when the page loads
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing phone dial...');
+  
+  // Debug: Check if dial pad elements exist
+  console.log('Dial pad element:', document.getElementById('dialPad'));
+  console.log('Dial buttons found:', document.querySelectorAll('.dial-btn').length);
+  console.log('Phone display:', document.getElementById('phoneDisplay'));
+  console.log('Backspace button:', document.getElementById('backspaceBtn'));
+  console.log('Clear button:', document.getElementById('clearBtn'));
+  
+  // Test: Manually add click handler to first dial button
+  const firstButton = document.querySelector('.dial-btn');
+  if (firstButton) {
+    console.log('First button data-number:', firstButton.getAttribute('data-number'));
+    firstButton.addEventListener('click', () => {
+      console.log('TEST: First button clicked manually!');
+    });
+  }
+  
   initializePhoneDial();
 });
  
