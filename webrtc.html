@@ -147,6 +147,46 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
+/* ================== PHONE DIAL EVENT LISTENERS ================== */
+// Update phone display
+function updatePhoneDisplay() {
+  if (phoneDisplay) {
+    phoneDisplay.textContent = dialedNumber;
+  }
+}
+
+// Initialize display
+updatePhoneDisplay();
+
+// Dial button clicks
+if (dialButtons) {
+  dialButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const number = btn.getAttribute('data-number');
+      dialedNumber += number;
+      updatePhoneDisplay();
+    });
+  });
+}
+
+// Backspace button
+if (backspaceBtn) {
+  backspaceBtn.addEventListener('click', () => {
+    if (dialedNumber.length > 2) { // Keep "+1" minimum
+      dialedNumber = dialedNumber.slice(0, -1);
+      updatePhoneDisplay();
+    }
+  });
+}
+
+// Clear button
+if (clearBtn) {
+  clearBtn.addEventListener('click', () => {
+    dialedNumber = "+1";
+    updatePhoneDisplay();
+  });
+}
+ 
 /* DIAGNOSTICS */
 #diagBox{
   display:none;
