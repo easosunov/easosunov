@@ -905,6 +905,12 @@ function initializePhoneDial() {
       }, 100);
     });
   }
+   // Debug: Log all dial buttons
+  const dialButtons = document.querySelectorAll('.dial-btn');
+  console.log(`Found ${dialButtons.length} dial buttons`);
+  dialButtons.forEach((btn, i) => {
+    console.log(`Button ${i}:`, btn.getAttribute('data-number'), btn.textContent);
+  });
 }
 
 
