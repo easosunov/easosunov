@@ -789,8 +789,6 @@ const backspaceBtn = document.getElementById("backspaceBtn");
 const clearBtn = document.getElementById("clearBtn");
 const showEmailLoginBtn = document.getElementById("showEmailLoginBtn");
 
-let dialedNumber = "+1"; // Start with country code
-
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
 
@@ -803,18 +801,22 @@ function initializePhoneDial() {
   const dialButtons = document.querySelectorAll(".dial-btn");
   const backspaceBtn = document.getElementById("backspaceBtn");
   const clearBtn = document.getElementById("clearBtn");
-  let dialedNumber = "+1"; // Start with country code
+  
+  // Initialize dialedNumber as a global variable
+  if (!window.dialedNumber) {
+    window.dialedNumber = "+1"; // Start with country code
+  }
   
   // Update phone display
   function updatePhoneDisplay() {
     if (phoneDisplay) {
-      phoneDisplay.textContent = dialedNumber;
+      phoneDisplay.textContent = window.dialedNumber;
     }
   }
   
   // Initialize display
   if (phoneDisplay) {
-    phoneDisplay.textContent = dialedNumber;
+    phoneDisplay.textContent = window.dialedNumber;
   }
   
   // Dial button clicks
@@ -823,7 +825,7 @@ function initializePhoneDial() {
       btn.addEventListener('click', () => {
         const number = btn.getAttribute('data-number');
         if (number) {
-          dialedNumber += number;
+          window.dialedNumber += number;
           updatePhoneDisplay();
         }
       });
@@ -833,8 +835,8 @@ function initializePhoneDial() {
   // Backspace button
   if (backspaceBtn) {
     backspaceBtn.addEventListener('click', () => {
-      if (dialedNumber.length > 2) { // Keep "+1" minimum
-        dialedNumber = dialedNumber.slice(0, -1);
+      if (window.dialedNumber.length > 2) { // Keep "+1" minimum
+        window.dialedNumber = window.dialedNumber.slice(0, -1);
         updatePhoneDisplay();
       }
     });
@@ -843,13 +845,10 @@ function initializePhoneDial() {
   // Clear button
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
-      dialedNumber = "+1";
+      window.dialedNumber = "+1";
       updatePhoneDisplay();
     });
   }
-  
-  // Make dialedNumber accessible globally for login function
-  window.dialedNumber = dialedNumber;
 }
 
 // Call this function when the page loads
@@ -4497,7 +4496,7 @@ function requireAuthOrPrompt(){
     
     try {
       // Get the dialed number (remove +1 prefix if it's just +1)
-      const phoneNumber = dialedNumber;
+     const phoneNumber = window.dialedNumber || "+1";
       
       // Use the new direct phone authentication
       loginStatus.textContent = "Verifying phone number…";
@@ -4587,7 +4586,9 @@ function requireAuthOrPrompt(){
         logDiag("Phone login error: " + (error?.message || error));
         showError(error);
       }
-          
+    }
+
+       
           <div style="margin:20px 0;">
             <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
             <input id="emailInput" type="email" value="${authResult.email}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
