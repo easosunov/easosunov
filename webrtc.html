@@ -1245,6 +1245,9 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+// ADD THIS LINE TO CLEAR CACHED RULES
+db._persistenceKey = "webrtc-" + Date.now(); // Add unique key to break cache
+
 /* ================== PHONE NUMBER AUTHENTICATION ================== */
 // Platform detection
 function isAndroidDevice() {
