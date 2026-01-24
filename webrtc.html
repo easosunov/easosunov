@@ -1284,114 +1284,74 @@ async function isPhoneNumberAllowed(phoneNumber) {
       };
     }
     
-    // Debug: Check Firestore connection
-    console.log("Firestore db object:", !!db);
-    console.log("doc function:", !!doc);
-    console.log("getDoc function:", !!getDoc);
-    
-    // Check if phones collection exists by trying a test query
     console.log("Creating document reference...");
     const phoneLookupRef = doc(db, "phones", normalizedPhone);
-    console.log("Document ref path:", phoneLookupRef.path);
-    console.log("Document ref type:", typeof phoneLookupRef);
     
-    try {
-      console.log("Attempting getDoc query...");
-      const phoneLookupSnap = await getDoc(phoneLookupRef);
-      console.log("Query completed!");
-      console.log("Snapshot exists:", phoneLookupSnap.exists());
-      console.log("Snapshot data:", phoneLookupSnap.data());
-      
-      if (!phoneLookupSnap.exists()) {
-        console.log("Phone document does not exist");
-        return { 
-          allowed: false, 
-          message: "Phone number not registered in system" 
-        };
-      }
-      
-      const phoneData = phoneLookupSnap.data();
-      console.log("Phone data retrieved:", phoneData);
-      
-      const userId = phoneData.uid;
-      console.log("User ID from phone data:", userId);
-      
-      if (!userId) {
-        return { 
-          allowed: false, 
-          message: "Phone number mapping incomplete" 
-        };
-      }
-      
-      // Verify the user exists
-      console.log("Checking if user exists...");
-      const userRef = doc(db, "users", userId);
-      const userSnap = await getDoc(userRef);
-      
-      if (!userSnap.exists()) {
-        console.log("User document does not exist");
-        return { 
-          allowed: false, 
-          message: "User account not found" 
-        };
-      }
-      
-      const userData = userSnap.data();
-      console.log("User email found:", userData.email);
-      console.log("User has password field:", !!userData.password);
-      
-      if (!userData.email || !userData.password) {
-        console.log("User missing credentials");
-        return { 
-          allowed: false, 
-          message: "User account missing credentials" 
-        };
-      }
-      
-      console.log("=== isPhoneNumberAllowed SUCCESS ===");
-      return { 
-        allowed: true,
-        message: "Phone number verified",
-        uid: userId,
-        phoneNumber: normalizedPhone,
-        email: userData.email,
-        password: userData.password
-      };
-      
-    } catch (queryError) {
-      console.error("=== QUERY ERROR ===");
-      console.error("Error name:", queryError.name);
-      console.error("Error code:", queryError.code);
-      console.error("Error message:", queryError.message);
-      console.error("Full error:", queryError);
-      
-      // Try to get more specific error info
-      if (queryError.code === 'permission-denied') {
-        return { 
-          allowed: false, 
-          message: "Database permission denied. Rules may not allow public read of phones collection." 
-        };
-      }
-      
-      if (queryError.code === 'not-found') {
-        return { 
-          allowed: false, 
-          message: "Database not accessible" 
-        };
-      }
-      
+    console.log("Attempting getDoc query...");
+    const phoneLookupSnap = await getDoc(phoneLookupRef);
+    console.log("Query completed!");
+    console.log("Snapshot exists:", phoneLookupSnap.exists());
+    
+    if (!phoneLookupSnap.exists()) {
+      console.log("Phone document does not exist");
       return { 
         allowed: false, 
-        message: "Database error: " + queryError.message 
+        message: "Phone number not registered in system" 
       };
     }
     
-  } catch (error) {
-    console.error("=== GENERAL ERROR ===");
-    console.error("Error:", error);
+    const phoneData = phoneLookupSnap.data();
+    console.log("Phone data retrieved:", phoneData);
+    
+    const userId = phoneData.uid;
+    console.log("User ID from phone data:", userId);
+    
+    if (!userId) {
+      return { 
+        allowed: false, 
+        message: "Phone number mapping incomplete" 
+      };
+    }
+    
+    // Check if email and password exist in phone data
+    const email = phoneData.email;
+    const password = phoneData.password;
+    
+    console.log("Email from phone data:", email);
+    console.log("Password exists:", !!password);
+    
+    if (!email || !password) {
+      return { 
+        allowed: false, 
+        message: "Phone number registered but credentials missing" 
+      };
+    }
+    
+    console.log("=== isPhoneNumberAllowed SUCCESS ===");
+    return { 
+      allowed: true,
+      message: "Phone number verified",
+      uid: userId,
+      phoneNumber: normalizedPhone,
+      email: email,
+      password: password
+    };
+    
+  } catch (queryError) {
+    console.error("=== QUERY ERROR ===");
+    console.error("Error code:", queryError.code);
+    console.error("Error message:", queryError.message);
+    
+    if (queryError.code === 'permission-denied') {
+      return { 
+        allowed: false, 
+        message: "Database permission denied. Please contact administrator." 
+      };
+    }
+    
     return { 
       allowed: false, 
-      message: "Error checking phone number: " + error.message 
+      message: "Database error: " + queryError.message 
     };
   }
 }
