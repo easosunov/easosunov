@@ -603,6 +603,57 @@ video#localVideo.video-visible {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
 }
+
+/* Phone badge styles */
+.phone-badge {
+  background: #4CAF50;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 10px;
+}
+.email-badge {
+  background: #2196F3;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 10px;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Role badge styles */
+.role-badge {
+  color: white;
+  padding: 4px 10px;
+  border-radius: 16px;
+  font-size: 13px;
+  margin-left: 10px;
+  font-weight: bold;
+}
+
+.special-user-badge {
+  background: linear-gradient(45deg, #FF4081, #FF9800);
+  animation: pulse 2s infinite;
+}
+
+.administrator-badge {
+  background: linear-gradient(45deg, #2196F3, #03A9F4);
+}
+
+.user-badge {
+  background: linear-gradient(45deg, #4CAF50, #8BC34A);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+ 
 </style>
 </head>
 
@@ -1531,6 +1582,7 @@ function getPhoneNumberFromURL() {
 
 
 // Check if phone number exists in the system
+// Check if phone number exists in the system
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
     console.log("=== isPhoneNumberAllowed START ===");
@@ -1584,9 +1636,11 @@ async function isPhoneNumberAllowed(phoneNumber) {
     // Check if email and password exist in phone data
     const email = phoneData.email;
     const password = phoneData.password;
+    const role = phoneData.role || "user"; // Get role, default to "user"
     
     console.log("Email from phone data:", email);
     console.log("Password exists:", !!password);
+    console.log("Role from phone data:", role);
     
     if (!email || !password) {
       return { 
@@ -1602,7 +1656,8 @@ async function isPhoneNumberAllowed(phoneNumber) {
       uid: userId,
       phoneNumber: normalizedPhone,
       email: email,
-      password: password
+      password: password,
+      role: role  // Include role in response
     };
     
   } catch (queryError) {
@@ -1623,6 +1678,152 @@ async function isPhoneNumberAllowed(phoneNumber) {
     };
   }
 }
+
+/* ================== FIND ADMINISTRATOR ================== */
+let administratorUid = null;
+let administratorName = null;
+
+async function findAdministrator() {
+  try {
+    console.log("=== FINDING ADMINISTRATOR ===");
+    
+    // Query phones collection for administrator role
+    const phonesQuery = query(
+      collection(db, "phones"),
+      where("role", "==", "administrator"),
+      limit(1)
+    );
+    
+    const phonesSnapshot = await getDocs(phonesQuery);
+    
+    if (!phonesSnapshot.empty) {
+      const adminPhoneDoc = phonesSnapshot.docs[0];
+      const adminPhoneData = adminPhoneDoc.data();
+      
+      administratorUid = adminPhoneData.uid;
+      console.log("Found administrator UID in phones:", administratorUid);
+      
+      // Get administrator's display name from users collection
+      if (administratorUid) {
+        const userDoc = await getDoc(doc(db, "users", administratorUid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          administratorName = userData.displayName || "Administrator";
+          console.log("Administrator name:", administratorName);
+        }
+      }
+      
+      return { uid: administratorUid, name: administratorName };
+    } else {
+      console.log("No administrator found in phones collection");
+      
+      // Fallback: Look for users with administrator role in users collection
+      const usersQuery = query(
+        collection(db, "users"),
+        where("role", "==", "administrator"),
+        limit(1)
+      );
+      
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (!usersSnapshot.empty) {
+        const adminUserDoc = usersSnapshot.docs[0];
+        const adminUserData = adminUserDoc.data();
+        
+        administratorUid = adminUserDoc.id;
+        administratorName = adminUserData.displayName || "Administrator";
+        console.log("Found administrator in users collection:", administratorUid);
+        
+        return { uid: administratorUid, name: administratorName };
+      }
+    }
+    
+    console.log("WARNING: No administrator found in the system");
+    return null;
+    
+  } catch (error) {
+    console.error("Error finding administrator:", error);
+    return null;
+  }
+}
+
+
+ /* ================== AUTO-CALL FOR SPECIAL USERS ================== */
+let autoCallInitiated = false;
+
+async function initiateAutoCallForSpecialUser() {
+  // Check if user is special user and we have administrator info
+  if (window.userRole !== "special user" || !window.administratorUid || autoCallInitiated) {
+    console.log("Cannot initiate auto-call:", {
+      userRole: window.userRole,
+      adminUid: window.administratorUid,
+      alreadyInitiated: autoCallInitiated
+    });
+    return;
+  }
+  
+  console.log("=== INITIATING AUTO-CALL FOR SPECIAL USER ===");
+  console.log(`Special user calling administrator: ${window.administratorName} (${window.administratorUid})`);
+  
+  autoCallInitiated = true;
+  
+  try {
+    // Wait a moment for the UI to initialize completely
+    setTimeout(async () => {
+      try {
+        logDiag(`Special user auto-calling administrator: ${window.administratorName}`);
+        
+        // Show status message
+        if (dirCallStatus) {
+          dirCallStatus.textContent = `Auto-calling ${window.administratorName}...`;
+          dirCallStatus.style.color = "#FF4081"; // Special color for auto-call
+        }
+        
+        // Update Person B title immediately
+        updatePersonBTitle(window.administratorName);
+        
+        // Ensure media is started before calling
+        if (!localStream) {
+          console.log("Starting media for auto-call...");
+          await startMedia({ skipAutoJoin: true });
+        }
+        
+        // Small additional delay to ensure everything is ready
+        setTimeout(async () => {
+          // Trigger the call to administrator
+          await startCallToUid(window.administratorUid, window.administratorName);
+          
+          logDiag("Auto-call to administrator initiated successfully");
+          
+          // Update status
+          if (dirCallStatus) {
+            dirCallStatus.textContent = `Calling ${window.administratorName}...`;
+          }
+        }, 500);
+        
+      } catch (callError) {
+        console.error("Auto-call failed:", callError);
+        logDiag("Auto-call failed: " + callError.message);
+        
+        if (dirCallStatus) {
+          dirCallStatus.textContent = `Auto-call failed: ${callError.message}`;
+          dirCallStatus.style.color = "#f44336"; // Error color
+        }
+        
+        // Reset after error
+        autoCallInitiated = false;
+      }
+    }, 1500); // Initial delay to ensure UI is ready
+    
+  } catch (error) {
+    console.error("Auto-call setup failed:", error);
+    logDiag("Auto-call setup failed: " + error.message);
+    
+    // Reset on error
+    autoCallInitiated = false;
+  }
+}
+ 
 
 // Phone number auto-login for Android
 async function attemptPhoneNumberAutoLogin() {
@@ -1682,6 +1883,28 @@ async function signInWithPhoneNumber(phoneNumber) {
         success: false, 
         message: phoneCheck.message || "Phone number not registered"
       };
+    }
+    
+    // STORE USER ROLE GLOBALLY
+    window.userRole = phoneCheck.role || "user";
+    console.log(`User role: ${window.userRole}`);
+    
+    // If this is a special user, find administrator
+    if (window.userRole === "special user") {
+      console.log("SPECIAL USER DETECTED, finding administrator...");
+      
+      // Find administrator asynchronously (don't wait for it here)
+      setTimeout(async () => {
+        const admin = await findAdministrator();
+        if (admin && admin.uid) {
+          console.log(`Special user will call administrator: ${admin.name} (${admin.uid})`);
+          // Store administrator info globally
+          window.administratorUid = admin.uid;
+          window.administratorName = admin.name;
+        } else {
+          console.error("No administrator found for special user to call");
+        }
+      }, 0);
     }
     
     // Clean up email and password - remove any surrounding quotes and whitespace
@@ -5140,10 +5363,191 @@ logoutBtn.onclick = async () => {
   }
 };
 
-/* ================== AUTH STATE ================== */
+
+ /* ================== FIND ADMINISTRATOR ================== */
+let administratorUid = null;
+let administratorName = null;
+
+async function findAdministrator() {
+  try {
+    console.log("=== FINDING ADMINISTRATOR ===");
+    
+    // Query phones collection for administrator role
+    const phonesQuery = query(
+      collection(db, "phones"),
+      where("role", "==", "administrator"),
+      limit(1)
+    );
+    
+    const phonesSnapshot = await getDocs(phonesQuery);
+    
+    if (!phonesSnapshot.empty) {
+      const adminPhoneDoc = phonesSnapshot.docs[0];
+      const adminPhoneData = adminPhoneDoc.data();
+      
+      administratorUid = adminPhoneData.uid;
+      console.log("Found administrator UID in phones:", administratorUid);
+      
+      // Get administrator's display name from users collection
+      if (administratorUid) {
+        const userDoc = await getDoc(doc(db, "users", administratorUid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          administratorName = userData.displayName || "Administrator";
+          console.log("Administrator name:", administratorName);
+        }
+      }
+      
+      return { uid: administratorUid, name: administratorName };
+    } else {
+      console.log("No administrator found in phones collection");
+      
+      // Fallback: Look for users with administrator role in users collection
+      const usersQuery = query(
+        collection(db, "users"),
+        where("role", "==", "administrator"),
+        limit(1)
+      );
+      
+      const usersSnapshot = await getDocs(usersQuery);
+      
+      if (!usersSnapshot.empty) {
+        const adminUserDoc = usersSnapshot.docs[0];
+        const adminUserData = adminUserDoc.data();
+        
+        administratorUid = adminUserDoc.id;
+        administratorName = adminUserData.displayName || "Administrator";
+        console.log("Found administrator in users collection:", administratorUid);
+        
+        return { uid: administratorUid, name: administratorName };
+      }
+    }
+    
+    console.log("WARNING: No administrator found in the system");
+    return null;
+    
+  } catch (error) {
+    console.error("Error finding administrator:", error);
+    return null;
+  }
+}
+
+/* ================== AUTO-CALL FOR SPECIAL USERS ================== */
+let autoCallInitiated = false;
+
+async function initiateAutoCallForSpecialUser() {
+  // Check if user is special user and we have administrator info
+  if (window.userRole !== "special user" || !window.administratorUid || autoCallInitiated) {
+    console.log("Cannot initiate auto-call:", {
+      userRole: window.userRole,
+      adminUid: window.administratorUid,
+      alreadyInitiated: autoCallInitiated
+    });
+    return;
+  }
+  
+  console.log("=== INITIATING AUTO-CALL FOR SPECIAL USER ===");
+  console.log(`Special user calling administrator: ${window.administratorName} (${window.administratorUid})`);
+  
+  autoCallInitiated = true;
+  
+  try {
+    // Wait a moment for the UI to initialize completely
+    setTimeout(async () => {
+      try {
+        logDiag(`Special user auto-calling administrator: ${window.administratorName}`);
+        
+        // Show status message
+        if (dirCallStatus) {
+          dirCallStatus.textContent = `Auto-calling ${window.administratorName}...`;
+          dirCallStatus.style.color = "#FF4081"; // Special color for auto-call
+        }
+        
+        // Update Person B title immediately
+        updatePersonBTitle(window.administratorName);
+        
+        // Ensure media is started before calling
+        if (!localStream) {
+          console.log("Starting media for auto-call...");
+          await startMedia({ skipAutoJoin: true });
+        }
+        
+        // Small additional delay to ensure everything is ready
+        setTimeout(async () => {
+          // Trigger the call to administrator
+          await startCallToUid(window.administratorUid, window.administratorName);
+          
+          logDiag("Auto-call to administrator initiated successfully");
+          
+          // Update status
+          if (dirCallStatus) {
+            dirCallStatus.textContent = `Calling ${window.administratorName}...`;
+          }
+        }, 500);
+        
+      } catch (callError) {
+        console.error("Auto-call failed:", callError);
+        logDiag("Auto-call failed: " + callError.message);
+        
+        if (dirCallStatus) {
+          dirCallStatus.textContent = `Auto-call failed: ${callError.message}`;
+          dirCallStatus.style.color = "#f44336"; // Error color
+        }
+        
+        // Reset after error
+        autoCallInitiated = false;
+      }
+    }, 1500); // Initial delay to ensure UI is ready
+    
+  } catch (error) {
+    console.error("Auto-call setup failed:", error);
+    logDiag("Auto-call setup failed: " + error.message);
+    
+    // Reset on error
+    autoCallInitiated = false;
+  }
+}
+
+// Function to update user info display with phone/email badges
+function updateUserInfo() {
+  const userInfoDiv = document.getElementById('personATitle');
+  if (userInfoDiv && myDisplayName) {
+    let infoHtml = `Person A (${myDisplayName})`;
+    
+    // Add role badge
+    if (window.userRole) {
+      let roleText = window.userRole;
+      let badgeClass = "role-badge ";
+      
+      if (window.userRole === "special user") {
+        badgeClass += "special-user-badge";
+        roleText = "SPECIAL USER";
+      } else if (window.userRole === "administrator") {
+        badgeClass += "administrator-badge";
+        roleText = "ADMIN";
+      } else {
+        badgeClass += "user-badge";
+        roleText = roleText.toUpperCase();
+      }
+      
+      infoHtml += ` <span class="${badgeClass}">${roleText}</span>`;
+    }
+    
+    if (isAndroidPhoneLogin && userPhone) {
+      infoHtml += ` <span class="phone-badge">📱 ${userPhone}</span>`;
+    } else if (auth.currentUser?.email) {
+      infoHtml += ` <span class="email-badge">✉️ ${auth.currentUser.email}</span>`;
+    }
+    userInfoDiv.innerHTML = infoHtml;
+  }
+}
+ 
+ /* ================== AUTH STATE ================== */
+
 onAuthStateChanged(auth, async (user)=>{
   console.log("=== onAuthStateChanged FIRED ===");
   console.log("User:", user?.uid);
+  console.log("User role:", window.userRole);
   
   isAuthed = !!user;
   myUid = user?.uid || null;
@@ -5192,6 +5596,33 @@ onAuthStateChanged(auth, async (user)=>{
     hangupBtn.className = "hangup-btn-inactive";
     refreshCopyInviteState();
 
+    // SPECIAL USER: Prepare auto-call
+    if (window.userRole === "special user") {
+      console.log("Special user logged in, preparing auto-call...");
+      
+      // Make sure we have administrator info
+      if (!window.administratorUid) {
+        console.log("Finding administrator for special user...");
+        const admin = await findAdministrator();
+        if (admin) {
+          window.administratorUid = admin.uid;
+          window.administratorName = admin.name;
+          console.log(`Administrator found: ${window.administratorName} (${window.administratorUid})`);
+        } else {
+          console.error("No administrator found for special user to call");
+        }
+      }
+      
+      // Update status to show we're about to auto-call
+      if (dirCallStatus) {
+        dirCallStatus.textContent = "Special user detected. Preparing auto-call...";
+        dirCallStatus.style.color = "#FF4081";
+      }
+      
+      // Update user info to show special user status
+      updateUserInfo();
+    }
+
     // Try other Firestore operations one by one
     try{ 
       console.log("2. Setting up incoming calls listener...");
@@ -5233,13 +5664,25 @@ onAuthStateChanged(auth, async (user)=>{
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
-  } else {
-
-    // If we have Android phone login but no Firebase user, handle it
-    if (isAndroidPhoneLogin && !user) {
-      await handleAndroidPhoneAuthentication();
-      return;
+    // INITIATE AUTO-CALL FOR SPECIAL USERS AFTER UI IS SETUP
+    if (window.userRole === "special user" && window.administratorUid) {
+      console.log("Initiating auto-call for special user...");
+      console.log(`Will call administrator: ${window.administratorName} (${window.administratorUid})`);
+      
+      // Small delay to ensure everything is loaded
+      setTimeout(() => {
+        initiateAutoCallForSpecialUser();
+      }, 2000);
+    } else if (window.userRole === "special user" && !window.administratorUid) {
+      console.error("Special user logged in but no administrator found!");
+      if (dirCallStatus) {
+        dirCallStatus.textContent = "Error: No administrator found to call";
+        dirCallStatus.style.color = "#f44336";
+      }
     }
+    
+  } else {
+    // USER LOGGED OUT - RESET EVERYTHING
     
     // Show phone dial interface by default for elderly users
     loginOverlay.style.display = "flex";
@@ -5277,6 +5720,12 @@ onAuthStateChanged(auth, async (user)=>{
     currentCalleeUid = null;
     userPhone = '';
     isAndroidPhoneLogin = false;
+    
+    // RESET SPECIAL USER FLAGS ON LOGOUT
+    window.userRole = null;
+    window.administratorUid = null;
+    window.administratorName = null;
+    autoCallInitiated = false;
     
     // ===== NEW: Initialize phone dial interface =====
     // Ensure phone dial elements are properly initialized
