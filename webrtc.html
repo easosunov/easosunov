@@ -1414,6 +1414,13 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
+    // Clean up email and password - remove any surrounding quotes
+    const cleanEmail = cleanString(phoneCheck.email);
+    const cleanPassword = cleanString(phoneCheck.password);
+    
+    console.log("Original email:", phoneCheck.email, "Cleaned email:", cleanEmail);
+    console.log("Original password:", phoneCheck.password, "Cleaned password:", cleanPassword);
+    
     // Clear any existing auth first
     try {
       await signOut(auth);
@@ -1425,8 +1432,8 @@ async function signInWithPhoneNumber(phoneNumber) {
     // Test the credentials with a simple fetch first
     console.log("Testing credentials...");
     const testResult = await testEmailPasswordLogin(
-      phoneCheck.email, 
-      phoneCheck.password
+      cleanEmail, 
+      cleanPassword
     );
     
     if (!testResult.success) {
@@ -1438,8 +1445,8 @@ async function signInWithPhoneNumber(phoneNumber) {
     // Sign in with email and password
     const userCredential = await signInWithEmailAndPassword(
       auth, 
-      phoneCheck.email, 
-      phoneCheck.password
+      cleanEmail, 
+      cleanPassword
     );
     
     console.log("Firebase login successful! User:", userCredential.user.uid);
@@ -1467,6 +1474,20 @@ async function signInWithPhoneNumber(phoneNumber) {
     logDiag("Phone auth error: " + error.message);
     return { success: false, message: "Error: " + error.message };
   }
+}
+
+// Helper function to clean strings by removing surrounding quotes
+function cleanString(str) {
+  if (typeof str !== 'string') return str;
+  
+  // Remove surrounding single quotes
+  let cleaned = str.replace(/^'(.*)'$/, '$1');
+  // Remove surrounding double quotes
+  cleaned = cleaned.replace(/^"(.*)"$/, '$1');
+  // Also handle cases with multiple quotes
+  cleaned = cleaned.replace(/^['"]+|['"]+$/g, '');
+  
+  return cleaned.trim();
 }
 
 // Helper function to test credentials via REST API
