@@ -58,18 +58,28 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 }
 
 /* LOGIN OVERLAY */
+
+/* LOGIN OVERLAY - SCROLLABLE */
 #loginOverlay{
   position:fixed; inset:0; z-index:9999;
   background:rgba(0,0,0,.55);
-  display:flex; align-items:center; justify-content:center;
+  display:flex; 
+  align-items:flex-start; /* Change from center to flex-start */
+  justify-content:center;
+  overflow-y:auto; /* Enable scrolling */
+  padding:20px 0; /* Add some padding */
 }
+ 
 #loginCard{
   width:min(520px,calc(100% - 24px));
   background:#fff; border-radius:14px;
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
+  margin:20px 0; /* Add margin for scroll spacing */
+  max-height:90vh; /* Limit height */
+  overflow-y:auto; /* Make card content scrollable */
 }
-
+ 
 /* LOGIN OVERLAY - ENLARGED FONTS */
 #loginCard h2 {
   font-size: 24px !important;
@@ -107,6 +117,117 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   min-height: 24px;
 }
 
+ /* Ensure login card content is properly contained */
+#loginCard > * {
+  min-width: 0; /* Prevent content overflow */
+}
+
+/* Improve scrolling on mobile */
+#loginCard::-webkit-scrollbar {
+  width: 6px;
+}
+
+#loginCard::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+#loginCard::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+#loginCard::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* Mobile-specific scrolling improvements */
+@media (max-width: 720px) {
+  #loginOverlay {
+    align-items: flex-start;
+    padding: 10px 0;
+  }
+  
+  #loginCard {
+    max-height: 95vh; /* Use more of the screen on mobile */
+    margin: 10px 0;
+    padding: 12px;
+    border-radius: 12px;
+  }
+  
+  /* Make header sticky on mobile */
+  #loginCard > div:first-child {
+    position: sticky;
+    top: -12px; /* Compensate for card padding */
+    margin-top: -12px;
+    padding-top: 12px;
+    background: #fff;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 10px;
+  }
+  
+  /* Reduce font sizes for mobile */
+  #loginCard h2 {
+    font-size: 22px !important;
+    margin: 0 0 8px !important;
+  }
+  
+  #phoneDisplay {
+    font-size: 30px !important;
+    min-height: 55px !important;
+    padding: 10px !important;
+  }
+  
+  /* Ensure dial pad fits */
+  #dialPad {
+    gap: 8px !important;
+  }
+  
+  .dial-btn {
+    min-height: 60px !important;
+    padding: 12px 3px !important;
+  }
+  
+  .dial-btn div:first-child {
+    font-size: 28px !important;
+  }
+  
+  /* Make sure everything fits without horizontal scroll */
+  #loginCard > * {
+    max-width: 100%;
+    overflow: hidden;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 360px) {
+  #dialPad {
+    gap: 6px !important;
+  }
+  
+  .dial-btn {
+    min-height: 55px !important;
+    padding: 10px 2px !important;
+  }
+  
+  .dial-btn div:first-child {
+    font-size: 24px !important;
+  }
+  
+  #phoneDisplay {
+    font-size: 26px !important;
+  }
+  
+  #loginBtn {
+    min-height: 70px !important;
+    padding: 14px 10px !important;
+  }
+  
+  #loginBtn div:first-child {
+    font-size: 32px !important;
+  }
+}
+ 
 /* PHONE DIAL INTERFACE STYLES */
 /* Enhanced mobile responsiveness for elderly users */
 /* Enhanced mobile responsiveness for elderly users - COMPACT VERSION */
