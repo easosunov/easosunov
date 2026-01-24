@@ -108,33 +108,95 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
 }
 
 /* PHONE DIAL INTERFACE STYLES */
+/* Enhanced mobile responsiveness for elderly users */
+@media (max-width: 720px) {
+  .dial-btn {
+    font-size: 32px !important;
+    min-height: 80px !important;
+    padding: 20px 5px !important;
+  }
+  
+  #phoneDisplay {
+    font-size: 36px !important;
+    min-height: 70px !important;
+    padding: 15px !important;
+  }
+  
+  #backspaceBtn, #clearBtn {
+    min-height: 90px !important;
+    padding: 20px 10px !important;
+  }
+  
+  #backspaceBtn div:first-child,
+  #clearBtn div:first-child,
+  #loginBtn div:first-child {
+    font-size: 36px !important;
+  }
+  
+  #loginBtn {
+    min-height: 100px !important;
+    padding: 20px 10px !important;
+  }
+  
+  #loginBtn div:first-child {
+    font-size: 42px !important;
+  }
+  
+  #dialPad {
+    gap: 12px !important;
+  }
+}
+
+/* Extra large screens */
+@media (min-width: 1024px) {
+  #dialPad {
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  
+  #phoneDisplay {
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+ 
 #dialPad {
   margin: 20px 0;
 }
 
 .dial-btn {
-  font-size: 24px !important;
-  padding: 20px 10px !important;
+  font-size: 36px !important;
+  padding: 25px 5px !important;
   background: #fff !important;
-  border: 2px solid #1976d2 !important;
+  border: 3px solid #1976d2 !important;
   color: #1976d2 !important;
-  border-radius: 12px !important;
-  min-height: 70px;
+  border-radius: 16px !important;
+  min-height: 90px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
+  font-weight: bold;
 }
 
 .dial-btn:hover {
   background: #1976d2 !important;
   color: white !important;
+  transform: scale(1.03);
 }
 
 .dial-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.97);
+}
+
+/* Make dial pad container larger */
+#dialPad {
+  gap: 15px !important;
+  margin: 25px 0 !important;
 }
 
 #phoneDisplay {
@@ -400,45 +462,80 @@ video#localVideo.video-visible {
     <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">Dial your registered phone number to sign in</div>
     
     <!-- Phone number display -->
-    <div id="phoneDisplay" style="font-size:32px;text-align:center;margin:20px 0;padding:15px;background:#f5f5f5;border-radius:12px;border:2px solid #ddd;min-height:60px;letter-spacing:2px;">
-      
+  <div id="phoneDisplay" style="font-size:44px;text-align:center;margin:25px 0;padding:20px;background:#f5f5f5;border-radius:16px;border:3px solid #1976d2;min-height:80px;letter-spacing:3px;font-weight:bold;">    
     </div>
     
     <!-- Dial pad -->
-<div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
-  <button class="dial-btn" data-number="1">1</button>
-  <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
-  <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
-  <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
-  <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
-  <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
-  <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
-  <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
-  <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
-  <button class="dial-btn" data-number="+">+<div style="font-size:12px;color:#666;">PLUS</div></button>
-  <button class="dial-btn" data-number="0">0</button>
-  <button class="dial-btn" data-number="#">#</button>
+<div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin:25px 0;">
+  <button class="dial-btn" data-number="1">
+    <div style="font-size:36px;font-weight:bold;">1</div>
+  </button>
+  <button class="dial-btn" data-number="2">
+    <div style="font-size:36px;font-weight:bold;">2</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">ABC</div>
+  </button>
+  <button class="dial-btn" data-number="3">
+    <div style="font-size:36px;font-weight:bold;">3</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">DEF</div>
+  </button>
+  <button class="dial-btn" data-number="4">
+    <div style="font-size:36px;font-weight:bold;">4</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">GHI</div>
+  </button>
+  <button class="dial-btn" data-number="5">
+    <div style="font-size:36px;font-weight:bold;">5</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">JKL</div>
+  </button>
+  <button class="dial-btn" data-number="6">
+    <div style="font-size:36px;font-weight:bold;">6</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">MNO</div>
+  </button>
+  <button class="dial-btn" data-number="7">
+    <div style="font-size:36px;font-weight:bold;">7</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">PQRS</div>
+  </button>
+  <button class="dial-btn" data-number="8">
+    <div style="font-size:36px;font-weight:bold;">8</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">TUV</div>
+  </button>
+  <button class="dial-btn" data-number="9">
+    <div style="font-size:36px;font-weight:bold;">9</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">WXYZ</div>
+  </button>
+  <button class="dial-btn" data-number="+">
+    <div style="font-size:36px;font-weight:bold;">+</div>
+    <div style="font-size:14px;color:#666;margin-top:2px;">PLUS</div>
+  </button>
+  <button class="dial-btn" data-number="0">
+    <div style="font-size:36px;font-weight:bold;">0</div>
+  </button>
+  <button class="dial-btn" data-number="#">
+    <div style="font-size:36px;font-weight:bold;">#</div>
+  </button>
 </div>
     
     <!-- Control buttons -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0;">
-      <button id="backspaceBtn" style="font-size:18px;padding:15px;background:#ffebee;border-color:#f44336;color:#c62828;">
-        ⌫ Backspace
-      </button>
-      <button id="clearBtn" style="font-size:18px;padding:15px;background:#fff8e1;border-color:#ffc107;color:#ff8f00;">
-        ✕ Clear
-      </button>
-    </div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:25px 0;">
+  <button id="backspaceBtn" style="font-size:32px;padding:25px 15px;background:#ffebee;border:3px solid #f44336;color:#c62828;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100px;">
+    <div style="font-size:42px;font-weight:bold;">⌫</div>
+    <div style="font-size:16px;margin-top:8px;">Backspace</div>
+  </button>
+  <button id="clearBtn" style="font-size:32px;padding:25px 15px;background:#fff8e1;border:3px solid #ffc107;color:#ff8f00;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100px;">
+    <div style="font-size:42px;font-weight:bold;">✕</div>
+    <div style="font-size:16px;margin-top:8px;">Clear</div>
+  </button>
+</div>
     
     <!-- Login button -->
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#e8f5e9;border-color:#4caf50;color:#2e7d32;width:100%;margin:10px 0;">
-      ↵ Enter / Dial to Sign In
-    </button>
+<button id="loginBtn" style="font-size:32px;padding:25px 15px;background:#e8f5e9;border:3px solid #4caf50;color:#2e7d32;width:100%;margin:15px 0;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:110px;">
+  <div style="font-size:48px;font-weight:bold;">↵</div>
+  <div style="font-size:18px;margin-top:8px;">Enter / Dial to Sign In</div>
+</button>
     
     <!-- Status display -->
-    <div id="loginStatus" class="status" style="font-size:18px;text-align:center;margin:15px 0;min-height:30px;">
-      Please dial your phone number
-    </div>
+<div id="loginStatus" class="status" style="font-size:20px;text-align:center;margin:20px 0;min-height:40px;font-weight:500;color:#1976d2;">
+  Please dial your phone number
+</div>
     
     <!-- Info text -->
     <div class="small" style="font-size:16px;text-align:center;color:#666;margin-top:20px;">
