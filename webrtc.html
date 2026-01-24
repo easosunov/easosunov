@@ -1388,7 +1388,6 @@ async function signInWithPhoneNumber(phoneNumber) {
   try {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
     
-    // First verify the phone number is in the system
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
     
     if (!phoneCheck.allowed) {
@@ -1398,51 +1397,36 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // We have the user ID, now get a custom token from Cloud Function
-    try {
-      const response = await fetch(
-        'https://us-central1-easosunov-webrtc.cloudfunctions.net/phoneNumberLogin',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ phoneNumber: phoneNumber })
-        }
-      );
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        // Sign in with the custom token
-        await firebase.auth().signInWithCustomToken(result.customToken);
-        
-        logDiag(`Phone authentication successful! UID: ${result.uid}`);
-        
-        return {
-          success: true,
-          message: "Phone authentication successful!",
-          uid: result.uid
-        };
-      } else {
-        return {
-          success: false,
-          message: result.error || "Authentication failed"
-        };
+    // Use generateCustomToken - it's already working
+    const response = await fetch(
+      'https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          phoneNumber: phoneNumber,
+          uid: phoneCheck.uid
+        })
       }
-      
-    } catch (error) {
-      logDiag("Cloud Function call error: " + error.message);
-      return {
-        success: false,
-        message: "System error. Please try again."
-      };
+    );
+    
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    if (result.success) {
+      await firebase.auth().signInWithCustomToken(result.customToken);
+      logDiag(`Phone authentication successful! UID: ${result.uid}`);
+      return { success: true, message: "Signed in!", uid: result.uid };
+    } else {
+      return { success: false, message: result.error || "Failed" };
     }
     
   } catch (error) {
-    logDiag("Phone authentication error: " + error.message);
-    return {
-      success: false,
-      message: "Authentication error: " + error.message
-    };
+    logDiag("Phone auth error: " + error.message);
+    return { success: false, message: "Error: " + error.message };
   }
 }
  
