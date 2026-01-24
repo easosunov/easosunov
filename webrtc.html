@@ -415,9 +415,9 @@ video#localVideo.video-visible {
   <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
   <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
   <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
-  <button class="dial-btn" data-number="*">*</button>
-  <button class="dial-btn" data-number="0">0</button>
   <button class="dial-btn" data-number="+">+<div style="font-size:12px;color:#666;">PLUS</div></button>
+  <button class="dial-btn" data-number="0">0</button>
+  <button class="dial-btn" data-number="#">#</button>
 </div>
     
     <!-- Control buttons -->
@@ -432,7 +432,7 @@ video#localVideo.video-visible {
     
     <!-- Login button -->
     <button id="loginBtn" style="font-size:22px;padding:18px;background:#e8f5e9;border-color:#4caf50;color:#2e7d32;width:100%;margin:10px 0;">
-      📞 Dial to Sign In
+      ↵ Enter / Dial to Sign In
     </button>
     
     <!-- Status display -->
@@ -909,17 +909,10 @@ setTimeout(() => {
       e.stopPropagation();
       console.log('DIRECT: Button', number, 'clicked');
       
-      if (number === 'enter') {
-        // Handle Enter button - submit the phone number
-        if (window.dialedNumber && window.dialedNumber.length >= 10) {
-          document.getElementById('loginBtn').click();
-        } else {
-          loginStatus.textContent = "Please enter at least 10 digits";
-        }
-      } else if (number) {
-        window.dialedNumber += number;
-        updatePhoneDisplay();
-      }
+    if (number) {
+      window.dialedNumber += number;
+      updatePhoneDisplay();
+    }
     });
   });
 }, 100);
