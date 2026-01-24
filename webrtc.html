@@ -1383,58 +1383,7 @@ if (!phoneCheck.allowed) {
   }
 }
 
-// Direct phone number authentication (for dial interface)
-async function authenticateWithPhoneNumber(phoneNumber) {
-  try {
-    logDiag(`Attempting direct phone auth for: ${phoneNumber}`);
-    
-    // Check if phone number is allowed
-    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    
-    if (!phoneCheck.allowed) {
-      return { 
-        success: false, 
-        message: "Phone number not registered",
-        requiresEmail: false 
-      };
-    }
-    
-    // If we have an email, we need password for Firebase Auth
-    // For now, we'll use a custom token approach or direct Firestore verification
-    // This is a simplified approach - in production, you'd use Firebase Custom Auth
-    
-    // For this demo, we'll simulate authentication by setting global state
-    // and letting the user in (if they have email/password, we'll ask for it)
-    
-    if (phoneCheck.email) {
-      return {
-        success: true,
-        message: "Phone verified",
-        requiresEmail: true,
-        email: phoneCheck.email,
-        uid: phoneCheck.uid,
-        displayName: phoneCheck.displayName
-      };
-    } else {
-      // No email associated - can't use Firebase Auth directly
-      return {
-        success: false,
-        message: "No email associated with this phone number",
-        requiresEmail: false
-      };
-    }
-    
-  } catch (error) {
-    logDiag("Phone authentication error: " + error.message);
-    return {
-      success: false,
-      message: "Authentication error: " + error.message,
-      requiresEmail: false
-    };
-  }
-}
 
-// Phone authentication using existing Firebase users
 async function signInWithPhoneNumber(phoneNumber) {
   try {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
@@ -1449,65 +1398,54 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // We have the user ID, but we don't have email yet
-    // We need to get the email from Firestore after authentication
-    
-    logDiag(`Phone verified. User ID: ${phoneCheck.uid}`);
-    
-    return {
-      success: false,
-      message: "Phone verified. Please sign in with your credentials.",
-      requiresCredentials: true,
-      uid: phoneCheck.uid,
-      phoneNumber: phoneCheck.phoneNumber
-    };
+    // We have the user ID, now get a custom token from Cloud Function
+    try {
+      const response = await fetch(
+        'https://us-central1-easosunov-webrtc.cloudfunctions.net/phoneNumberLogin',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phoneNumber: phoneNumber })
+        }
+      );
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Sign in with the custom token
+        await firebase.auth().signInWithCustomToken(result.customToken);
+        
+        logDiag(`Phone authentication successful! UID: ${result.uid}`);
+        
+        return {
+          success: true,
+          message: "Phone authentication successful!",
+          uid: result.uid
+        };
+      } else {
+        return {
+          success: false,
+          message: result.error || "Authentication failed"
+        };
+      }
+      
+    } catch (error) {
+      logDiag("Cloud Function call error: " + error.message);
+      return {
+        success: false,
+        message: "System error. Please try again."
+      };
+    }
     
   } catch (error) {
     logDiag("Phone authentication error: " + error.message);
     return {
       success: false,
-      message: "Authentication error: " + error.message,
-      requiresCredentials: false
+      message: "Authentication error: " + error.message
     };
   }
 }
  
-// Handle Android phone authentication
-async function handleAndroidPhoneAuthentication() {
-  try {
-    const phoneNumber = userPhone;
-    if (!phoneNumber) {
-      showLoginUI();
-      return;
-    }
-    
-    logDiag("Verifying phone number...");
-    
-    // Check phone number again
-    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    
-    if (!phoneCheck.allowed) {
-      logDiag("Phone number not registered");
-      showLoginUI();
-      return;
-    }
-    
-    // If we have an email associated with the phone, try to pre-fill it
-    if (phoneCheck.email) {
-      logDiag(`Attempting email login for Android user: ${phoneCheck.email}`);
-      // We'll show the email login form with pre-filled email
-      showEmailLoginForm(phoneCheck.email, phoneNumber);
-    } else {
-      // No email associated - show standard login
-      showLoginUI();
-    }
-    
-  } catch (error) {
-    console.error("Android phone auth error:", error);
-    logDiag("Phone authentication failed: " + error.message);
-    showLoginUI();
-  }
-}
 
 // Show login UI with optional pre-filled email
 function showLoginUI() {
@@ -1515,124 +1453,8 @@ function showLoginUI() {
   appRoot.classList.add("locked");
 }
 
-// Show email login form with pre-filled email
-function showEmailLoginForm(email, phoneNumber) {
-  if (!document.querySelector('#loginCard')) return;
-  
-  document.querySelector('#loginCard').innerHTML = `
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Password</h2>
-    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">
-      Phone: <strong>${phoneNumber || ''}</strong><br>
-      Email: <strong>${email || ''}</strong>
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
-      <input id="emailInput" type="email" value="${email || ''}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-      <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-    </div>
-    
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-      Sign In
-    </button>
-    
-    <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-      Enter password for ${email || ''}
-    </div>
-    
-    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-      <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-        ← Use Different Phone Number
-      </button>
-    </div>
-  `;
-  
-  // Re-attach event listeners
-  setTimeout(() => {
-    const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-    const loginBtn = document.getElementById('loginBtn');
-    const passInput = document.getElementById('passInput');
-    
-    if (showPhoneLoginBtn) {
-      showPhoneLoginBtn.addEventListener('click', () => {
-        location.reload();
-      });
-    }
-    
-    if (loginBtn) {
-      loginBtn.addEventListener('click', handleEmailLogin);
-    }
-    
-    if (passInput) {
-      passInput.focus();
-    }
-  }, 100);
-}
 
 
-// Show generic email login form (when we can't read user email)
-function showGenericEmailLoginForm(phoneNumber) {
-  if (!document.querySelector('#loginCard')) return;
-  
-  document.querySelector('#loginCard').innerHTML = `
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Sign In</h2>
-    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">
-      Phone: <strong>${phoneNumber || ''}</strong> verified
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
-      <input id="emailInput" type="email" placeholder="Enter your registered email" autocomplete="username" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-      <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-    </div>
-    
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-      Sign In
-    </button>
-    
-    <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-      Enter the email associated with this phone number
-    </div>
-    
-    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-      <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-        ← Use Different Phone Number
-      </button>
-    </div>
-  `;
-  
-  // Re-attach event listeners
-  setTimeout(() => {
-    const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-    const loginBtn = document.getElementById('loginBtn');
-    const emailInput = document.getElementById('emailInput');
-    
-    if (showPhoneLoginBtn) {
-      showPhoneLoginBtn.addEventListener('click', () => {
-        location.reload();
-      });
-    }
-    
-    if (loginBtn) {
-      loginBtn.addEventListener('click', handleEmailLogin);
-    }
-    
-    if (emailInput) {
-      emailInput.focus();
-    }
-  }, 100);
-}
- 
 // Handle email login
 async function handleEmailLogin() {
   const emailInput = document.getElementById('emailInput');
@@ -4772,95 +4594,31 @@ function requireAuthOrPrompt(){
 loginBtn.onclick = async () => {
   hideErrorBox();
   
-  // Check if we're in phone dial mode or email mode
   const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
   
   if (isPhoneDialMode) {
-    // PHONE DIAL LOGIN
     if (loginStatus) loginStatus.textContent = "Checking phone number…";
     wasManualLogin = true;
     
     try {
-      // Get the dialed number - store it for Firestore submission
       const phoneNumber = window.dialedNumber || dialedNumber;
-      window.submittedPhoneNumber = phoneNumber; // Store for authentication
       
       if (loginStatus) loginStatus.textContent = "Verifying phone number…";
       
-      // First check if phone number is allowed
-      const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+      const authResult = await signInWithPhoneNumber(phoneNumber);
       
-      if (!phoneCheck.allowed) {
-        if (loginStatus) loginStatus.textContent = "Phone number not registered";
-        logDiag(`Phone auth failed: ${phoneNumber} not in allowlist`);
-        return;
-      }
-      
-// Try phone authentication
-if (loginStatus) loginStatus.textContent = "Signing in with phone…";
-
-try {
-  const authResult = await signInWithPhoneNumber(phoneNumber);
-  
-  if (authResult.success) {
-    // Success! Phone authentication worked
-    if (loginStatus) loginStatus.textContent = "Signed in successfully!";
-    logDiag(`Phone authentication successful for: ${phoneNumber}`);
-    
-    // Claim device owner
-    const uid = auth.currentUser?.uid;
-    if (uid) {
-      setDeviceOwner(uid);
-      broadcastNewOwner(uid);
-    }
-    
-    return; // Authentication complete
-  }
-  
-  // If authentication requires credentials
-  if (authResult.requiresCredentials && authResult.uid) {
-    if (loginStatus) loginStatus.textContent = "Phone verified. Loading user details...";
-    
-    // Try to get user email (we might have permission if user is signed in elsewhere)
-    try {
-      const userRef = doc(db, "users", authResult.uid);
-      const userSnap = await getDoc(userRef);
-      
-      if (userSnap.exists()) {
-        const userData = userSnap.data();
-        const email = userData.email;
+      if (authResult.success) {
+        if (loginStatus) loginStatus.textContent = "Signed in successfully!";
+        logDiag(`Phone authentication successful for: ${phoneNumber}`);
         
-        if (email) {
-          if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
-          // Show email/password form with pre-filled email
-          showEmailLoginForm(email, phoneNumber);
-        } else {
-          if (loginStatus) loginStatus.textContent = "No email associated with this phone";
-          showGenericEmailLoginForm(phoneNumber);
+        const uid = auth.currentUser?.uid;
+        if (uid) {
+          setDeviceOwner(uid);
+          broadcastNewOwner(uid);
         }
       } else {
-        if (loginStatus) loginStatus.textContent = "User account not found";
-        showGenericEmailLoginForm(phoneNumber);
+        if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
       }
-    } catch (error) {
-      // Can't read user details without authentication
-      console.log("Cannot read user details:", error.message);
-      if (loginStatus) loginStatus.textContent = "Phone verified. Please use email login.";
-      // Show generic email login form
-      showGenericEmailLoginForm(phoneNumber);
-    }
-    
-    return;
-  }
-  
-  // If we get here, show the error message
-  if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
-  
-} catch (error) {
-  if (loginStatus) loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
-  logDiag("Phone login error: " + (error?.message || error));
-  showError(error);
-}
       
     } catch (e) {
       if (loginStatus) loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
@@ -4869,7 +4627,7 @@ try {
     }
     
   } else {
-    // EMAIL/PASSWORD LOGIN (fallback mode)
+    // EMAIL/PASSWORD LOGIN (fallback mode) - KEEP EXISTING CODE
     if (loginStatus) loginStatus.textContent = "Signing in…";
     wasManualLogin = true;
     
@@ -4885,7 +4643,6 @@ try {
       await signInWithEmailAndPassword(auth, email, password);
       if (loginStatus) loginStatus.textContent = "Signed in. Checking allowlist…";
 
-      // Claim device owner immediately
       const uid = auth.currentUser?.uid;
       if(uid){
         setDeviceOwner(uid);
