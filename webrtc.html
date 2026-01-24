@@ -1268,36 +1268,82 @@ async function isPhoneNumberAllowed(phoneNumber) {
       return { allowed: false, message: "Please enter a valid phone number" };
     }
     
-    // Remove the country code for checking
-    const cleanPhone = phoneNumber.replace('', '').trim();
-    if (cleanPhone.length < 10) {
-      return { allowed: false, message: "Please enter a 10-digit phone number" };
+    // Normalize phone number format
+    const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
+    
+    console.log("Checking normalized phone:", normalizedPhone);
+    
+    // Query Firestore for user with this phone number
+    // First, try to find in phoneNumber field
+    const phoneQuery = query(
+      collection(db, "users"),
+      where("phoneNumber", "==", normalizedPhone),
+      limit(1)
+    );
+    
+    const phoneSnapshot = await getDocs(phoneQuery);
+    
+    if (!phoneSnapshot.empty) {
+      const userDoc = phoneSnapshot.docs[0];
+      const userData = userDoc.data();
+      
+      console.log("Found user by phone number:", userDoc.id, userData);
+      
+      return { 
+        allowed: true,
+        message: "Phone number verified",
+        uid: userDoc.id,
+        displayName: userData.displayName || "User " + normalizedPhone.slice(-4),
+        email: userData.email || "",
+        phoneNumber: normalizedPhone
+      };
     }
     
-    console.log("Checking phone:", cleanPhone);
+    // If not found in phoneNumber field, check if it's stored as displayName (for backward compatibility)
+    const nameQuery = query(
+      collection(db, "users"),
+      where("displayName", "==", normalizedPhone),
+      limit(1)
+    );
     
-    // FOR NOW: Bypass Firestore check and allow any valid phone number
-    // This is for testing until Firestore permissions are fixed
-    console.log("Bypassing Firestore check for testing");
+    const nameSnapshot = await getDocs(nameQuery);
     
+    if (!nameSnapshot.empty) {
+      const userDoc = nameSnapshot.docs[0];
+      const userData = userDoc.data();
+      
+      console.log("Found user by display name (phone):", userDoc.id, userData);
+      
+      return { 
+        allowed: true,
+        message: "Phone number verified (by display name)",
+        uid: userDoc.id,
+        displayName: userData.displayName,
+        email: userData.email || "",
+        phoneNumber: normalizedPhone
+      };
+    }
+    
+    // Phone number not found in database
     return { 
-      allowed: true,
-      message: "Phone number accepted (test mode)",
-      uid: "test_uid_" + cleanPhone,
-      displayName: "User " + cleanPhone.slice(-4),
-      email: "user_" + cleanPhone + "@example.com"
+      allowed: false, 
+      message: "Phone number not registered in system" 
     };
     
   } catch (error) {
     console.error("Error checking phone number:", error);
     
-    // Even if there's an error, allow for testing
+    // Check if error is due to Firestore permissions
+    if (error.code === 'permission-denied') {
+      return { 
+        allowed: false, 
+        message: "Database permission error. Please contact administrator." 
+      };
+    }
+    
     return { 
-      allowed: true,
-      message: "Testing mode - bypassing checks",
-      uid: "test_uid_" + Date.now(),
-      displayName: "Test User",
-      email: "test@example.com"
+      allowed: false, 
+      message: "Error checking phone number: " + error.message 
     };
   }
 }
@@ -1395,58 +1441,69 @@ async function authenticateWithPhoneNumber(phoneNumber) {
   }
 }
 
- // Passwordless phone authentication using custom tokens
-async function signInWithPhoneCustomToken(phoneNumber) {
+ // Phone authentication using existing Firebase users
+async function signInWithPhoneNumber(phoneNumber) {
   try {
-    logDiag(`Attempting custom token auth for: ${phoneNumber}`);
+    logDiag(`Attempting phone auth for: ${phoneNumber}`);
     
-    // First verify the phone number is allowed
+    // First verify the phone number is in the system
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
     
     if (!phoneCheck.allowed) {
       return { 
         success: false, 
-        message: "Phone number not registered"
+        message: phoneCheck.message || "Phone number not registered"
       };
     }
     
-    // Call the Cloud Function to generate a custom token
-    const response = await fetch('https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        phoneNumber: phoneNumber,
-        uid: phoneCheck.uid
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error('Custom token generation failed');
+    // Check if we have an email for this user
+    if (!phoneCheck.email) {
+      return {
+        success: false,
+        message: "No email associated with this phone number",
+        requiresEmail: false
+      };
     }
     
-    const data = await response.json();
+    // Try to sign in with email/password (password should be the phone number or stored in user doc)
+    // First, get the user's password from Firestore if stored
+    const userRef = doc(db, "users", phoneCheck.uid);
+    const userSnap = await getDoc(userRef);
+    const userData = userSnap.data() || {};
     
-    if (data.customToken) {
-      // Sign in with the custom token
-      const userCredential = await signInWithCustomToken(auth, data.customToken);
-      logDiag(`Custom token auth successful for UID: ${userCredential.user.uid}`);
+    let password = userData.password || phoneNumber; // Use phone as password if no password stored
+    
+    try {
+      // Try to sign in with email and password
+      const userCredential = await signInWithEmailAndPassword(auth, phoneCheck.email, password);
+      logDiag(`Phone auth successful via email: ${userCredential.user.uid}`);
       
       return {
         success: true,
         message: "Signed in successfully",
         user: userCredential.user
       };
-    } else {
-      throw new Error('No custom token received');
+    } catch (signInError) {
+      // If sign in fails, it might be because password is different
+      logDiag(`Phone auth failed: ${signInError.message}`);
+      
+      // Show email login form for user to enter their actual password
+      return {
+        success: false,
+        message: "Please enter your password",
+        requiresEmail: true,
+        email: phoneCheck.email,
+        uid: phoneCheck.uid,
+        displayName: phoneCheck.displayName
+      };
     }
     
   } catch (error) {
-    logDiag("Custom token auth error: " + error.message);
+    logDiag("Phone authentication error: " + error.message);
     return {
       success: false,
-      message: "Authentication failed: " + error.message
+      message: "Authentication error: " + error.message,
+      requiresEmail: false
     };
   }
 }
@@ -4716,14 +4773,14 @@ loginBtn.onclick = async () => {
         return;
       }
       
-      // Try custom token authentication first
+      // Try phone authentication
       if (loginStatus) loginStatus.textContent = "Signing in with phone…";
       
       try {
-        const authResult = await signInWithPhoneCustomToken(phoneNumber);
+        const authResult = await signInWithPhoneNumber(phoneNumber);
         
         if (authResult.success) {
-          // Success! Custom token authentication worked
+          // Success! Phone authentication worked
           if (loginStatus) loginStatus.textContent = "Signed in successfully!";
           logDiag(`Phone authentication successful for: ${phoneNumber}`);
           
@@ -4737,14 +4794,13 @@ loginBtn.onclick = async () => {
           return; // Authentication complete
         }
         
-        // If custom token auth failed, fall back to email/password
-        if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
-        
-        if (phoneCheck.email) {
+        // If authentication requires email/password
+        if (authResult.requiresEmail && authResult.email) {
+          if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
           // Show email/password form with pre-filled email
-          showEmailLoginForm(phoneCheck.email, phoneNumber);
+          showEmailLoginForm(authResult.email, phoneNumber);
         } else {
-          if (loginStatus) loginStatus.textContent = "No email associated with this phone number";
+          if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
         }
         
       } catch (error) {
