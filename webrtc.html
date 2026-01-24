@@ -1259,7 +1259,7 @@ function getPhoneNumberFromURL() {
 }
 
 
-// Check if phone number exists in user's allowlist
+// Check if phone number exists in the system
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
     console.log("isPhoneNumberAllowed called with:", phoneNumber);
@@ -1268,72 +1268,71 @@ async function isPhoneNumberAllowed(phoneNumber) {
       return { allowed: false, message: "Please enter a valid phone number" };
     }
     
-    // Normalize phone number format
+    // Normalize phone number format (E.164 format: +12345678901)
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
     
     console.log("Checking normalized phone:", normalizedPhone);
     
-    // Query Firestore for user with this phone number
-    // First, try to find in phoneNumber field
-    const phoneQuery = query(
-      collection(db, "users"),
-      where("phoneNumber", "==", normalizedPhone),
-      limit(1)
-    );
-    
-    const phoneSnapshot = await getDocs(phoneQuery);
-    
-    if (!phoneSnapshot.empty) {
-      const userDoc = phoneSnapshot.docs[0];
-      const userData = userDoc.data();
-      
-      console.log("Found user by phone number:", userDoc.id, userData);
-      
+    // Check if this looks like a valid phone number
+    if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
       return { 
-        allowed: true,
-        message: "Phone number verified",
-        uid: userDoc.id,
-        displayName: userData.displayName || "User " + normalizedPhone.slice(-4),
-        email: userData.email || "",
-        phoneNumber: normalizedPhone
+        allowed: false, 
+        message: "Please enter a valid phone number with country code (format: +12345678901)" 
       };
     }
     
-    // If not found in phoneNumber field, check if it's stored as displayName (for backward compatibility)
-    const nameQuery = query(
-      collection(db, "users"),
-      where("displayName", "==", normalizedPhone),
-      limit(1)
-    );
+    // Check if phone number exists in phoneLookup collection
+    const phoneLookupRef = doc(db, "phoneLookup", normalizedPhone);
+    const phoneLookupSnap = await getDoc(phoneLookupRef);
     
-    const nameSnapshot = await getDocs(nameQuery);
-    
-    if (!nameSnapshot.empty) {
-      const userDoc = nameSnapshot.docs[0];
-      const userData = userDoc.data();
-      
-      console.log("Found user by display name (phone):", userDoc.id, userData);
-      
+    if (!phoneLookupSnap.exists()) {
       return { 
-        allowed: true,
-        message: "Phone number verified (by display name)",
-        uid: userDoc.id,
-        displayName: userData.displayName,
-        email: userData.email || "",
-        phoneNumber: normalizedPhone
+        allowed: false, 
+        message: "Phone number not registered in system" 
       };
     }
     
-    // Phone number not found in database
+    const phoneData = phoneLookupSnap.data();
+    const userId = phoneData.uid;
+    
+    if (!userId) {
+      return { 
+        allowed: false, 
+        message: "Phone number mapping incomplete" 
+      };
+    }
+    
+    // Get user details from users collection
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (!userSnap.exists()) {
+      return { 
+        allowed: false, 
+        message: "User account not found" 
+      };
+    }
+    
+    const userData = userSnap.data();
+    
+    console.log("Found user for phone:", {
+      phone: normalizedPhone,
+      uid: userId,
+      userData: userData
+    });
+    
     return { 
-      allowed: false, 
-      message: "Phone number not registered in system" 
+      allowed: true,
+      message: "Phone number verified",
+      uid: userId,
+      displayName: userData.displayName || "User " + normalizedPhone.slice(-4),
+      email: userData.email || "",
+      phoneNumber: normalizedPhone
     };
     
   } catch (error) {
     console.error("Error checking phone number:", error);
     
-    // Check if error is due to Firestore permissions
     if (error.code === 'permission-denied') {
       return { 
         allowed: false, 
@@ -1441,7 +1440,7 @@ async function authenticateWithPhoneNumber(phoneNumber) {
   }
 }
 
- // Phone authentication using existing Firebase users
+// Phone authentication using existing Firebase users
 async function signInWithPhoneNumber(phoneNumber) {
   try {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
@@ -1465,38 +1464,19 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Try to sign in with email/password (password should be the phone number or stored in user doc)
-    // First, get the user's password from Firestore if stored
-    const userRef = doc(db, "users", phoneCheck.uid);
-    const userSnap = await getDoc(userRef);
-    const userData = userSnap.data() || {};
+    // Since users were created with email/password, we need their actual password
+    // We can't retrieve passwords from Firebase, so we need to ask the user
+    logDiag(`Phone verified. User email: ${phoneCheck.email}`);
     
-    let password = userData.password || phoneNumber; // Use phone as password if no password stored
-    
-    try {
-      // Try to sign in with email and password
-      const userCredential = await signInWithEmailAndPassword(auth, phoneCheck.email, password);
-      logDiag(`Phone auth successful via email: ${userCredential.user.uid}`);
-      
-      return {
-        success: true,
-        message: "Signed in successfully",
-        user: userCredential.user
-      };
-    } catch (signInError) {
-      // If sign in fails, it might be because password is different
-      logDiag(`Phone auth failed: ${signInError.message}`);
-      
-      // Show email login form for user to enter their actual password
-      return {
-        success: false,
-        message: "Please enter your password",
-        requiresEmail: true,
-        email: phoneCheck.email,
-        uid: phoneCheck.uid,
-        displayName: phoneCheck.displayName
-      };
-    }
+    // Show email login form for user to enter their actual password
+    return {
+      success: false,
+      message: "Please enter your password",
+      requiresEmail: true,
+      email: phoneCheck.email,
+      uid: phoneCheck.uid,
+      displayName: phoneCheck.displayName
+    };
     
   } catch (error) {
     logDiag("Phone authentication error: " + error.message);
