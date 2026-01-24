@@ -1397,9 +1397,9 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Use generateCustomToken - it's already working
+    // USE generateCustomToken INSTEAD of phoneNumberLogin
     const response = await fetch(
-      'https://us-central1-easosunov-webrtc.cloudfunctions.net/phoneNumberLogin',
+      'https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
