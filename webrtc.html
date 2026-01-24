@@ -1405,9 +1405,7 @@ async function signInWithPhoneNumber(phoneNumber) {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
     
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    console.log("=== PHONE CHECK RESULT ===");
-    console.log(JSON.stringify(phoneCheck, null, 2));
-    console.log("=== END PHONE CHECK ===");
+    console.log("Phone check result:", phoneCheck);
     
     if (!phoneCheck.allowed) {
       return { 
@@ -1416,123 +1414,30 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Clean up email and password - remove any surrounding quotes and whitespace
-    function cleanCredential(str) {
-      if (typeof str !== 'string') {
-        console.warn(`cleanCredential: input is not a string:`, str);
-        return str || '';
-      }
-      
-      // Log the raw input
-      console.log(`cleanCredential input: "${str}" (length: ${str.length})`);
-      
-      // Show character codes for debugging
-      const chars = Array.from(str).map((c, i) => `${i}: '${c}' (${c.charCodeAt(0)})`);
-      console.log(`Character analysis:`, chars);
-      
-      // Remove surrounding quotes
-      let cleaned = str.replace(/^['"`]+|['"`]+$/g, '');
-      
-      // Remove all whitespace (spaces, tabs, newlines)
-      cleaned = cleaned.replace(/\s/g, '');
-      
-      // Remove any other invisible characters
-      cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
-      
-      console.log(`cleanCredential output: "${cleaned}" (length: ${cleaned.length})`);
-      return cleaned;
-    }
+    // Clean up email and password - remove any surrounding quotes
+    const cleanEmail = cleanString(phoneCheck.email);
+    const cleanPassword = cleanString(phoneCheck.password);
     
-    const cleanEmail = cleanCredential(phoneCheck.email);
-    const cleanPassword = cleanCredential(phoneCheck.password);
-    
-    console.log("=== CLEANED CREDENTIALS ===");
-    console.log(`Email: "${cleanEmail}" (original: "${phoneCheck.email}")`);
-    console.log(`Password: "${cleanPassword}" (original: "${phoneCheck.password}")`);
-    console.log(`Email length: ${cleanEmail.length}, Password length: ${cleanPassword.length}`);
-    console.log("=== END CREDENTIALS ===");
+    console.log("Original email:", phoneCheck.email, "Cleaned email:", cleanEmail);
+    console.log("Original password:", phoneCheck.password, "Cleaned password:", cleanPassword);
     
     // Clear any existing auth first
     try {
       await signOut(auth);
       console.log("Cleared any existing auth");
     } catch (e) {
-      console.log("No existing auth to clear or error:", e.message);
+      // Ignore
     }
     
     // Test the credentials with a simple fetch first
     console.log("Testing credentials...");
-    console.log(`Attempting login with email: "${cleanEmail}" and password: "${cleanPassword}"`);
-    
     const testResult = await testEmailPasswordLogin(
       cleanEmail, 
       cleanPassword
     );
     
-    console.log("Test result:", testResult);
-    
     if (!testResult.success) {
-      console.error("=== CREDENTIALS TEST FAILED ===");
-      console.error("Error:", testResult.error);
-      console.error("Email used:", JSON.stringify(cleanEmail));
-      console.error("Password used:", JSON.stringify(cleanPassword));
-      console.error("=== END FAILURE ===");
-      
-      // Try one more test - direct Firebase auth without the test function
-      console.log("Attempting direct Firebase auth as fallback...");
-      try {
-        const userCredential = await signInWithEmailAndPassword(
-          auth, 
-          cleanEmail, 
-          cleanPassword
-        );
-        console.log("Direct Firebase auth successful!");
-        logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
-        return { 
-          success: true, 
-          message: "Signed in!", 
-          uid: phoneCheck.uid 
-        };
-      } catch (directError) {
-        console.error("Direct Firebase auth also failed:", directError.code, directError.message);
-        
-        // Try common variations of the password
-        console.log("Testing password variations...");
-        const variations = [
-          cleanPassword,
-          cleanPassword.toLowerCase(),
-          cleanPassword.toUpperCase(),
-          'telefon123',
-          'Telefon',
-          'Telefon123',
-          'Telefon!',
-          'telefon!',
-          'password',
-          'Password'
-        ];
-        
-        for (let i = 0; i < variations.length; i++) {
-          const variation = variations[i];
-          if (variation === cleanPassword) continue; // Skip already tried
-          
-          console.log(`Testing variation ${i+1}: "${variation}"`);
-          try {
-            const test = await signInWithEmailAndPassword(auth, cleanEmail, variation);
-            console.log(`SUCCESS with variation "${variation}"!`);
-            logDiag(`Phone authentication successful with password variation! UID: ${phoneCheck.uid}`);
-            return { 
-              success: true, 
-              message: "Signed in!", 
-              uid: phoneCheck.uid,
-              note: `Used password variation: ${variation}`
-            };
-          } catch (e) {
-            // Continue to next variation
-          }
-        }
-        
-        throw new Error(`Credentials test failed: ${testResult.error}. Tried ${variations.length} password variations.`);
-      }
+      throw new Error(`Credentials test failed: ${testResult.error}`);
     }
     
     console.log("Credentials test passed, attempting Firebase login...");
@@ -1545,12 +1450,6 @@ async function signInWithPhoneNumber(phoneNumber) {
     );
     
     console.log("Firebase login successful! User:", userCredential.user.uid);
-    console.log("Expected UID from phone data:", phoneCheck.uid);
-    
-    // Verify UID matches
-    if (userCredential.user.uid !== phoneCheck.uid) {
-      console.warn(`UID mismatch! Firebase: ${userCredential.user.uid}, Phone data: ${phoneCheck.uid}`);
-    }
     
     logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
     return { 
@@ -1569,29 +1468,11 @@ async function signInWithPhoneNumber(phoneNumber) {
     
     // Try to parse Firebase error
     if (error.code && error.code.startsWith('auth/')) {
-      let userMessage = error.message;
-      
-      // User-friendly messages
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
-        userMessage = "Invalid email or password. Please check the credentials in your Firestore document.";
-      } else if (error.code === 'auth/user-not-found') {
-        userMessage = "User not found in Firebase Authentication. Please register this email/password in Firebase Auth first.";
-      } else if (error.code === 'auth/too-many-requests') {
-        userMessage = "Too many failed attempts. Please try again later.";
-      }
-      
-      return { 
-        success: false, 
-        message: `Authentication error: ${userMessage}`,
-        code: error.code
-      };
+      return { success: false, message: `Authentication error: ${error.message}` };
     }
     
     logDiag("Phone auth error: " + error.message);
-    return { 
-      success: false, 
-      message: "Error: " + error.message 
-    };
+    return { success: false, message: "Error: " + error.message };
   }
 }
 
