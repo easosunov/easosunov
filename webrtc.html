@@ -804,120 +804,177 @@ const remoteVideo = document.getElementById("remoteVideo");
 
  
 /* ================== PHONE DIAL EVENT LISTENERS ================== */
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
+
 // Initialize phone dial functionality
 function initializePhoneDial() {
-  console.log('=== initializePhoneDial() called ===');
+  console.log("=== initializePhoneDial() called ===");
   
-  // Get elements fresh each time
-  const dialPad = document.getElementById('dialPad');
-  const phoneDisplay = document.getElementById('phoneDisplay');
-  const backspaceBtn = document.getElementById('backspaceBtn');
-  const clearBtn = document.getElementById('clearBtn');
+  const elements = {
+    dialPad: document.getElementById('dialPad'),
+    phoneDisplay: document.getElementById('phoneDisplay'),
+    backspaceBtn: document.getElementById('backspaceBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+    loginBtn: document.getElementById('loginBtn')
+  };
   
-  console.log('Elements found:', {
-    dialPad: !!dialPad,
-    phoneDisplay: !!phoneDisplay,
-    backspaceBtn: !!backspaceBtn,
-    clearBtn: !!clearBtn
+  console.log("Elements found:", {
+    dialPad: !!elements.dialPad,
+    phoneDisplay: !!elements.phoneDisplay,
+    backspaceBtn: !!elements.backspaceBtn,
+    clearBtn: !!elements.clearBtn,
+    loginBtn: !!elements.loginBtn
   });
   
-  if (!dialPad || !phoneDisplay) {
-    console.error('Required elements missing!');
-    return;
-  }
-  
-  // Reset to ensure we're using the global variable
-  window.dialedNumber = "";
-  
-// Update phone display
-function updatePhoneDisplay() {
-  phoneDisplay.innerHTML = window.dialedNumber + ' <span id="cursor" style="color:#1976d2;animation:blink 1s infinite">|</span>';
-  console.log('Display updated:', window.dialedNumber);
+  // Update phone display first
+  if (elements.phoneDisplay) {
+    // MAKE DISPLAY LARGE
+  elements.phoneDisplay.style.cssText = `
+    font-size: 56px;
+    text-align: center;
+    margin: 40px 0;
+    padding: 25px;
+    background: #f8f8f8;
+    border-radius: 20px;
+    border: 4px solid #ccc;
+    min-height: 100px;
+    letter-spacing: 4px;
+    font-weight: 900;
+    color: #222;
+    box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+  `;
+  elements.phoneDisplay.textContent = '+';
+  console.log("Initial display set");
 }
   
-  // Initialize display
-  phoneDisplay.textContent = window.dialedNumber;
-  console.log('Initial display set');
-  
-  // Clear any existing event listeners first
-  const newDialPad = dialPad.cloneNode(true);
-  dialPad.parentNode.replaceChild(newDialPad, dialPad);
-  
-  // Get fresh reference
-  const freshDialPad = document.getElementById('dialPad');
-  
-// Use event delegation on the fresh dial pad
-freshDialPad.addEventListener('click', (e) => {
-  console.log('Dial pad clicked, target:', e.target);
-  
-  // Find the dial button that was clicked
-  const dialBtn = e.target.closest('.dial-btn');
-  if (dialBtn) {
-    const number = dialBtn.getAttribute('data-number');
-    console.log('Dial button clicked:', number);
-    
-    if (number) {
-      window.dialedNumber += number;
-      updatePhoneDisplay();
-    }
+  // Update special buttons with LARGE symbols and small text
+  if (elements.backspaceBtn) {
+    elements.backspaceBtn.innerHTML = `
+      <div style="font-size: 36px; font-weight: bold; margin-bottom: 3px;">⌫</div>
+      <div style="font-size: 12px; opacity: 0.9;">Backspace</div>
+    `;
+    elements.backspaceBtn.style.cssText = `
+      font-size: 12px;
+      padding: 15px 8px;
+      background: #ffebee;
+      border: 3px solid #f44336;
+      color: #c62828;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-height: 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    `;
   }
-});
   
-  // Backspace button
-  if (backspaceBtn) {
-    // Clone to remove old listeners
-    const newBackspace = backspaceBtn.cloneNode(true);
-    backspaceBtn.parentNode.replaceChild(newBackspace, backspaceBtn);
+  if (elements.clearBtn) {
+    elements.clearBtn.innerHTML = `
+      <div style="font-size: 36px; font-weight: bold; margin-bottom: 3px;">✕</div>
+      <div style="font-size: 12px; opacity: 0.9;">Clear</div>
+    `;
+    elements.clearBtn.style.cssText = `
+      font-size: 12px;
+      padding: 15px 8px;
+      background: #fff8e1;
+      border: 3px solid #ffc107;
+      color: #ff8f00;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-height: 60px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    `;
+  }
+  
+  if (elements.loginBtn) {
+    elements.loginBtn.innerHTML = `
+      <div style="font-size: 36px; font-weight: bold; margin-bottom: 3px;">↵</div>
+      <div style="font-size: 12px; opacity: 0.9;">Enter / Dial to Sign In</div>
+    `;
+    elements.loginBtn.style.cssText = `
+      font-size: 12px;
+      padding: 15px 8px;
+      background: #e8f5e9;
+      border: 3px solid #4caf50;
+      color: #2e7d32;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      min-height: 60px;
+      width: 100%;
+      margin: 10px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    `;
+  }
+  
+  // Now update the dial pad buttons
+  if (elements.dialPad) {
+    console.log("Adding direct handlers to 12 buttons");
     
-    // Get fresh reference and add listener
-    document.getElementById('backspaceBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Backspace clicked');
+    // Get all buttons in the dial pad
+    const buttons = elements.dialPad.querySelectorAll('button');
+    console.log(`Found ${buttons.length} buttons`);
+    
+    buttons.forEach((button, index) => {
+      const buttonText = button.textContent.trim();
       
-      if (window.dialedNumber.length > 0) {
-        window.dialedNumber = window.dialedNumber.slice(0, -1);
-        updatePhoneDisplay();
+      // Skip special buttons (they already have IDs)
+      if (button.id) return;
+      
+      // Check if this is a number button (0-9 or +)
+      if (/^[0-9\+]$/.test(buttonText)) {
+        // MAKE NUMBER BUTTONS EXTRA LARGE
+        button.style.cssText = `
+          font-size: 42px;
+          font-weight: 900;
+          padding: 30px 20px;
+          background: linear-gradient(145deg, #ffffff, #e6e6e6);
+          border: 4px solid #bbb;
+          border-radius: 20px;
+          cursor: pointer;
+          transition: all 0.2s;
+          min-height: 100px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #333;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        `;
+        
+        // Add hover effects
+        button.addEventListener('mouseenter', () => {
+          button.style.background = 'linear-gradient(145deg, #f0f0f0, #d6d6d6)';
+          button.style.transform = 'scale(1.05)';
+        });
+        
+        button.addEventListener('mouseleave', () => {
+          button.style.background = 'linear-gradient(145deg, #ffffff, #e6e6e6)';
+          button.style.transform = 'scale(1)';
+        });
+        
+        button.addEventListener('mousedown', () => {
+          button.style.background = 'linear-gradient(145deg, #e0e0e0, #c6c6c6)';
+          button.style.transform = 'scale(0.95)';
+        });
+        
+        button.addEventListener('mouseup', () => {
+          button.style.background = 'linear-gradient(145deg, #f0f0f0, #d6d6d6)';
+          button.style.transform = 'scale(1.05)';
+        });
       }
     });
   }
   
-  // Clear button
-  if (clearBtn) {
-    // Clone to remove old listeners
-    const newClear = clearBtn.cloneNode(true);
-    clearBtn.parentNode.replaceChild(newClear, clearBtn);
-    
-    // Get fresh reference and add listener
-    document.getElementById('clearBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Clear clicked');
-      
-      window.dialedNumber = "";
-      updatePhoneDisplay();
-    });
-  }
-  
-// Add direct click handlers to buttons as backup
-setTimeout(() => {
-  const buttons = document.querySelectorAll('.dial-btn');
-  console.log('Adding direct handlers to', buttons.length, 'buttons');
-  
-  buttons.forEach(btn => {
-    const number = btn.getAttribute('data-number');
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      console.log('DIRECT: Button', number, 'clicked');
-      
-    if (number) {
-      window.dialedNumber += number;
-      updatePhoneDisplay();
-    }
-    });
-  });
-}, 100);
-  
-  console.log('Phone dial initialized');
+  console.log("Phone dial initialized");
+  console.log("Test function available: window.testDialPad()");
 }
 
 
