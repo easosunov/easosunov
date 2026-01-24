@@ -4701,8 +4701,9 @@ loginBtn.onclick = async () => {
     wasManualLogin = true;
     
     try {
-      // Get the dialed number
+      // Get the dialed number - store it for Firestore submission
       const phoneNumber = window.dialedNumber || dialedNumber;
+      window.submittedPhoneNumber = phoneNumber; // Store for authentication
       
       if (loginStatus) loginStatus.textContent = "Verifying phone number…";
       
