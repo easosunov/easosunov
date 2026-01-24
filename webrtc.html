@@ -1405,6 +1405,7 @@ async function signInWithPhoneNumber(phoneNumber) {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
     
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+    console.log("Phone check result:", phoneCheck);
     
     if (!phoneCheck.allowed) {
       return { 
@@ -1413,21 +1414,35 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Get user document from Firestore to get email and password
-    const userDoc = await getDoc(doc(db, "users", phoneCheck.uid));
-    
-    if (!userDoc.exists()) {
-      throw new Error("User document not found");
+    // Clear any existing auth first
+    try {
+      await signOut(auth);
+      console.log("Cleared any existing auth");
+    } catch (e) {
+      // Ignore
     }
     
-    const userData = userDoc.data();
+    // Test the credentials with a simple fetch first
+    console.log("Testing credentials...");
+    const testResult = await testEmailPasswordLogin(
+      phoneCheck.email, 
+      phoneCheck.password
+    );
     
-    if (!userData.email || !userData.password) {
-      throw new Error("User credentials incomplete (missing email or password)");
+    if (!testResult.success) {
+      throw new Error(`Credentials test failed: ${testResult.error}`);
     }
     
-    // Sign in with email and password instead of custom token
-    await signInWithEmailAndPassword(auth, userData.email, userData.password);
+    console.log("Credentials test passed, attempting Firebase login...");
+    
+    // Sign in with email and password
+    const userCredential = await signInWithEmailAndPassword(
+      auth, 
+      phoneCheck.email, 
+      phoneCheck.password
+    );
+    
+    console.log("Firebase login successful! User:", userCredential.user.uid);
     
     logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
     return { 
@@ -1437,8 +1452,62 @@ async function signInWithPhoneNumber(phoneNumber) {
     };
     
   } catch (error) {
+    console.error("=== SIGN IN ERROR ===");
+    console.error("Error object:", error);
+    console.error("Error name:", error.name);
+    console.error("Error code:", error.code);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    
+    // Try to parse Firebase error
+    if (error.code && error.code.startsWith('auth/')) {
+      return { success: false, message: `Authentication error: ${error.message}` };
+    }
+    
     logDiag("Phone auth error: " + error.message);
     return { success: false, message: "Error: " + error.message };
+  }
+}
+
+// Helper function to test credentials via REST API
+async function testEmailPasswordLogin(email, password) {
+  try {
+    const apiKey = "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98"; // Your Firebase API key
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: email,
+        password: password,
+        returnSecureToken: true
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      return {
+        success: false,
+        error: data.error.message,
+        code: data.error.code
+      };
+    }
+    
+    return {
+      success: true,
+      userId: data.localId,
+      email: data.email
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
  
@@ -4665,65 +4734,47 @@ logoutBtn.onclick = async () => {
 
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
-  // First, attempt Android phone auto-login before processing auth state
-  if (!isAutoLoginAttempted) {
-    await attemptPhoneNumberAutoLogin();
-  }
+  console.log("=== onAuthStateChanged FIRED ===");
+  console.log("User:", user?.uid);
   
   isAuthed = !!user;
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
-    try{ await enforceAllowlist(user); }
+    try{ 
+      console.log("1. Checking allowlist...");
+      await enforceAllowlist(user); 
+      console.log("Allowlist check passed");
+    }
     catch(e){
+      console.error("Allowlist check failed:", e);
       showError(e);
-
-      // restore locked UI so login doesn't look frozen
-      loginOverlay.style.display = "flex";
-      appRoot.classList.add("locked");
-      logoutBtn.style.display = "none";
-      startBtn.disabled = true;
-
       return;
     }
 
-    // Single-user lock: reaffirm ownership after allowlist passes
+    // Single-user lock
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
 
-    // Hide login overlay if this was a manual login
-    if (wasManualLogin) {
-      loginOverlay.style.display = "none";
-      appRoot.classList.remove("locked");
-      wasManualLogin = false;
-    } else {
-      // Auto-authenticated - still allow access
-      loginOverlay.style.display = "none";
-      appRoot.classList.remove("locked");
-    }
-    
+    // Hide login overlay
+    loginOverlay.style.display = "none";
+    appRoot.classList.remove("locked");
     logoutBtn.style.display = "inline-block";
     if (loginStatus) loginStatus.textContent = "Signed in.";
 
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    // ===== NEW: enable quality selector once authed =====
+    // Enable UI elements
     videoQualitySelect.disabled = false;
     updateVideoQualityUi();
-
-    // ===== NEW: enable call mode radio buttons once authed =====
     testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
-
-    await rotateFcmTokenIfUserChanged();
-    autoEnablePushOnLogin();
-
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
-    /* ADD THIS LINE: Show utility logout button when signed in */
+    /* Show utility logout button */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "inline-block";
         logoutUtilityBtn.disabled = false;
@@ -4731,36 +4782,51 @@ onAuthStateChanged(auth, async (user)=>{
     
     hangupBtn.disabled = true;
     hangupBtn.className = "hangup-btn-inactive";
-
     refreshCopyInviteState();
 
-    try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
-    await catchUpMissedRingingCall();
-    await catchUpMissedCallNotification();
-    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
-    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
-    try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
-    // Process any pending notifications after auth
-    await processPendingNotifications();
-    
-    // Update user info with phone/email badge
-    updateUserInfo();
-
-    if (pendingIncomingCallWhileLoggedOut?.id) {
-      const callId = pendingIncomingCallWhileLoggedOut.id;
-      updateDoc(doc(db,"calls", callId), {
-        deliveredAt: serverTimestamp(),
-        deliveredVia: "push_open"
-      }).catch(()=>{});
+    // Try other Firestore operations one by one
+    try{ 
+      console.log("2. Setting up incoming calls listener...");
+      await listenIncomingCalls(); 
+      console.log("Incoming calls listener set up");
+    } catch(e){ 
+      console.error("Incoming listener failed: " + e.message); 
     }
-
-    // Update background service status
+    
+    try{ 
+      console.log("3. Setting up user profile...");
+      await ensureMyUserProfile(user); 
+      console.log("User profile set up");
+    } catch(e){ 
+      console.error("ensureMyUserProfile failed: " + e.message); 
+    }
+    
+    try{ 
+      console.log("4. Loading allowed users...");
+      await loadAllAllowedUsers(); 
+      console.log("Allowed users loaded");
+    } catch(e){ 
+      console.error("loadAllAllowedUsers failed: " + e.message); 
+    }
+    
+    try{ 
+      console.log("5. Loading recent calls...");
+      await loadRecentCalls(); 
+      console.log("Recent calls loaded");
+    } catch(e){ 
+      console.error("loadRecentCalls failed: " + e.message); 
+    }
+    
+    // Process pending notifications
+    await processPendingNotifications();
+    updateUserInfo();
     updateServiceStatus();
-    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
+    setInterval(updateServiceStatus, 30000);
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
+
     // If we have Android phone login but no Firebase user, handle it
     if (isAndroidPhoneLogin && !user) {
       await handleAndroidPhoneAuthentication();
