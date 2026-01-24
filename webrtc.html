@@ -3808,18 +3808,6 @@ function updatePersonBTitle(username = 'Other') {
 }
 
 // Function to update user info display with phone/email badges
-function updateUserInfo() {
-  const userInfoDiv = document.getElementById('personATitle');
-  if (userInfoDiv && myDisplayName) {
-    let infoHtml = `Person A (${myDisplayName})`;
-    if (isAndroidPhoneLogin && userPhone) {
-      infoHtml += ` <span class="phone-badge">📱 ${userPhone}</span>`;
-    } else if (auth.currentUser?.email) {
-      infoHtml += ` <span class="email-badge">✉️ ${auth.currentUser.email}</span>`;
-    }
-    userInfoDiv.innerHTML = infoHtml;
-  }
-}
  
 async function saveMyName(){
   if(!requireAuthOrPrompt()) return;
