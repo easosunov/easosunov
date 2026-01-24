@@ -1405,6 +1405,7 @@ async function signInWithPhoneNumber(phoneNumber) {
     logDiag(`Attempting phone auth for: ${phoneNumber}`);
     
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
+    console.log("Phone check result:", phoneCheck);
     
     if (!phoneCheck.allowed) {
       return { 
@@ -1413,21 +1414,35 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Get user document from Firestore to get email and password
-    const userDoc = await getDoc(doc(db, "users", phoneCheck.uid));
-    
-    if (!userDoc.exists()) {
-      throw new Error("User document not found");
+    // Clear any existing auth first
+    try {
+      await signOut(auth);
+      console.log("Cleared any existing auth");
+    } catch (e) {
+      // Ignore
     }
     
-    const userData = userDoc.data();
+    // Test the credentials with a simple fetch first
+    console.log("Testing credentials...");
+    const testResult = await testEmailPasswordLogin(
+      phoneCheck.email, 
+      phoneCheck.password
+    );
     
-    if (!userData.email || !userData.password) {
-      throw new Error("User credentials incomplete (missing email or password)");
+    if (!testResult.success) {
+      throw new Error(`Credentials test failed: ${testResult.error}`);
     }
     
-    // Sign in with email and password instead of custom token
-    await signInWithEmailAndPassword(auth, userData.email, userData.password);
+    console.log("Credentials test passed, attempting Firebase login...");
+    
+    // Sign in with email and password
+    const userCredential = await signInWithEmailAndPassword(
+      auth, 
+      phoneCheck.email, 
+      phoneCheck.password
+    );
+    
+    console.log("Firebase login successful! User:", userCredential.user.uid);
     
     logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
     return { 
@@ -1437,8 +1452,62 @@ async function signInWithPhoneNumber(phoneNumber) {
     };
     
   } catch (error) {
+    console.error("=== SIGN IN ERROR ===");
+    console.error("Error object:", error);
+    console.error("Error name:", error.name);
+    console.error("Error code:", error.code);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    
+    // Try to parse Firebase error
+    if (error.code && error.code.startsWith('auth/')) {
+      return { success: false, message: `Authentication error: ${error.message}` };
+    }
+    
     logDiag("Phone auth error: " + error.message);
     return { success: false, message: "Error: " + error.message };
+  }
+}
+
+// Helper function to test credentials via REST API
+async function testEmailPasswordLogin(email, password) {
+  try {
+    const apiKey = "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98"; // Your Firebase API key
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: email,
+        password: password,
+        returnSecureToken: true
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.error) {
+      return {
+        success: false,
+        error: data.error.message,
+        code: data.error.code
+      };
+    }
+    
+    return {
+      success: true,
+      userId: data.localId,
+      email: data.email
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
  
