@@ -4692,9 +4692,8 @@ function requireAuthOrPrompt(){
 loginBtn.onclick = async () => {
   hideErrorBox();
   
-      // Get the dialed number - store it for Firestore submission
-      const phoneNumber = window.dialedNumber || dialedNumber;
-      window.submittedPhoneNumber = phoneNumber; // Store for authentication
+  // Check if we're in phone dial mode or email mode
+  const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
   
   if (isPhoneDialMode) {
     // PHONE DIAL LOGIN
