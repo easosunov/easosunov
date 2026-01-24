@@ -1262,70 +1262,71 @@ function getPhoneNumberFromURL() {
 }
 
 
+// Check if phone number exists in the system
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
-    console.log("=== DEBUG isPhoneNumberAllowed START ===");
-    console.log("1. Phone number:", phoneNumber);
+    console.log("isPhoneNumberAllowed called with:", phoneNumber);
     
-    // Normalize phone number format
+    if (!phoneNumber || phoneNumber === "") {
+      return { allowed: false, message: "Please enter a valid phone number" };
+    }
+    
+    // Normalize phone number format (E.164 format: +12345678901)
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
-    console.log("2. Normalized phone:", normalizedPhone);
+    
+    console.log("Checking normalized phone:", normalizedPhone);
+    
+    // Check if this looks like a valid phone number
+    if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
+      return { 
+        allowed: false, 
+        message: "Please enter a valid phone number with country code (format: +12345678901)" 
+      };
+    }
     
     // Check if phone number exists in phones collection
-    console.log("3. Creating document reference...");
+    console.log("DEBUG: Querying phones collection for:", normalizedPhone);
     const phoneLookupRef = doc(db, "phones", normalizedPhone);
-    console.log("4. Document path:", phoneLookupRef.path);
-    console.log("5. Database app:", db.app.name);
-    console.log("6. Database project:", db.app.options.projectId);
-    
-    console.log("7. Attempting getDoc...");
     const phoneLookupSnap = await getDoc(phoneLookupRef);
-    console.log("8. getDoc completed, exists?", phoneLookupSnap.exists());
     
     if (!phoneLookupSnap.exists()) {
-      console.log("9. Document does not exist");
-      return { allowed: false, message: "Phone number not registered in system" };
+      return { 
+        allowed: false, 
+        message: "Phone number not registered in system" 
+      };
     }
     
     const phoneData = phoneLookupSnap.data();
-    console.log("10. Document data:", phoneData);
     const userId = phoneData.uid;
-    console.log("11. User ID from document:", userId);
     
-    // Get user details from users collection
-    console.log("12. Querying users collection...");
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
-    console.log("13. User exists?", userSnap.exists());
-    
-    if (!userSnap.exists()) {
-      console.log("14. User document not found");
-      return { allowed: false, message: "User account not found" };
+    if (!userId) {
+      return { 
+        allowed: false, 
+        message: "Phone number mapping incomplete" 
+      };
     }
     
-    const userData = userSnap.data();
-    console.log("15. User data:", userData);
+    console.log("Found phone mapping:", {
+      phone: normalizedPhone,
+      uid: userId,
+      phoneData: phoneData
+    });
     
-    console.log("=== DEBUG isPhoneNumberAllowed END ===");
+    // NOTE: We're NOT querying the users collection here
+    // User details will be fetched after authentication
     
     return { 
       allowed: true,
       message: "Phone number verified",
       uid: userId,
-      displayName: userData.displayName || "User " + normalizedPhone.slice(-4),
-      email: userData.email || "",
       phoneNumber: normalizedPhone
+      // Removed: displayName, email - will get these later
     };
     
   } catch (error) {
-    console.error("=== DEBUG ERROR ===");
-    console.error("Error in isPhoneNumberAllowed:", error);
-    console.error("Error code:", error.code);
-    console.error("Error message:", error.message);
-    console.error("Full error:", error);
+    console.error("Error checking phone number:", error);
     
     if (error.code === 'permission-denied') {
-      console.error("PERMISSION DENIED - Check Firestore rules");
       return { 
         allowed: false, 
         message: "Database permission error. Please contact administrator." 
@@ -1448,27 +1449,17 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // Check if we have an email for this user
-    if (!phoneCheck.email) {
-      return {
-        success: false,
-        message: "No email associated with this phone number",
-        requiresEmail: false
-      };
-    }
+    // We have the user ID, but we don't have email yet
+    // We need to get the email from Firestore after authentication
     
-    // Since users were created with email/password, we need their actual password
-    // We can't retrieve passwords from Firebase, so we need to ask the user
-    logDiag(`Phone verified. User email: ${phoneCheck.email}`);
+    logDiag(`Phone verified. User ID: ${phoneCheck.uid}`);
     
-    // Show email login form for user to enter their actual password
     return {
       success: false,
-      message: "Please enter your password",
-      requiresEmail: true,
-      email: phoneCheck.email,
+      message: "Phone verified. Please sign in with your credentials.",
+      requiresCredentials: true,
       uid: phoneCheck.uid,
-      displayName: phoneCheck.displayName
+      phoneNumber: phoneCheck.phoneNumber
     };
     
   } catch (error) {
@@ -1476,7 +1467,7 @@ async function signInWithPhoneNumber(phoneNumber) {
     return {
       success: false,
       message: "Authentication error: " + error.message,
-      requiresEmail: false
+      requiresCredentials: false
     };
   }
 }
@@ -1583,6 +1574,65 @@ function showEmailLoginForm(email, phoneNumber) {
   }, 100);
 }
 
+
+// Show generic email login form (when we can't read user email)
+function showGenericEmailLoginForm(phoneNumber) {
+  if (!document.querySelector('#loginCard')) return;
+  
+  document.querySelector('#loginCard').innerHTML = `
+    <button id="logoutBtn" style="display:none;">Logout</button>
+    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Sign In</h2>
+    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">
+      Phone: <strong>${phoneNumber || ''}</strong> verified
+    </div>
+    
+    <div style="margin:20px 0;">
+      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
+      <input id="emailInput" type="email" placeholder="Enter your registered email" autocomplete="username" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+    </div>
+    
+    <div style="margin:20px 0;">
+      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
+      <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
+    </div>
+    
+    <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
+      Sign In
+    </button>
+    
+    <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
+      Enter the email associated with this phone number
+    </div>
+    
+    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
+      <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
+        ← Use Different Phone Number
+      </button>
+    </div>
+  `;
+  
+  // Re-attach event listeners
+  setTimeout(() => {
+    const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const emailInput = document.getElementById('emailInput');
+    
+    if (showPhoneLoginBtn) {
+      showPhoneLoginBtn.addEventListener('click', () => {
+        location.reload();
+      });
+    }
+    
+    if (loginBtn) {
+      loginBtn.addEventListener('click', handleEmailLogin);
+    }
+    
+    if (emailInput) {
+      emailInput.focus();
+    }
+  }, 100);
+}
+ 
 // Handle email login
 async function handleEmailLogin() {
   const emailInput = document.getElementById('emailInput');
@@ -4746,41 +4796,71 @@ loginBtn.onclick = async () => {
         return;
       }
       
-      // Try phone authentication
-      if (loginStatus) loginStatus.textContent = "Signing in with phone…";
+// Try phone authentication
+if (loginStatus) loginStatus.textContent = "Signing in with phone…";
+
+try {
+  const authResult = await signInWithPhoneNumber(phoneNumber);
+  
+  if (authResult.success) {
+    // Success! Phone authentication worked
+    if (loginStatus) loginStatus.textContent = "Signed in successfully!";
+    logDiag(`Phone authentication successful for: ${phoneNumber}`);
+    
+    // Claim device owner
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+    
+    return; // Authentication complete
+  }
+  
+  // If authentication requires credentials
+  if (authResult.requiresCredentials && authResult.uid) {
+    if (loginStatus) loginStatus.textContent = "Phone verified. Loading user details...";
+    
+    // Try to get user email (we might have permission if user is signed in elsewhere)
+    try {
+      const userRef = doc(db, "users", authResult.uid);
+      const userSnap = await getDoc(userRef);
       
-      try {
-        const authResult = await signInWithPhoneNumber(phoneNumber);
+      if (userSnap.exists()) {
+        const userData = userSnap.data();
+        const email = userData.email;
         
-        if (authResult.success) {
-          // Success! Phone authentication worked
-          if (loginStatus) loginStatus.textContent = "Signed in successfully!";
-          logDiag(`Phone authentication successful for: ${phoneNumber}`);
-          
-          // Claim device owner
-          const uid = auth.currentUser?.uid;
-          if (uid) {
-            setDeviceOwner(uid);
-            broadcastNewOwner(uid);
-          }
-          
-          return; // Authentication complete
-        }
-        
-        // If authentication requires email/password
-        if (authResult.requiresEmail && authResult.email) {
+        if (email) {
           if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
           // Show email/password form with pre-filled email
-          showEmailLoginForm(authResult.email, phoneNumber);
+          showEmailLoginForm(email, phoneNumber);
         } else {
-          if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
+          if (loginStatus) loginStatus.textContent = "No email associated with this phone";
+          showGenericEmailLoginForm(phoneNumber);
         }
-        
-      } catch (error) {
-        if (loginStatus) loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
-        logDiag("Phone login error: " + (error?.message || error));
-        showError(error);
+      } else {
+        if (loginStatus) loginStatus.textContent = "User account not found";
+        showGenericEmailLoginForm(phoneNumber);
       }
+    } catch (error) {
+      // Can't read user details without authentication
+      console.log("Cannot read user details:", error.message);
+      if (loginStatus) loginStatus.textContent = "Phone verified. Please use email login.";
+      // Show generic email login form
+      showGenericEmailLoginForm(phoneNumber);
+    }
+    
+    return;
+  }
+  
+  // If we get here, show the error message
+  if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
+  
+} catch (error) {
+  if (loginStatus) loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
+  logDiag("Phone login error: " + (error?.message || error));
+  showError(error);
+}
       
     } catch (e) {
       if (loginStatus) loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
