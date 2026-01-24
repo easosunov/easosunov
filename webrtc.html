@@ -1262,67 +1262,51 @@ function getPhoneNumberFromURL() {
 }
 
 
-// Check if phone number exists in the system
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
-    console.log("isPhoneNumberAllowed called with:", phoneNumber);
+    console.log("=== DEBUG isPhoneNumberAllowed START ===");
+    console.log("1. Phone number:", phoneNumber);
     
-    if (!phoneNumber || phoneNumber === "") {
-      return { allowed: false, message: "Please enter a valid phone number" };
-    }
-    
-    // Normalize phone number format (E.164 format: +12345678901)
+    // Normalize phone number format
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
-    
-    console.log("Checking normalized phone:", normalizedPhone);
-    
-    // Check if this looks like a valid phone number
-    if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
-      return { 
-        allowed: false, 
-        message: "Please enter a valid phone number with country code (format: +12345678901)" 
-      };
-    }
+    console.log("2. Normalized phone:", normalizedPhone);
     
     // Check if phone number exists in phones collection
-const phoneLookupRef = doc(db, "phones", normalizedPhone);
-const phoneLookupSnap = await getDoc(phoneLookupRef);
+    console.log("3. Creating document reference...");
+    const phoneLookupRef = doc(db, "phones", normalizedPhone);
+    console.log("4. Document path:", phoneLookupRef.path);
+    console.log("5. Database app:", db.app.name);
+    console.log("6. Database project:", db.app.options.projectId);
+    
+    console.log("7. Attempting getDoc...");
+    const phoneLookupSnap = await getDoc(phoneLookupRef);
+    console.log("8. getDoc completed, exists?", phoneLookupSnap.exists());
     
     if (!phoneLookupSnap.exists()) {
-      return { 
-        allowed: false, 
-        message: "Phone number not registered in system" 
-      };
+      console.log("9. Document does not exist");
+      return { allowed: false, message: "Phone number not registered in system" };
     }
     
     const phoneData = phoneLookupSnap.data();
+    console.log("10. Document data:", phoneData);
     const userId = phoneData.uid;
-    
-    if (!userId) {
-      return { 
-        allowed: false, 
-        message: "Phone number mapping incomplete" 
-      };
-    }
+    console.log("11. User ID from document:", userId);
     
     // Get user details from users collection
+    console.log("12. Querying users collection...");
     const userRef = doc(db, "users", userId);
     const userSnap = await getDoc(userRef);
+    console.log("13. User exists?", userSnap.exists());
     
     if (!userSnap.exists()) {
-      return { 
-        allowed: false, 
-        message: "User account not found" 
-      };
+      console.log("14. User document not found");
+      return { allowed: false, message: "User account not found" };
     }
     
     const userData = userSnap.data();
+    console.log("15. User data:", userData);
     
-    console.log("Found user for phone:", {
-      phone: normalizedPhone,
-      uid: userId,
-      userData: userData
-    });
+    console.log("=== DEBUG isPhoneNumberAllowed END ===");
     
     return { 
       allowed: true,
@@ -1334,9 +1318,14 @@ const phoneLookupSnap = await getDoc(phoneLookupRef);
     };
     
   } catch (error) {
-    console.error("Error checking phone number:", error);
+    console.error("=== DEBUG ERROR ===");
+    console.error("Error in isPhoneNumberAllowed:", error);
+    console.error("Error code:", error.code);
+    console.error("Error message:", error.message);
+    console.error("Full error:", error);
     
     if (error.code === 'permission-denied') {
+      console.error("PERMISSION DENIED - Check Firestore rules");
       return { 
         allowed: false, 
         message: "Database permission error. Please contact administrator." 
@@ -1368,11 +1357,12 @@ async function attemptPhoneNumberAutoLogin() {
   // Check if phone number is allowed
   const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
   
-  if (!phoneCheck.allowed) {
-    console.log("Phone number not found in allowlist");
-    logDiag("Phone number not registered. Please use email login.");
-    return;
-  }
+if (!phoneCheck.allowed) {
+  if (loginStatus) loginStatus.textContent = phoneCheck.message || "Phone number not registered";
+  console.log("Phone check failed:", phoneCheck);
+  logDiag(`Phone auth failed: ${phoneNumber} - ${phoneCheck.message}`);
+  return;
+}
   
   // Phone number is allowed - attempt authentication
   try {
