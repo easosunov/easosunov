@@ -1416,11 +1416,11 @@ async function signInWithPhoneNumber(phoneNumber) {
     
     const result = await response.json();
     
-    if (result.success) {
-      await firebase.auth().signInWithCustomToken(result.customToken);
-      logDiag(`Phone authentication successful! UID: ${result.uid}`);
-      return { success: true, message: "Signed in!", uid: result.uid };
-    } else {
+if (result.success) {
+  await signInWithCustomToken(auth, result.customToken);
+  logDiag(`Phone authentication successful! UID: ${result.uid}`);
+  return { success: true, message: "Signed in!", uid: result.uid };
+}else {
       return { success: false, message: result.error || "Failed" };
     }
     
