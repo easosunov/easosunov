@@ -417,9 +417,7 @@ video#localVideo.video-visible {
   <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
   <button class="dial-btn" data-number="*">*</button>
   <button class="dial-btn" data-number="0">0</button>
-  <button id="enterBtn" class="dial-btn" data-number="enter" style="background:#4caf50;color:white;border-color:#388E3C;">
-    ↵ Enter
-  </button>
+  <button class="dial-btn" data-number="+">+<div style="font-size:12px;color:#666;">PLUS</div></button>
 </div>
     
     <!-- Control buttons -->
@@ -877,7 +875,7 @@ freshDialPad.addEventListener('click', (e) => {
       e.preventDefault();
       console.log('Backspace clicked');
       
-      if (window.dialedNumber.length > 2) {
+      if (window.dialedNumber.length > 0) {
         window.dialedNumber = window.dialedNumber.slice(0, -1);
         updatePhoneDisplay();
       }
