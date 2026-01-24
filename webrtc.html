@@ -1281,9 +1281,9 @@ async function isPhoneNumberAllowed(phoneNumber) {
       };
     }
     
-    // Check if phone number exists in phoneLookup collection
-    const phoneLookupRef = doc(db, "phoneLookup", normalizedPhone);
-    const phoneLookupSnap = await getDoc(phoneLookupRef);
+    // Check if phone number exists in phones collection
+const phoneLookupRef = doc(db, "phones", normalizedPhone);
+const phoneLookupSnap = await getDoc(phoneLookupRef);
     
     if (!phoneLookupSnap.exists()) {
       return { 
