@@ -366,6 +366,10 @@ video#localVideo.video-visible {
   font-size: 12px;
   margin-left: 10px;
 }
+ @keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
 </style>
 </head>
 
@@ -401,20 +405,22 @@ video#localVideo.video-visible {
     </div>
     
     <!-- Dial pad -->
-    <div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
-      <button class="dial-btn" data-number="1">1</button>
-      <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
-      <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
-      <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
-      <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
-      <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
-      <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
-      <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
-      <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
-      <button class="dial-btn" data-number="*">*</button>
-      <button class="dial-btn" data-number="0">0<div style="font-size:12px;color:#666;">+</div></button>
-      <button class="dial-btn" data-number="#">#</button>
-    </div>
+<div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
+  <button class="dial-btn" data-number="1">1</button>
+  <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
+  <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
+  <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
+  <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
+  <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
+  <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
+  <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
+  <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
+  <button class="dial-btn" data-number="*">*</button>
+  <button class="dial-btn" data-number="0">0</button>
+  <button id="enterBtn" class="dial-btn" data-number="enter" style="background:#4caf50;color:white;border-color:#388E3C;">
+    ↵ Enter
+  </button>
+</div>
     
     <!-- Control buttons -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0;">
@@ -826,11 +832,11 @@ function initializePhoneDial() {
   // Reset to ensure we're using the global variable
   window.dialedNumber = "";
   
-  // Update phone display
-  function updatePhoneDisplay() {
-    phoneDisplay.textContent = window.dialedNumber;
-    console.log('Display updated:', window.dialedNumber);
-  }
+// Update phone display
+function updatePhoneDisplay() {
+  phoneDisplay.innerHTML = window.dialedNumber + ' <span id="cursor" style="color:#1976d2;animation:blink 1s infinite">|</span>';
+  console.log('Display updated:', window.dialedNumber);
+}
   
   // Initialize display
   phoneDisplay.textContent = window.dialedNumber;
@@ -843,22 +849,22 @@ function initializePhoneDial() {
   // Get fresh reference
   const freshDialPad = document.getElementById('dialPad');
   
-  // Use event delegation on the fresh dial pad
-  freshDialPad.addEventListener('click', (e) => {
-    console.log('Dial pad clicked, target:', e.target);
+// Use event delegation on the fresh dial pad
+freshDialPad.addEventListener('click', (e) => {
+  console.log('Dial pad clicked, target:', e.target);
+  
+  // Find the dial button that was clicked
+  const dialBtn = e.target.closest('.dial-btn');
+  if (dialBtn) {
+    const number = dialBtn.getAttribute('data-number');
+    console.log('Dial button clicked:', number);
     
-    // Find the dial button that was clicked
-    const dialBtn = e.target.closest('.dial-btn');
-    if (dialBtn) {
-      const number = dialBtn.getAttribute('data-number');
-      console.log('Dial button clicked:', number);
-      
-      if (number) {
-        window.dialedNumber += number;
-        updatePhoneDisplay();
-      }
+    if (number) {
+      window.dialedNumber += number;
+      updatePhoneDisplay();
     }
-  });
+  }
+});
   
   // Backspace button
   if (backspaceBtn) {
@@ -894,21 +900,31 @@ function initializePhoneDial() {
     });
   }
   
-  // Add direct click handlers to buttons as backup
-  setTimeout(() => {
-    const buttons = document.querySelectorAll('.dial-btn');
-    console.log('Adding direct handlers to', buttons.length, 'buttons');
-    
-    buttons.forEach(btn => {
-      const number = btn.getAttribute('data-number');
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        console.log('DIRECT: Button', number, 'clicked');
+// Add direct click handlers to buttons as backup
+setTimeout(() => {
+  const buttons = document.querySelectorAll('.dial-btn');
+  console.log('Adding direct handlers to', buttons.length, 'buttons');
+  
+  buttons.forEach(btn => {
+    const number = btn.getAttribute('data-number');
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      console.log('DIRECT: Button', number, 'clicked');
+      
+      if (number === 'enter') {
+        // Handle Enter button - submit the phone number
+        if (window.dialedNumber && window.dialedNumber.length >= 10) {
+          document.getElementById('loginBtn').click();
+        } else {
+          loginStatus.textContent = "Please enter at least 10 digits";
+        }
+      } else if (number) {
         window.dialedNumber += number;
         updatePhoneDisplay();
-      });
+      }
     });
-  }, 100);
+  });
+}, 100);
   
   console.log('Phone dial initialized');
 }
@@ -4685,8 +4701,9 @@ function requireAuthOrPrompt(){
 loginBtn.onclick = async () => {
   hideErrorBox();
   
-  // Check if we're in phone dial mode or email mode
-  const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
+      // Get the dialed number - store it for Firestore submission
+      const phoneNumber = window.dialedNumber || dialedNumber;
+      window.submittedPhoneNumber = phoneNumber; // Store for authentication
   
   if (isPhoneDialMode) {
     // PHONE DIAL LOGIN
