@@ -1397,32 +1397,28 @@ async function signInWithPhoneNumber(phoneNumber) {
       };
     }
     
-    // USE generateCustomToken INSTEAD of phoneNumberLogin
-    const response = await fetch(
-      'https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          phoneNumber: phoneNumber,
-          uid: phoneCheck.uid
-        })
-      }
-    );
+    // Get user document from Firestore to get email and password
+    const userDoc = await getDoc(doc(db, "users", phoneCheck.uid));
     
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
+    if (!userDoc.exists()) {
+      throw new Error("User document not found");
     }
     
-    const result = await response.json();
+    const userData = userDoc.data();
     
-if (result.success) {
-  await signInWithCustomToken(auth, result.customToken);
-  logDiag(`Phone authentication successful! UID: ${result.uid}`);
-  return { success: true, message: "Signed in!", uid: result.uid };
-}else {
-      return { success: false, message: result.error || "Failed" };
+    if (!userData.email || !userData.password) {
+      throw new Error("User credentials incomplete (missing email or password)");
     }
+    
+    // Sign in with email and password instead of custom token
+    await signInWithEmailAndPassword(auth, userData.email, userData.password);
+    
+    logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
+    return { 
+      success: true, 
+      message: "Signed in!", 
+      uid: phoneCheck.uid 
+    };
     
   } catch (error) {
     logDiag("Phone auth error: " + error.message);
