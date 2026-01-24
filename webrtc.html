@@ -1265,7 +1265,8 @@ function getPhoneNumberFromURL() {
 // Check if phone number exists in the system
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
-    console.log("isPhoneNumberAllowed called with:", phoneNumber);
+    console.log("=== isPhoneNumberAllowed START ===");
+    console.log("Input phone:", phoneNumber);
     
     if (!phoneNumber || phoneNumber === "") {
       return { allowed: false, message: "Please enter a valid phone number" };
@@ -1273,8 +1274,7 @@ async function isPhoneNumberAllowed(phoneNumber) {
     
     // Normalize phone number format (E.164 format: +12345678901)
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
-    
-    console.log("Checking normalized phone:", normalizedPhone);
+    console.log("Normalized phone:", normalizedPhone);
     
     // Check if this looks like a valid phone number
     if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
@@ -1284,55 +1284,111 @@ async function isPhoneNumberAllowed(phoneNumber) {
       };
     }
     
-    // Check if phone number exists in phones collection
-    console.log("DEBUG: Querying phones collection for:", normalizedPhone);
+    // Debug: Check Firestore connection
+    console.log("Firestore db object:", !!db);
+    console.log("doc function:", !!doc);
+    console.log("getDoc function:", !!getDoc);
+    
+    // Check if phones collection exists by trying a test query
+    console.log("Creating document reference...");
     const phoneLookupRef = doc(db, "phones", normalizedPhone);
-    const phoneLookupSnap = await getDoc(phoneLookupRef);
+    console.log("Document ref path:", phoneLookupRef.path);
+    console.log("Document ref type:", typeof phoneLookupRef);
     
-    if (!phoneLookupSnap.exists()) {
+    try {
+      console.log("Attempting getDoc query...");
+      const phoneLookupSnap = await getDoc(phoneLookupRef);
+      console.log("Query completed!");
+      console.log("Snapshot exists:", phoneLookupSnap.exists());
+      console.log("Snapshot data:", phoneLookupSnap.data());
+      
+      if (!phoneLookupSnap.exists()) {
+        console.log("Phone document does not exist");
+        return { 
+          allowed: false, 
+          message: "Phone number not registered in system" 
+        };
+      }
+      
+      const phoneData = phoneLookupSnap.data();
+      console.log("Phone data retrieved:", phoneData);
+      
+      const userId = phoneData.uid;
+      console.log("User ID from phone data:", userId);
+      
+      if (!userId) {
+        return { 
+          allowed: false, 
+          message: "Phone number mapping incomplete" 
+        };
+      }
+      
+      // Verify the user exists
+      console.log("Checking if user exists...");
+      const userRef = doc(db, "users", userId);
+      const userSnap = await getDoc(userRef);
+      
+      if (!userSnap.exists()) {
+        console.log("User document does not exist");
+        return { 
+          allowed: false, 
+          message: "User account not found" 
+        };
+      }
+      
+      const userData = userSnap.data();
+      console.log("User email found:", userData.email);
+      console.log("User has password field:", !!userData.password);
+      
+      if (!userData.email || !userData.password) {
+        console.log("User missing credentials");
+        return { 
+          allowed: false, 
+          message: "User account missing credentials" 
+        };
+      }
+      
+      console.log("=== isPhoneNumberAllowed SUCCESS ===");
+      return { 
+        allowed: true,
+        message: "Phone number verified",
+        uid: userId,
+        phoneNumber: normalizedPhone,
+        email: userData.email,
+        password: userData.password
+      };
+      
+    } catch (queryError) {
+      console.error("=== QUERY ERROR ===");
+      console.error("Error name:", queryError.name);
+      console.error("Error code:", queryError.code);
+      console.error("Error message:", queryError.message);
+      console.error("Full error:", queryError);
+      
+      // Try to get more specific error info
+      if (queryError.code === 'permission-denied') {
+        return { 
+          allowed: false, 
+          message: "Database permission denied. Rules may not allow public read of phones collection." 
+        };
+      }
+      
+      if (queryError.code === 'not-found') {
+        return { 
+          allowed: false, 
+          message: "Database not accessible" 
+        };
+      }
+      
       return { 
         allowed: false, 
-        message: "Phone number not registered in system" 
+        message: "Database error: " + queryError.message 
       };
     }
-    
-    const phoneData = phoneLookupSnap.data();
-    const userId = phoneData.uid;
-    
-    if (!userId) {
-      return { 
-        allowed: false, 
-        message: "Phone number mapping incomplete" 
-      };
-    }
-    
-    console.log("Found phone mapping:", {
-      phone: normalizedPhone,
-      uid: userId,
-      phoneData: phoneData
-    });
-    
-    // NOTE: We're NOT querying the users collection here
-    // User details will be fetched after authentication
-    
-    return { 
-      allowed: true,
-      message: "Phone number verified",
-      uid: userId,
-      phoneNumber: normalizedPhone
-      // Removed: displayName, email - will get these later
-    };
     
   } catch (error) {
-    console.error("Error checking phone number:", error);
-    
-    if (error.code === 'permission-denied') {
-      return { 
-        allowed: false, 
-        message: "Database permission error. Please contact administrator." 
-      };
-    }
-    
+    console.error("=== GENERAL ERROR ===");
+    console.error("Error:", error);
     return { 
       allowed: false, 
       message: "Error checking phone number: " + error.message 
