@@ -3203,9 +3203,6 @@ try {
   sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
 };
 
-await sendIncomingCallNotification(messagePayload);
-
-
   // Trigger the push notification for incoming call
   await sendIncomingCallNotification(messagePayload);
 } catch (e) {
