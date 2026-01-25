@@ -3175,6 +3175,9 @@ async function startCallToUid(toUid, toName=""){
 });
 
 // NEW: SEND FCM PUSH NOTIFICATION TO ANDROID
+/ Add this delay before sending push notifications
+await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+ 
 try {
   await sendFCMToAndroid(toUid, created.roomId, myDisplayName, note, callRef.id);
 } catch (e) {
