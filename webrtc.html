@@ -12,7 +12,7 @@ h1{font-size:20px;margin:0 0 10px}
 .row{display:flex;gap:12px;flex-wrap:wrap}
 .card{border:1px solid #ddd;border-radius:12px;padding:12px;flex:1 1 320px}
 .videos{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media (max-width: 720px){ .videos{grid-template-columns:1fr} } 
+@media (max-width: 720px){ .videos{grid-template-columns:1fr} }
 video {
     width: 100%;
     background: #000;
@@ -69,85 +69,10 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
-
-/* LOGIN OVERLAY - ENLARGED FONTS */
-#loginCard h2 {
-  font-size: 24px !important;
-  margin: 0 0 12px !important;
-}
-
-#loginCard .small {
-  font-size: 16px !important;
-  margin-bottom: 12px !important;
-}
-
-#loginCard label {
-  font-size: 16px !important;
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 500;
-}
-
-#loginCard input {
-  font-size: 18px !important;
-  padding: 14px 16px !important;
-  margin-bottom: 16px !important;
-  border-radius: 12px !important;
-}
-
-#loginCard button {
-  font-size: 18px !important;
-  padding: 14px 24px !important;
-  border-radius: 12px !important;
-}
-
-#loginCard #loginStatus {
-  font-size: 16px !important;
-  margin-top: 12px !important;
-  min-height: 24px;
-}
-
-/* PHONE DIAL INTERFACE STYLES */
-#dialPad {
-  margin: 20px 0;
-}
-
-.dial-btn {
-  font-size: 24px !important;
-  padding: 20px 10px !important;
-  background: #fff !important;
-  border: 2px solid #1976d2 !important;
-  color: #1976d2 !important;
-  border-radius: 12px !important;
-  min-height: 70px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.dial-btn:hover {
-  background: #1976d2 !important;
-  color: white !important;
-}
-
-.dial-btn:active {
-  transform: scale(0.95);
-}
-
-#phoneDisplay {
-  font-family: monospace;
-  font-weight: bold;
-  user-select: none;
-} 
- 
 #loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
- 
 /* DIAGNOSTICS */
 #diagBox{
   display:none;
@@ -366,10 +291,6 @@ video#localVideo.video-visible {
   font-size: 12px;
   margin-left: 10px;
 }
- @keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
 </style>
 </head>
 
@@ -392,65 +313,23 @@ video#localVideo.video-visible {
 </div>
 
 <!-- LOGIN -->
-<!-- LOGIN - PHONE DIAL INTERFACE -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Your Phone Number</h2>
-    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">Dial your registered phone number to sign in</div>
-    
-    <!-- Phone number display -->
-    <div id="phoneDisplay" style="font-size:32px;text-align:center;margin:20px 0;padding:15px;background:#f5f5f5;border-radius:12px;border:2px solid #ddd;min-height:60px;letter-spacing:2px;">
-      
+    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
+    <div class="small">Only approved users can access this communicator.</div>
+
+    <label class="small">Email</label>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
+
+    <label class="small">Password</label>
+    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
+
+    <div id="loginRow">
+      <button id="loginBtn">Login</button>
     </div>
-    
-    <!-- Dial pad -->
-<div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
-  <button class="dial-btn" data-number="1">1</button>
-  <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
-  <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
-  <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
-  <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
-  <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
-  <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
-  <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
-  <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
-  <button class="dial-btn" data-number="+">+<div style="font-size:12px;color:#666;">PLUS</div></button>
-  <button class="dial-btn" data-number="0">0</button>
-  <button class="dial-btn" data-number="#">#</button>
-</div>
-    
-    <!-- Control buttons -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0;">
-      <button id="backspaceBtn" style="font-size:18px;padding:15px;background:#ffebee;border-color:#f44336;color:#c62828;">
-        ⌫ Backspace
-      </button>
-      <button id="clearBtn" style="font-size:18px;padding:15px;background:#fff8e1;border-color:#ffc107;color:#ff8f00;">
-        ✕ Clear
-      </button>
-    </div>
-    
-    <!-- Login button -->
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#e8f5e9;border-color:#4caf50;color:#2e7d32;width:100%;margin:10px 0;">
-      ↵ Enter / Dial to Sign In
-    </button>
-    
-    <!-- Status display -->
-    <div id="loginStatus" class="status" style="font-size:18px;text-align:center;margin:15px 0;min-height:30px;">
-      Please dial your phone number
-    </div>
-    
-    <!-- Info text -->
-    <div class="small" style="font-size:16px;text-align:center;color:#666;margin-top:20px;">
-      Your phone number must be registered with the administrator
-    </div>
-    
-    <!-- Traditional login fallback -->
-    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:15px;">
-      <button id="showEmailLoginBtn" style="font-size:16px;padding:12px;background:#f5f5f5;border-color:#ddd;color:#666;width:100%;">
-        Use Email Login Instead
-      </button>
-    </div>
+    <div id="loginStatus" class="status">Please sign in.</div>
+    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
   </div>
 </div>
 
@@ -785,185 +664,9 @@ const loginStatus = document.getElementById("loginStatus");
 const emailInput = document.getElementById("emailInput");
 const passInput = document.getElementById("passInput");
 const appRoot = document.getElementById("app");
- 
- /* ================== PHONE DIAL ELEMENTS ================== */
-const phoneDisplay = document.getElementById("phoneDisplay");
-const dialButtons = document.querySelectorAll(".dial-btn");
-const backspaceBtn = document.getElementById("backspaceBtn");
-const clearBtn = document.getElementById("clearBtn");
-const showEmailLoginBtn = document.getElementById("showEmailLoginBtn");
-
-let dialedNumber = ""; // Start with country code
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
-
-
-
-
-
- 
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
-// Initialize phone dial functionality
-function initializePhoneDial() {
-  console.log('=== initializePhoneDial() called ===');
-  
-  // Get elements fresh each time
-  const dialPad = document.getElementById('dialPad');
-  const phoneDisplay = document.getElementById('phoneDisplay');
-  const backspaceBtn = document.getElementById('backspaceBtn');
-  const clearBtn = document.getElementById('clearBtn');
-  
-  console.log('Elements found:', {
-    dialPad: !!dialPad,
-    phoneDisplay: !!phoneDisplay,
-    backspaceBtn: !!backspaceBtn,
-    clearBtn: !!clearBtn
-  });
-  
-  if (!dialPad || !phoneDisplay) {
-    console.error('Required elements missing!');
-    return;
-  }
-  
-  // Reset to ensure we're using the global variable
-  window.dialedNumber = "";
-  
-// Update phone display
-function updatePhoneDisplay() {
-  phoneDisplay.innerHTML = window.dialedNumber + ' <span id="cursor" style="color:#1976d2;animation:blink 1s infinite">|</span>';
-  console.log('Display updated:', window.dialedNumber);
-}
-  
-  // Initialize display
-  phoneDisplay.textContent = window.dialedNumber;
-  console.log('Initial display set');
-  
-  // Clear any existing event listeners first
-  const newDialPad = dialPad.cloneNode(true);
-  dialPad.parentNode.replaceChild(newDialPad, dialPad);
-  
-  // Get fresh reference
-  const freshDialPad = document.getElementById('dialPad');
-  
-// Use event delegation on the fresh dial pad
-freshDialPad.addEventListener('click', (e) => {
-  console.log('Dial pad clicked, target:', e.target);
-  
-  // Find the dial button that was clicked
-  const dialBtn = e.target.closest('.dial-btn');
-  if (dialBtn) {
-    const number = dialBtn.getAttribute('data-number');
-    console.log('Dial button clicked:', number);
-    
-    if (number) {
-      window.dialedNumber += number;
-      updatePhoneDisplay();
-    }
-  }
-});
-  
-  // Backspace button
-  if (backspaceBtn) {
-    // Clone to remove old listeners
-    const newBackspace = backspaceBtn.cloneNode(true);
-    backspaceBtn.parentNode.replaceChild(newBackspace, backspaceBtn);
-    
-    // Get fresh reference and add listener
-    document.getElementById('backspaceBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Backspace clicked');
-      
-      if (window.dialedNumber.length > 0) {
-        window.dialedNumber = window.dialedNumber.slice(0, -1);
-        updatePhoneDisplay();
-      }
-    });
-  }
-  
-  // Clear button
-  if (clearBtn) {
-    // Clone to remove old listeners
-    const newClear = clearBtn.cloneNode(true);
-    clearBtn.parentNode.replaceChild(newClear, clearBtn);
-    
-    // Get fresh reference and add listener
-    document.getElementById('clearBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Clear clicked');
-      
-      window.dialedNumber = "";
-      updatePhoneDisplay();
-    });
-  }
-  
-// Add direct click handlers to buttons as backup
-setTimeout(() => {
-  const buttons = document.querySelectorAll('.dial-btn');
-  console.log('Adding direct handlers to', buttons.length, 'buttons');
-  
-  buttons.forEach(btn => {
-    const number = btn.getAttribute('data-number');
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      console.log('DIRECT: Button', number, 'clicked');
-      
-    if (number) {
-      window.dialedNumber += number;
-      updatePhoneDisplay();
-    }
-    });
-  });
-}, 100);
-  
-  console.log('Phone dial initialized');
-}
-
-
-// Initialize phone dial immediately when script loads
-console.log('Script loaded, checking DOM...');
-
-// Use setTimeout to ensure DOM is ready since we're in a module
-setTimeout(() => {
-  console.log('Initializing phone dial (delayed)...');
-  
-  // Debug: Check if dial pad elements exist
-  console.log('Dial pad element:', document.getElementById('dialPad'));
-  console.log('Dial buttons found:', document.querySelectorAll('.dial-btn').length);
-  console.log('Phone display:', document.getElementById('phoneDisplay'));
-  console.log('Backspace button:', document.getElementById('backspaceBtn'));
-  console.log('Clear button:', document.getElementById('clearBtn'));
-  console.log('Login button:', document.getElementById('loginBtn'));
-  
-  // Check if app is locked
-  console.log('App root element:', appRoot);
-  console.log('App locked?', appRoot?.classList?.contains('locked'));
-  console.log('Login overlay display:', loginOverlay?.style?.display);
-  
-  // Initialize
-  initializePhoneDial();
-  
-  // Test: Try to add a global function for testing
-  window.testDialPad = function() {
-    console.log('=== TESTING DIAL PAD ===');
-    console.log('dialedNumber:', dialedNumber);
-    console.log('phoneDisplay text:', phoneDisplay?.textContent);
-    
-    // Simulate a button click
-    const testBtn = document.querySelector('.dial-btn[data-number="5"]');
-    if (testBtn) {
-      console.log('Found button 5, clicking...');
-      testBtn.click();
-    }
-    
-    return 'Test complete';
-  };
-  
-  console.log('Test function available: window.testDialPad()');
-}, 500);
- 
- 
 /* ================== VIDEO SCREEN TOGGLE ================== */
 let videoMode = {
     local: 'normal',  // 'normal', 'fullscreen', 'small'
@@ -1215,8 +918,8 @@ function hideErrorBox(){
 }
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-emailInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
-passInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -1231,7 +934,7 @@ import { getMessaging, getToken, onMessage, deleteToken }
 
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
-  setPersistence, inMemoryPersistence, signInWithCustomToken
+  setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp({
@@ -1244,9 +947,6 @@ const app = initializeApp({
 });
 const db = getFirestore(app);
 const auth = getAuth(app);
-
-// ADD THIS LINE TO CLEAR CACHED RULES
-db._persistenceKey = "webrtc-" + Date.now(); // Add unique key to break cache
 
 /* ================== PHONE NUMBER AUTHENTICATION ================== */
 // Platform detection
@@ -1261,98 +961,32 @@ function getPhoneNumberFromURL() {
   return phone ? phone.replace(/[^0-9+]/g, '') : null;
 }
 
-
-// Check if phone number exists in the system
+// Check if phone number exists in user's allowlist
 async function isPhoneNumberAllowed(phoneNumber) {
   try {
-    console.log("=== isPhoneNumberAllowed START ===");
-    console.log("Input phone:", phoneNumber);
+    if (!phoneNumber) return { allowed: false };
     
-    if (!phoneNumber || phoneNumber === "") {
-      return { allowed: false, message: "Please enter a valid phone number" };
-    }
+    // Check users collection for phone number match
+    const usersSnapshot = await getDocs(query(
+      collection(db, 'users'),
+      where('phone', '==', phoneNumber),
+      limit(1)
+    ));
     
-    // Normalize phone number format (E.164 format: +12345678901)
-    const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
-    console.log("Normalized phone:", normalizedPhone);
-    
-    // Check if this looks like a valid phone number
-    if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
-      return { 
-        allowed: false, 
-        message: "Please enter a valid phone number with country code (format: +12345678901)" 
+    if (!usersSnapshot.empty) {
+      const userData = usersSnapshot.docs[0].data();
+      return {
+        allowed: true,
+        email: userData.email || '',
+        displayName: userData.displayName || phoneNumber,
+        uid: usersSnapshot.docs[0].id
       };
     }
     
-    console.log("Creating document reference...");
-    const phoneLookupRef = doc(db, "phones", normalizedPhone);
-    
-    console.log("Attempting getDoc query...");
-    const phoneLookupSnap = await getDoc(phoneLookupRef);
-    console.log("Query completed!");
-    console.log("Snapshot exists:", phoneLookupSnap.exists());
-    
-    if (!phoneLookupSnap.exists()) {
-      console.log("Phone document does not exist");
-      return { 
-        allowed: false, 
-        message: "Phone number not registered in system" 
-      };
-    }
-    
-    const phoneData = phoneLookupSnap.data();
-    console.log("Phone data retrieved:", phoneData);
-    
-    const userId = phoneData.uid;
-    console.log("User ID from phone data:", userId);
-    
-    if (!userId) {
-      return { 
-        allowed: false, 
-        message: "Phone number mapping incomplete" 
-      };
-    }
-    
-    // Check if email and password exist in phone data
-    const email = phoneData.email;
-    const password = phoneData.password;
-    
-    console.log("Email from phone data:", email);
-    console.log("Password exists:", !!password);
-    
-    if (!email || !password) {
-      return { 
-        allowed: false, 
-        message: "Phone number registered but credentials missing" 
-      };
-    }
-    
-    console.log("=== isPhoneNumberAllowed SUCCESS ===");
-    return { 
-      allowed: true,
-      message: "Phone number verified",
-      uid: userId,
-      phoneNumber: normalizedPhone,
-      email: email,
-      password: password
-    };
-    
-  } catch (queryError) {
-    console.error("=== QUERY ERROR ===");
-    console.error("Error code:", queryError.code);
-    console.error("Error message:", queryError.message);
-    
-    if (queryError.code === 'permission-denied') {
-      return { 
-        allowed: false, 
-        message: "Database permission denied. Please contact administrator." 
-      };
-    }
-    
-    return { 
-      allowed: false, 
-      message: "Database error: " + queryError.message 
-    };
+    return { allowed: false };
+  } catch (error) {
+    console.error("Error checking phone number:", error);
+    return { allowed: false };
   }
 }
 
@@ -1374,12 +1008,11 @@ async function attemptPhoneNumberAutoLogin() {
   // Check if phone number is allowed
   const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
   
-if (!phoneCheck.allowed) {
-  if (loginStatus) loginStatus.textContent = phoneCheck.message || "Phone number not registered";
-  console.log("Phone check failed:", phoneCheck);
-  logDiag(`Phone auth failed: ${phoneNumber} - ${phoneCheck.message}`);
-  return;
-}
+  if (!phoneCheck.allowed) {
+    console.log("Phone number not found in allowlist");
+    logDiag("Phone number not registered. Please use email login.");
+    return;
+  }
   
   // Phone number is allowed - attempt authentication
   try {
@@ -1399,292 +1032,48 @@ if (!phoneCheck.allowed) {
   }
 }
 
-
-async function signInWithPhoneNumber(phoneNumber) {
+// Handle Android phone authentication
+async function handleAndroidPhoneAuthentication() {
   try {
-    logDiag(`Attempting phone auth for: ${phoneNumber}`);
+    const phoneNumber = userPhone;
+    if (!phoneNumber) {
+      showLoginUI();
+      return;
+    }
     
+    logDiag("Verifying phone number...");
+    
+    // Check phone number again
     const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    console.log("=== PHONE CHECK RESULT ===");
-    console.log(JSON.stringify(phoneCheck, null, 2));
-    console.log("=== END PHONE CHECK ===");
     
     if (!phoneCheck.allowed) {
-      return { 
-        success: false, 
-        message: phoneCheck.message || "Phone number not registered"
-      };
+      logDiag("Phone number not registered");
+      showLoginUI();
+      return;
     }
     
-    // Clean up email and password - remove any surrounding quotes and whitespace
-    function cleanCredential(str) {
-      if (typeof str !== 'string') {
-        console.warn(`cleanCredential: input is not a string:`, str);
-        return str || '';
-      }
-      
-      // Log the raw input
-      console.log(`cleanCredential input: "${str}" (length: ${str.length})`);
-      
-      // Show character codes for debugging
-      const chars = Array.from(str).map((c, i) => `${i}: '${c}' (${c.charCodeAt(0)})`);
-      console.log(`Character analysis:`, chars);
-      
-      // Remove surrounding quotes
-      let cleaned = str.replace(/^['"`]+|['"`]+$/g, '');
-      
-      // Remove all whitespace (spaces, tabs, newlines)
-      cleaned = cleaned.replace(/\s/g, '');
-      
-      // Remove any other invisible characters
-      cleaned = cleaned.replace(/[\u200B-\u200D\uFEFF]/g, '');
-      
-      console.log(`cleanCredential output: "${cleaned}" (length: ${cleaned.length})`);
-      return cleaned;
+    // If we have an email associated with the phone, try to pre-fill it
+    if (phoneCheck.email) {
+      logDiag(`Attempting email login for Android user: ${phoneCheck.email}`);
+      emailInput.value = phoneCheck.email;
+      // Focus on password field for manual login
+      passInput.focus();
+    } else {
+      // No email associated - show standard login
+      showLoginUI();
     }
-    
-    const cleanEmail = cleanCredential(phoneCheck.email);
-    const cleanPassword = cleanCredential(phoneCheck.password);
-    
-    console.log("=== CLEANED CREDENTIALS ===");
-    console.log(`Email: "${cleanEmail}" (original: "${phoneCheck.email}")`);
-    console.log(`Password: "${cleanPassword}" (original: "${phoneCheck.password}")`);
-    console.log(`Email length: ${cleanEmail.length}, Password length: ${cleanPassword.length}`);
-    console.log("=== END CREDENTIALS ===");
-    
-    // Clear any existing auth first
-    try {
-      await signOut(auth);
-      console.log("Cleared any existing auth");
-    } catch (e) {
-      console.log("No existing auth to clear or error:", e.message);
-    }
-    
-    // Test the credentials with a simple fetch first
-    console.log("Testing credentials...");
-    console.log(`Attempting login with email: "${cleanEmail}" and password: "${cleanPassword}"`);
-    
-    const testResult = await testEmailPasswordLogin(
-      cleanEmail, 
-      cleanPassword
-    );
-    
-    console.log("Test result:", testResult);
-    
-    if (!testResult.success) {
-      console.error("=== CREDENTIALS TEST FAILED ===");
-      console.error("Error:", testResult.error);
-      console.error("Email used:", JSON.stringify(cleanEmail));
-      console.error("Password used:", JSON.stringify(cleanPassword));
-      console.error("=== END FAILURE ===");
-      
-      // Try one more test - direct Firebase auth without the test function
-      console.log("Attempting direct Firebase auth as fallback...");
-      try {
-        const userCredential = await signInWithEmailAndPassword(
-          auth, 
-          cleanEmail, 
-          cleanPassword
-        );
-        console.log("Direct Firebase auth successful!");
-        logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
-        return { 
-          success: true, 
-          message: "Signed in!", 
-          uid: phoneCheck.uid 
-        };
-      } catch (directError) {
-        console.error("Direct Firebase auth also failed:", directError.code, directError.message);
-        
-        // Try common variations of the password
-        console.log("Testing password variations...");
-        const variations = [
-          cleanPassword,
-          cleanPassword.toLowerCase(),
-          cleanPassword.toUpperCase(),
-          'telefon123',
-          'Telefon',
-          'Telefon123',
-          'Telefon!',
-          'telefon!',
-          'password',
-          'Password'
-        ];
-        
-        for (let i = 0; i < variations.length; i++) {
-          const variation = variations[i];
-          if (variation === cleanPassword) continue; // Skip already tried
-          
-          console.log(`Testing variation ${i+1}: "${variation}"`);
-          try {
-            const test = await signInWithEmailAndPassword(auth, cleanEmail, variation);
-            console.log(`SUCCESS with variation "${variation}"!`);
-            logDiag(`Phone authentication successful with password variation! UID: ${phoneCheck.uid}`);
-            return { 
-              success: true, 
-              message: "Signed in!", 
-              uid: phoneCheck.uid,
-              note: `Used password variation: ${variation}`
-            };
-          } catch (e) {
-            // Continue to next variation
-          }
-        }
-        
-        throw new Error(`Credentials test failed: ${testResult.error}. Tried ${variations.length} password variations.`);
-      }
-    }
-    
-    console.log("Credentials test passed, attempting Firebase login...");
-    
-    // Sign in with email and password
-    const userCredential = await signInWithEmailAndPassword(
-      auth, 
-      cleanEmail, 
-      cleanPassword
-    );
-    
-    console.log("Firebase login successful! User:", userCredential.user.uid);
-    console.log("Expected UID from phone data:", phoneCheck.uid);
-    
-    // Verify UID matches
-    if (userCredential.user.uid !== phoneCheck.uid) {
-      console.warn(`UID mismatch! Firebase: ${userCredential.user.uid}, Phone data: ${phoneCheck.uid}`);
-    }
-    
-    logDiag(`Phone authentication successful! UID: ${phoneCheck.uid}`);
-    return { 
-      success: true, 
-      message: "Signed in!", 
-      uid: phoneCheck.uid 
-    };
     
   } catch (error) {
-    console.error("=== SIGN IN ERROR ===");
-    console.error("Error object:", error);
-    console.error("Error name:", error.name);
-    console.error("Error code:", error.code);
-    console.error("Error message:", error.message);
-    console.error("Error stack:", error.stack);
-    
-    // Try to parse Firebase error
-    if (error.code && error.code.startsWith('auth/')) {
-      let userMessage = error.message;
-      
-      // User-friendly messages
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password') {
-        userMessage = "Invalid email or password. Please check the credentials in your Firestore document.";
-      } else if (error.code === 'auth/user-not-found') {
-        userMessage = "User not found in Firebase Authentication. Please register this email/password in Firebase Auth first.";
-      } else if (error.code === 'auth/too-many-requests') {
-        userMessage = "Too many failed attempts. Please try again later.";
-      }
-      
-      return { 
-        success: false, 
-        message: `Authentication error: ${userMessage}`,
-        code: error.code
-      };
-    }
-    
-    logDiag("Phone auth error: " + error.message);
-    return { 
-      success: false, 
-      message: "Error: " + error.message 
-    };
+    console.error("Android phone auth error:", error);
+    logDiag("Phone authentication failed: " + error.message);
+    showLoginUI();
   }
 }
-
-// Helper function to clean strings by removing surrounding quotes
-function cleanString(str) {
-  if (typeof str !== 'string') return str;
-  
-  // Remove surrounding single quotes
-  let cleaned = str.replace(/^'(.*)'$/, '$1');
-  // Remove surrounding double quotes
-  cleaned = cleaned.replace(/^"(.*)"$/, '$1');
-  // Also handle cases with multiple quotes
-  cleaned = cleaned.replace(/^['"]+|['"]+$/g, '');
-  
-  return cleaned.trim();
-}
-
-// Helper function to test credentials via REST API
-async function testEmailPasswordLogin(email, password) {
-  try {
-    const apiKey = "AIzaSyAg6TXwgejbPAyuEPEBqW9eHaZyLV4Wq98"; // Your Firebase API key
-    const url = `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: email,
-        password: password,
-        returnSecureToken: true
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      return {
-        success: false,
-        error: data.error.message,
-        code: data.error.code
-      };
-    }
-    
-    return {
-      success: true,
-      userId: data.localId,
-      email: data.email
-    };
-    
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
- 
 
 // Show login UI with optional pre-filled email
 function showLoginUI() {
   loginOverlay.style.display = "flex";
   appRoot.classList.add("locked");
-}
-
-
-
-// Handle email login
-async function handleEmailLogin() {
-  const emailInput = document.getElementById('emailInput');
-  const passInput = document.getElementById('passInput');
-  const loginStatus = document.getElementById('loginStatus');
-  
-  if (!emailInput || !passInput || !loginStatus) return;
-  
-  const email = emailInput.value.trim();
-  const password = passInput.value;
-  
-  if (!email || !password) {
-    loginStatus.textContent = "Please enter email and password";
-    return;
-  }
-  
-  loginStatus.textContent = "Signing in...";
-  
-  try {
-    await signInWithEmailAndPassword(auth, email, password);
-    loginStatus.textContent = "Signed in successfully!";
-  } catch (error) {
-    loginStatus.textContent = `Login failed: ${error.code || "unknown error"}`;
-    logDiag("Email login error: " + error.message);
-  }
 }
 
 /* ================== PROCESS PENDING NOTIFICATIONS ================== */
@@ -3771,7 +3160,7 @@ async function startCallToUid(toUid, toName=""){
   const callRef = await addDoc(collection(db,"calls"), {
   fromUid: myUid,
   toUid,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value) || "(unknown)",
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
   toName: toName || "",
   roomId: created.roomId,
   note,
@@ -3808,7 +3197,7 @@ try {
   const messagePayload = {
   toUid,          // Callee's UID
   callId: callRef.id,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value),
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
   note: note,
   timestamp: new Date().toLocaleString(), // Adding timestamp
   sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
@@ -4182,68 +3571,6 @@ myNameInput.addEventListener("input", ()=>{
 });
 userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
- /* ===== NEW: Phone dial restore handler ===== */
-// This will be called from the dynamically created button
-window.restorePhoneDial = function() {
-  location.reload();
-};
-
-// Update the showEmailLoginBtn handler
-if (showEmailLoginBtn) {
-  showEmailLoginBtn.addEventListener('click', () => {
-    if (!document.querySelector('#loginCard')) return;
-    
-    document.querySelector('#loginCard').innerHTML = `
-      <button id="logoutBtn" style="display:none;">Logout</button>
-      <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
-      <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">For administrators and email users</div>
-      
-      <div style="margin:20px 0;">
-        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
-        <input id="emailInput" type="email" placeholder="your.email@example.com" autocomplete="username" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-      </div>
-      
-      <div style="margin:20px 0;">
-        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-        <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-      </div>
-      
-      <button id="loginBtn" style="font-size:24px;padding:18px;background:#1976d2;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-        Sign In with Email
-      </button>
-      
-      <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-        Enter your email and password
-      </div>
-      
-      <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-        <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-          ← Back to Phone Dial
-        </button>
-      </div>
-    `;
-    
-    setTimeout(() => {
-      const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-      const loginBtn = document.getElementById('loginBtn');
-      const emailInput = document.getElementById('emailInput');
-      
-      if (showPhoneLoginBtn) {
-        showPhoneLoginBtn.addEventListener('click', () => {
-          location.reload();
-        });
-      }
-      
-      if (loginBtn) {
-        loginBtn.addEventListener('click', handleEmailLogin);
-      }
-      
-      if (emailInput) {
-        emailInput.focus();
-      }
-    }, 100);
-  });
-}
 
 /* Calls list button */
 refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
@@ -4258,14 +3585,14 @@ async function enforceAllowlist(user){
     const snap = await getDoc(ref);
 
     if(!snap.exists()){
-      if(loginStatus) loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist missing for UID: " + uid);
     }
 
     const enabled = snap.data()?.enabled === true;
     if(!enabled){
-      if(loginStatus) loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
       try{ await signOut(auth); }catch{}
       throw new Error("Allowlist disabled for UID: " + uid);
     }
@@ -4273,10 +3600,8 @@ async function enforceAllowlist(user){
     return true;
   }catch(e){
     if(String(e?.code || "").includes("permission-denied")){
-      if(loginStatus) {
-        loginStatus.textContent =
-          "Allowlist check blocked by Firestore rules (permission-denied).";
-      }
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
     }
     throw e;
   }
@@ -4768,7 +4093,7 @@ function releaseLock() {
         }
       }, 100);
     }
-  });  // <-- This should be just one closing brace and one closing parenthesis
+  });
   
   // Beforeunload cleanup
   window.addEventListener('beforeunload', () => {
@@ -4785,8 +4110,22 @@ function releaseLock() {
       disableAppImmediately();
     }
   }, 2000);
-})();  // <-- This closes the entire IIFE
+})();
 
+// Also add a pre-check before any significant action
+ /*
+const originalStartMedia = window.startMedia;
+if (originalStartMedia) {
+  window.startMedia = function(...args) {
+    if (!hasLock || isDisabled) {
+      logDiag("Blocked startMedia - no lock or disabled");
+      disableAppImmediately();
+      return Promise.reject(new Error("Another instance is running"));
+    }
+    return originalStartMedia.apply(this, args);
+  };
+}
+ */
  /* ================== AUTH GATE ================== */
 function requireAuthOrPrompt(){
   if (isAuthed) return true;
@@ -4794,71 +4133,25 @@ function requireAuthOrPrompt(){
   return false;
 }
 
-
-// SIMPLIFIED LOGIN BUTTON HANDLER - FIXED VERSION
 loginBtn.onclick = async () => {
   hideErrorBox();
-  
-  const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
-  
-  if (isPhoneDialMode) {
-    if (loginStatus) loginStatus.textContent = "Checking phone number…";
-    wasManualLogin = true;
-    
-    try {
-      const phoneNumber = window.dialedNumber || dialedNumber;
-      
-      if (loginStatus) loginStatus.textContent = "Verifying phone number…";
-      
-      const authResult = await signInWithPhoneNumber(phoneNumber);
-      
-      if (authResult.success) {
-        if (loginStatus) loginStatus.textContent = "Signed in successfully!";
-        logDiag(`Phone authentication successful for: ${phoneNumber}`);
-        
-        const uid = auth.currentUser?.uid;
-        if (uid) {
-          setDeviceOwner(uid);
-          broadcastNewOwner(uid);
-        }
-      } else {
-        if (loginStatus) loginStatus.textContent = authResult.message || "Authentication failed";
-      }
-      
-    } catch (e) {
-      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
-      logDiag("Phone login error: " + (e?.message || e));
-      showError(e);
-    }
-    
-  } else {
-    // EMAIL/PASSWORD LOGIN (fallback mode) - KEEP EXISTING CODE
-    if (loginStatus) loginStatus.textContent = "Signing in…";
-    wasManualLogin = true;
-    
-    try {
-      const email = emailInput?.value.trim();
-      const password = passInput?.value;
-      
-      if (!email || !password) {
-        if (loginStatus) loginStatus.textContent = "Please enter email and password";
-        return;
-      }
-      
-      await signInWithEmailAndPassword(auth, email, password);
-      if (loginStatus) loginStatus.textContent = "Signed in. Checking allowlist…";
+  loginStatus.textContent = "Signing in…";
+  wasManualLogin = true;  // <-- Add this line
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    loginStatus.textContent = "Signed in. Checking allowlist…";
 
-      const uid = auth.currentUser?.uid;
-      if(uid){
-        setDeviceOwner(uid);
-        broadcastNewOwner(uid);
-      }
-
-    } catch (e) {
-      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
-      try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
-      showError(e);
+    // Claim device owner immediately (forces other tabs with different UID to sign out)
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
     }
+
+  } catch (e) {
+    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
   }
 };
 
@@ -4874,47 +4167,65 @@ logoutBtn.onclick = async () => {
 
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
-  console.log("=== onAuthStateChanged FIRED ===");
-  console.log("User:", user?.uid);
+  // First, attempt Android phone auto-login before processing auth state
+  if (!isAutoLoginAttempted) {
+    await attemptPhoneNumberAutoLogin();
+  }
   
   isAuthed = !!user;
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
   if (isAuthed){
-    try{ 
-      console.log("1. Checking allowlist...");
-      await enforceAllowlist(user); 
-      console.log("Allowlist check passed");
-    }
+    try{ await enforceAllowlist(user); }
     catch(e){
-      console.error("Allowlist check failed:", e);
       showError(e);
+
+      // restore locked UI so login doesn't look frozen
+      loginOverlay.style.display = "flex";
+      appRoot.classList.add("locked");
+      logoutBtn.style.display = "none";
+      startBtn.disabled = true;
+
       return;
     }
 
-    // Single-user lock
+    // Single-user lock: reaffirm ownership after allowlist passes
     setDeviceOwner(user.uid);
     broadcastNewOwner(user.uid);
 
-    // Hide login overlay
-    loginOverlay.style.display = "none";
-    appRoot.classList.remove("locked");
+    // Hide login overlay if this was a manual login
+    if (wasManualLogin) {
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
+      wasManualLogin = false;
+    } else {
+      // Auto-authenticated - still allow access
+      loginOverlay.style.display = "none";
+      appRoot.classList.remove("locked");
+    }
+    
     logoutBtn.style.display = "inline-block";
-    if (loginStatus) loginStatus.textContent = "Signed in.";
+    loginStatus.textContent = "Signed in.";
 
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
 
-    // Enable UI elements
+    // ===== NEW: enable quality selector once authed =====
     videoQualitySelect.disabled = false;
     updateVideoQualityUi();
+
+    // ===== NEW: enable call mode radio buttons once authed =====
     testSoundBtn.disabled = false;
     resetPushBtn.disabled = false;
+
+    await rotateFcmTokenIfUserChanged();
+    autoEnablePushOnLogin();
+
     saveNameBtn.disabled = !String(myNameInput.value||"").trim();
     refreshUsersBtn.disabled = false;
 
-    /* Show utility logout button */
+    /* ADD THIS LINE: Show utility logout button when signed in */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "inline-block";
         logoutUtilityBtn.disabled = false;
@@ -4922,58 +4233,42 @@ onAuthStateChanged(auth, async (user)=>{
     
     hangupBtn.disabled = true;
     hangupBtn.className = "hangup-btn-inactive";
+
     refreshCopyInviteState();
 
-    // Try other Firestore operations one by one
-    try{ 
-      console.log("2. Setting up incoming calls listener...");
-      await listenIncomingCalls(); 
-      console.log("Incoming calls listener set up");
-    } catch(e){ 
-      console.error("Incoming listener failed: " + e.message); 
-    }
-    
-    try{ 
-      console.log("3. Setting up user profile...");
-      await ensureMyUserProfile(user); 
-      console.log("User profile set up");
-    } catch(e){ 
-      console.error("ensureMyUserProfile failed: " + e.message); 
-    }
-    
-    try{ 
-      console.log("4. Loading allowed users...");
-      await loadAllAllowedUsers(); 
-      console.log("Allowed users loaded");
-    } catch(e){ 
-      console.error("loadAllAllowedUsers failed: " + e.message); 
-    }
-    
-    try{ 
-      console.log("5. Loading recent calls...");
-      await loadRecentCalls(); 
-      console.log("Recent calls loaded");
-    } catch(e){ 
-      console.error("loadRecentCalls failed: " + e.message); 
-    }
-    
-    // Process pending notifications
+    try{ await listenIncomingCalls(); } catch(e){ logDiag("Incoming listener failed: " + (e?.message || e)); }
+    await catchUpMissedRingingCall();
+    await catchUpMissedCallNotification();
+    try{ await ensureMyUserProfile(user); } catch(e){ logDiag("ensureMyUserProfile failed: " + (e?.message || e)); }
+    try{ await loadAllAllowedUsers(); } catch(e){ logDiag("loadAllAllowedUsers failed: " + (e?.message || e)); }
+    try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
+    // Process any pending notifications after auth
     await processPendingNotifications();
+    
+    // Update user info with phone/email badge
     updateUserInfo();
+
+    if (pendingIncomingCallWhileLoggedOut?.id) {
+      const callId = pendingIncomingCallWhileLoggedOut.id;
+      updateDoc(doc(db,"calls", callId), {
+        deliveredAt: serverTimestamp(),
+        deliveredVia: "push_open"
+      }).catch(()=>{});
+    }
+
+    // Update background service status
     updateServiceStatus();
-    setInterval(updateServiceStatus, 30000);
+    setInterval(updateServiceStatus, 30000); // Check every 30 seconds
 
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
-
     // If we have Android phone login but no Firebase user, handle it
     if (isAndroidPhoneLogin && !user) {
       await handleAndroidPhoneAuthentication();
       return;
     }
     
-    // Show phone dial interface by default for elderly users
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
@@ -4989,7 +4284,7 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
-    /* Hide utility logout button when signed out */
+    /* ADD THIS LINE: Hide utility logout button when signed out */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "none";
         logoutUtilityBtn.disabled = true;
@@ -5009,16 +4304,7 @@ onAuthStateChanged(auth, async (user)=>{
     currentCalleeUid = null;
     userPhone = '';
     isAndroidPhoneLogin = false;
-    
-    // ===== NEW: Initialize phone dial interface =====
-    // Ensure phone dial elements are properly initialized
-    setTimeout(() => {
-      if (phoneDisplay && dialedNumber) {
-        phoneDisplay.textContent = dialedNumber;
-      }
-    }, 100);
   }
-   
 });
 
 window.addEventListener("beforeunload", ()=>{
