@@ -1596,13 +1596,27 @@ async function isPhoneNumberAllowed(phoneNumber) {
     const normalizedPhone = phoneNumber.replace(/[^\d+]/g, '');
     console.log("Normalized phone:", normalizedPhone);
     
-    // Check if this looks like a valid phone number
-    if (!normalizedPhone.startsWith('+') || normalizedPhone.replace('+', '').length < 10) {
-      return { 
-        allowed: false, 
-        message: "Please enter a valid phone number with country code (format: +12345678901)" 
-      };
-    }
+ 
+// Check if this looks like a valid phone number
+// Allow shorter numbers for testing (like "03" for special user)
+if (!normalizedPhone.startsWith('+')) {
+  // If it doesn't start with +, check if it's a test number
+  if (normalizedPhone === '03' || normalizedPhone === '123') {
+    // Allow test numbers
+    console.log("Allowing test phone number:", normalizedPhone);
+  } else {
+    return { 
+      allowed: false, 
+      message: "Please enter a valid phone number with country code (format: +12345678901)" 
+    };
+  }
+} else if (normalizedPhone.replace('+', '').length < 10 && normalizedPhone !== '+03' && normalizedPhone !== '+123') {
+  // For real numbers, require at least 10 digits after +
+  return { 
+    allowed: false, 
+    message: "Please enter a valid phone number with country code (format: +12345678901)" 
+  };
+}
     
     console.log("Creating document reference...");
     const phoneLookupRef = doc(db, "phones", normalizedPhone);
@@ -1743,25 +1757,34 @@ async function signInWithPhoneNumber(phoneNumber) {
     }
     
     // STORE USER ROLE GLOBALLY
-    window.userRole = phoneCheck.role || "user";
-    console.log(`User role: ${window.userRole}`);
-    
-    // If this is a special user, find administrator
-    if (window.userRole === "special user") {
-      console.log("SPECIAL USER DETECTED, finding administrator...");
+    if (typeof window !== 'undefined') {
+      window.userRole = phoneCheck.role || "user";
+      console.log(`User role: ${window.userRole}`);
       
-      // Find administrator asynchronously (don't wait for it here)
-      setTimeout(async () => {
-        const admin = await findAdministrator();
-        if (admin && admin.uid) {
-          console.log(`Special user will call administrator: ${admin.name} (${admin.uid})`);
-          // Store administrator info globally
-          window.administratorUid = admin.uid;
-          window.administratorName = admin.name;
-        } else {
-          console.error("No administrator found for special user to call");
-        }
-      }, 0);
+      // If this is a special user, find administrator
+      if (window.userRole === "special user") {
+        console.log("SPECIAL USER DETECTED, finding administrator...");
+        
+        // Store special user info
+        window.isSpecialUser = true;
+        
+        // Find administrator asynchronously
+        setTimeout(async () => {
+          try {
+            const admin = await findAdministrator();
+            if (admin && admin.uid) {
+              console.log(`Special user will call administrator: ${admin.name} (${admin.uid})`);
+              // Store administrator info globally
+              window.administratorUid = admin.uid;
+              window.administratorName = admin.name;
+            } else {
+              console.error("No administrator found for special user to call");
+            }
+          } catch (adminError) {
+            console.error("Error finding administrator:", adminError);
+          }
+        }, 0);
+      }
     }
     
     // Clean up email and password - remove any surrounding quotes and whitespace
