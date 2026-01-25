@@ -69,85 +69,10 @@ input{padding:10px 12px;border-radius:10px;border:1px solid #ccc;width:100%}
   padding:16px;
   box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
-
-/* LOGIN OVERLAY - ENLARGED FONTS */
-#loginCard h2 {
-  font-size: 24px !important;
-  margin: 0 0 12px !important;
-}
-
-#loginCard .small {
-  font-size: 16px !important;
-  margin-bottom: 12px !important;
-}
-
-#loginCard label {
-  font-size: 16px !important;
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 500;
-}
-
-#loginCard input {
-  font-size: 18px !important;
-  padding: 14px 16px !important;
-  margin-bottom: 16px !important;
-  border-radius: 12px !important;
-}
-
-#loginCard button {
-  font-size: 18px !important;
-  padding: 14px 24px !important;
-  border-radius: 12px !important;
-}
-
-#loginCard #loginStatus {
-  font-size: 16px !important;
-  margin-top: 12px !important;
-  min-height: 24px;
-}
-
-/* PHONE DIAL INTERFACE STYLES */
-#dialPad {
-  margin: 20px 0;
-}
-
-.dial-btn {
-  font-size: 24px !important;
-  padding: 20px 10px !important;
-  background: #fff !important;
-  border: 2px solid #1976d2 !important;
-  color: #1976d2 !important;
-  border-radius: 12px !important;
-  min-height: 70px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.dial-btn:hover {
-  background: #1976d2 !important;
-  color: white !important;
-}
-
-.dial-btn:active {
-  transform: scale(0.95);
-}
-
-#phoneDisplay {
-  font-family: monospace;
-  font-weight: bold;
-  user-select: none;
-} 
- 
 #loginRow{display:flex; gap:10px; flex-wrap:wrap; margin-top:10px}
 #logoutBtn{float:right}
 #app.locked{filter:blur(2px);opacity:.35;pointer-events:none;user-select:none}
 
- 
 /* DIAGNOSTICS */
 #diagBox{
   display:none;
@@ -349,23 +274,6 @@ video#localVideo.video-visible {
   filter: grayscale(50%);
 }
  
-/* Phone badge styles */
-.phone-badge {
-  background: #4CAF50;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  margin-left: 10px;
-}
-.email-badge {
-  background: #2196F3;
-  color: white;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  margin-left: 10px;
-}
 </style>
 </head>
 
@@ -388,65 +296,23 @@ video#localVideo.video-visible {
 </div>
 
 <!-- LOGIN -->
-<!-- LOGIN - PHONE DIAL INTERFACE -->
 <div id="loginOverlay">
   <div id="loginCard">
     <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Your Phone Number</h2>
-    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">Dial your registered phone number to sign in</div>
-    
-    <!-- Phone number display -->
-    <div id="phoneDisplay" style="font-size:32px;text-align:center;margin:20px 0;padding:15px;background:#f5f5f5;border-radius:12px;border:2px solid #ddd;min-height:60px;letter-spacing:2px;">
-      +1
+    <h2 style="margin:0 0 8px;font-size:18px;">Sign in required</h2>
+    <div class="small">Only approved users can access this communicator.</div>
+
+    <label class="small">Email</label>
+    <input id="emailInput" type="email" placeholder="you@example.com" autocomplete="username"/>
+
+    <label class="small">Password</label>
+    <input id="passInput" type="password" placeholder="••••••••" autocomplete="current-password"/>
+
+    <div id="loginRow">
+      <button id="loginBtn">Login</button>
     </div>
-    
-    <!-- Dial pad -->
-    <div id="dialPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:20px 0;">
-      <button class="dial-btn" data-number="1">1</button>
-      <button class="dial-btn" data-number="2">2<div style="font-size:12px;color:#666;">ABC</div></button>
-      <button class="dial-btn" data-number="3">3<div style="font-size:12px;color:#666;">DEF</div></button>
-      <button class="dial-btn" data-number="4">4<div style="font-size:12px;color:#666;">GHI</div></button>
-      <button class="dial-btn" data-number="5">5<div style="font-size:12px;color:#666;">JKL</div></button>
-      <button class="dial-btn" data-number="6">6<div style="font-size:12px;color:#666;">MNO</div></button>
-      <button class="dial-btn" data-number="7">7<div style="font-size:12px;color:#666;">PQRS</div></button>
-      <button class="dial-btn" data-number="8">8<div style="font-size:12px;color:#666;">TUV</div></button>
-      <button class="dial-btn" data-number="9">9<div style="font-size:12px;color:#666;">WXYZ</div></button>
-      <button class="dial-btn" data-number="*">*</button>
-      <button class="dial-btn" data-number="0">0<div style="font-size:12px;color:#666;">+</div></button>
-      <button class="dial-btn" data-number="#">#</button>
-    </div>
-    
-    <!-- Control buttons -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:20px 0;">
-      <button id="backspaceBtn" style="font-size:18px;padding:15px;background:#ffebee;border-color:#f44336;color:#c62828;">
-        ⌫ Backspace
-      </button>
-      <button id="clearBtn" style="font-size:18px;padding:15px;background:#fff8e1;border-color:#ffc107;color:#ff8f00;">
-        ✕ Clear
-      </button>
-    </div>
-    
-    <!-- Login button -->
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#e8f5e9;border-color:#4caf50;color:#2e7d32;width:100%;margin:10px 0;">
-      📞 Dial to Sign In
-    </button>
-    
-    <!-- Status display -->
-    <div id="loginStatus" class="status" style="font-size:18px;text-align:center;margin:15px 0;min-height:30px;">
-      Please dial your phone number
-    </div>
-    
-    <!-- Info text -->
-    <div class="small" style="font-size:16px;text-align:center;color:#666;margin-top:20px;">
-      Your phone number must be registered with the administrator
-    </div>
-    
-    <!-- Traditional login fallback -->
-    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:15px;">
-      <button id="showEmailLoginBtn" style="font-size:16px;padding:12px;background:#f5f5f5;border-color:#ddd;color:#666;width:100%;">
-        Use Email Login Instead
-      </button>
-    </div>
+    <div id="loginStatus" class="status">Please sign in.</div>
+    <div class="small">Tip: If you mistype, you will see a message here (no pink error box).</div>
   </div>
 </div>
 
@@ -781,182 +647,9 @@ const loginStatus = document.getElementById("loginStatus");
 const emailInput = document.getElementById("emailInput");
 const passInput = document.getElementById("passInput");
 const appRoot = document.getElementById("app");
- 
- /* ================== PHONE DIAL ELEMENTS ================== */
-const phoneDisplay = document.getElementById("phoneDisplay");
-const dialButtons = document.querySelectorAll(".dial-btn");
-const backspaceBtn = document.getElementById("backspaceBtn");
-const clearBtn = document.getElementById("clearBtn");
-const showEmailLoginBtn = document.getElementById("showEmailLoginBtn");
-
-let dialedNumber = "+1"; // Start with country code
 
 const localVideo = document.getElementById("localVideo");
 const remoteVideo = document.getElementById("remoteVideo");
-
-
-
-
-
- 
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
-/* ================== PHONE DIAL EVENT LISTENERS ================== */
-// Initialize phone dial functionality
-function initializePhoneDial() {
-  console.log('=== initializePhoneDial() called ===');
-  
-  // Get elements fresh each time
-  const dialPad = document.getElementById('dialPad');
-  const phoneDisplay = document.getElementById('phoneDisplay');
-  const backspaceBtn = document.getElementById('backspaceBtn');
-  const clearBtn = document.getElementById('clearBtn');
-  
-  console.log('Elements found:', {
-    dialPad: !!dialPad,
-    phoneDisplay: !!phoneDisplay,
-    backspaceBtn: !!backspaceBtn,
-    clearBtn: !!clearBtn
-  });
-  
-  if (!dialPad || !phoneDisplay) {
-    console.error('Required elements missing!');
-    return;
-  }
-  
-  // Reset to ensure we're using the global variable
-  window.dialedNumber = "+1";
-  
-  // Update phone display
-  function updatePhoneDisplay() {
-    phoneDisplay.textContent = window.dialedNumber;
-    console.log('Display updated:', window.dialedNumber);
-  }
-  
-  // Initialize display
-  phoneDisplay.textContent = window.dialedNumber;
-  console.log('Initial display set');
-  
-  // Clear any existing event listeners first
-  const newDialPad = dialPad.cloneNode(true);
-  dialPad.parentNode.replaceChild(newDialPad, dialPad);
-  
-  // Get fresh reference
-  const freshDialPad = document.getElementById('dialPad');
-  
-  // Use event delegation on the fresh dial pad
-  freshDialPad.addEventListener('click', (e) => {
-    console.log('Dial pad clicked, target:', e.target);
-    
-    // Find the dial button that was clicked
-    const dialBtn = e.target.closest('.dial-btn');
-    if (dialBtn) {
-      const number = dialBtn.getAttribute('data-number');
-      console.log('Dial button clicked:', number);
-      
-      if (number) {
-        window.dialedNumber += number;
-        updatePhoneDisplay();
-      }
-    }
-  });
-  
-  // Backspace button
-  if (backspaceBtn) {
-    // Clone to remove old listeners
-    const newBackspace = backspaceBtn.cloneNode(true);
-    backspaceBtn.parentNode.replaceChild(newBackspace, backspaceBtn);
-    
-    // Get fresh reference and add listener
-    document.getElementById('backspaceBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Backspace clicked');
-      
-      if (window.dialedNumber.length > 2) {
-        window.dialedNumber = window.dialedNumber.slice(0, -1);
-        updatePhoneDisplay();
-      }
-    });
-  }
-  
-  // Clear button
-  if (clearBtn) {
-    // Clone to remove old listeners
-    const newClear = clearBtn.cloneNode(true);
-    clearBtn.parentNode.replaceChild(newClear, clearBtn);
-    
-    // Get fresh reference and add listener
-    document.getElementById('clearBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      console.log('Clear clicked');
-      
-      window.dialedNumber = "+1";
-      updatePhoneDisplay();
-    });
-  }
-  
-  // Add direct click handlers to buttons as backup
-  setTimeout(() => {
-    const buttons = document.querySelectorAll('.dial-btn');
-    console.log('Adding direct handlers to', buttons.length, 'buttons');
-    
-    buttons.forEach(btn => {
-      const number = btn.getAttribute('data-number');
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        console.log('DIRECT: Button', number, 'clicked');
-        window.dialedNumber += number;
-        updatePhoneDisplay();
-      });
-    });
-  }, 100);
-  
-  console.log('Phone dial initialized');
-}
-
-
-// Initialize phone dial immediately when script loads
-console.log('Script loaded, checking DOM...');
-
-// Use setTimeout to ensure DOM is ready since we're in a module
-setTimeout(() => {
-  console.log('Initializing phone dial (delayed)...');
-  
-  // Debug: Check if dial pad elements exist
-  console.log('Dial pad element:', document.getElementById('dialPad'));
-  console.log('Dial buttons found:', document.querySelectorAll('.dial-btn').length);
-  console.log('Phone display:', document.getElementById('phoneDisplay'));
-  console.log('Backspace button:', document.getElementById('backspaceBtn'));
-  console.log('Clear button:', document.getElementById('clearBtn'));
-  console.log('Login button:', document.getElementById('loginBtn'));
-  
-  // Check if app is locked
-  console.log('App root element:', appRoot);
-  console.log('App locked?', appRoot?.classList?.contains('locked'));
-  console.log('Login overlay display:', loginOverlay?.style?.display);
-  
-  // Initialize
-  initializePhoneDial();
-  
-  // Test: Try to add a global function for testing
-  window.testDialPad = function() {
-    console.log('=== TESTING DIAL PAD ===');
-    console.log('dialedNumber:', dialedNumber);
-    console.log('phoneDisplay text:', phoneDisplay?.textContent);
-    
-    // Simulate a button click
-    const testBtn = document.querySelector('.dial-btn[data-number="5"]');
-    if (testBtn) {
-      console.log('Found button 5, clicking...');
-      testBtn.click();
-    }
-    
-    return 'Test complete';
-  };
-  
-  console.log('Test function available: window.testDialPad()');
-}, 500);
- 
- 
 /* ================== VIDEO SCREEN TOGGLE ================== */
 let videoMode = {
     local: 'normal',  // 'normal', 'fullscreen', 'small'
@@ -1108,10 +801,6 @@ const downloadBgLink = document.getElementById('downloadBgLink');
 
 const logoutUtilityBtn = document.getElementById("logoutUtilityBtn");
 
-/* ================== PHONE AUTHENTICATION VARIABLES ================== */
-let isAutoLoginAttempted = false;
-let isAndroidPhoneLogin = false;
-let userPhone = '';
  
 /* ================== STATE VARIABLES ================== */
 let isAuthed = false;
@@ -1208,8 +897,8 @@ function hideErrorBox(){
 }
 window.addEventListener("error", (e)=> showError(e.error || e.message || e));
 window.addEventListener("unhandledrejection", (e)=> showError(e.reason || e));
-emailInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
-passInput?.addEventListener("input", () => { hideErrorBox(); if(loginStatus) loginStatus.textContent=""; });
+emailInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
+passInput.addEventListener("input", () => { hideErrorBox(); loginStatus.textContent=""; });
 
 /* ================== FIREBASE ================== */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -1224,7 +913,7 @@ import { getMessaging, getToken, onMessage, deleteToken }
 
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
-  setPersistence, inMemoryPersistence, signInWithCustomToken
+  setPersistence, inMemoryPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 
 const app = initializeApp({
@@ -1238,340 +927,596 @@ const app = initializeApp({
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-/* ================== PHONE NUMBER AUTHENTICATION ================== */
-// Platform detection
-function isAndroidDevice() {
-  return /android/i.test(navigator.userAgent);
-}
 
-// Get phone number from URL parameters (sent by Android APK)
-function getPhoneNumberFromURL() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const phone = urlParams.get('phone');
-  return phone ? phone.replace(/[^0-9+]/g, '') : null;
-}
+ /* UID allowlist */
+async function enforceAllowlist(user){
+  const uid = user.uid;
+  logDiag("Allowlist check uid=" + uid);
 
+  try{
+    const ref = doc(db, "allowlistUids", uid);
+    const snap = await getDoc(ref);
 
-// Check if phone number exists in user's allowlist
-async function isPhoneNumberAllowed(phoneNumber) {
-  try {
-    console.log("isPhoneNumberAllowed called with:", phoneNumber);
-    
-    if (!phoneNumber || phoneNumber === "+1") {
-      return { allowed: false, message: "Please enter a valid phone number" };
+    if(!snap.exists()){
+      loginStatus.textContent = "Not approved yet. Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist missing for UID: " + uid);
     }
-    
-    // Remove the country code for checking
-    const cleanPhone = phoneNumber.replace('+1', '').trim();
-    if (cleanPhone.length < 10) {
-      return { allowed: false, message: "Please enter a 10-digit phone number" };
+
+    const enabled = snap.data()?.enabled === true;
+    if(!enabled){
+      loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
+      try{ await signOut(auth); }catch{}
+      throw new Error("Allowlist disabled for UID: " + uid);
     }
-    
-    console.log("Checking phone:", cleanPhone);
-    
-    // FOR NOW: Bypass Firestore check and allow any valid phone number
-    // This is for testing until Firestore permissions are fixed
-    console.log("Bypassing Firestore check for testing");
-    
-    return { 
-      allowed: true,
-      message: "Phone number accepted (test mode)",
-      uid: "test_uid_" + cleanPhone,
-      displayName: "User " + cleanPhone.slice(-4),
-      email: "user_" + cleanPhone + "@example.com"
-    };
-    
-  } catch (error) {
-    console.error("Error checking phone number:", error);
-    
-    // Even if there's an error, allow for testing
-    return { 
-      allowed: true,
-      message: "Testing mode - bypassing checks",
-      uid: "test_uid_" + Date.now(),
-      displayName: "Test User",
-      email: "test@example.com"
-    };
+
+    return true;
+  }catch(e){
+    if(String(e?.code || "").includes("permission-denied")){
+      loginStatus.textContent =
+        "Allowlist check blocked by Firestore rules (permission-denied).";
+    }
+    throw e;
   }
 }
 
-// Phone number auto-login for Android
-async function attemptPhoneNumberAutoLogin() {
-  if (!isAndroidDevice() || isAutoLoginAttempted) return;
-  
-  isAutoLoginAttempted = true;
-  const phoneNumber = getPhoneNumberFromURL();
-  
-  if (!phoneNumber) {
-    console.log("No phone number detected in URL");
+ 
+/* ================== BACKGROUND SERVICE ================== */
+// Test if background service is running
+async function checkBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/status', { 
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    // Service is not running or not reachable
+    return { isRunning: false, uid: null };
+  }
+}
+
+// Start background service
+async function startBackgroundService() {
+  if (!isAuthed || !myUid) {
+    alert('Please sign in first');
     return;
   }
   
-  console.log("Detected phone number:", phoneNumber);
-  logDiag("Detected Android device. Attempting phone number login...");
-  
-  // Check if phone number is allowed
-  const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-  
-  if (!phoneCheck.allowed) {
-    console.log("Phone number not found in allowlist");
-    logDiag("Phone number not registered. Please use email login.");
-    return;
-  }
-  
-  // Phone number is allowed - attempt authentication
   try {
-    logDiag(`Phone login authorized for: ${phoneCheck.displayName}`);
+    bgStatus.textContent = 'Connecting to background service...';
     
-    // Store phone number info globally
-    userPhone = phoneNumber;
-    isAndroidPhoneLogin = true;
-    
-    // For now, we'll set a flag and let the normal auth flow continue
-    // In the auth state listener, we'll handle this specially
-    
-  } catch (error) {
-    console.error("Phone auto-login error:", error);
-    logDiag("Auto-login failed: " + error.message);
-    isAndroidPhoneLogin = false;
-  }
-}
-
-// Direct phone number authentication (for dial interface)
-async function authenticateWithPhoneNumber(phoneNumber) {
-  try {
-    logDiag(`Attempting direct phone auth for: ${phoneNumber}`);
-    
-    // Check if phone number is allowed
-    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    
-    if (!phoneCheck.allowed) {
-      return { 
-        success: false, 
-        message: "Phone number not registered",
-        requiresEmail: false 
-      };
-    }
-    
-    // If we have an email, we need password for Firebase Auth
-    // For now, we'll use a custom token approach or direct Firestore verification
-    // This is a simplified approach - in production, you'd use Firebase Custom Auth
-    
-    // For this demo, we'll simulate authentication by setting global state
-    // and letting the user in (if they have email/password, we'll ask for it)
-    
-    if (phoneCheck.email) {
-      return {
-        success: true,
-        message: "Phone verified",
-        requiresEmail: true,
-        email: phoneCheck.email,
-        uid: phoneCheck.uid,
-        displayName: phoneCheck.displayName
-      };
-    } else {
-      // No email associated - can't use Firebase Auth directly
-      return {
-        success: false,
-        message: "No email associated with this phone number",
-        requiresEmail: false
-      };
-    }
-    
-  } catch (error) {
-    logDiag("Phone authentication error: " + error.message);
-    return {
-      success: false,
-      message: "Authentication error: " + error.message,
-      requiresEmail: false
-    };
-  }
-}
-
- // Passwordless phone authentication using custom tokens
-async function signInWithPhoneCustomToken(phoneNumber) {
-  try {
-    logDiag(`Attempting custom token auth for: ${phoneNumber}`);
-    
-    // First verify the phone number is allowed
-    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    
-    if (!phoneCheck.allowed) {
-      return { 
-        success: false, 
-        message: "Phone number not registered"
-      };
-    }
-    
-    // Call the Cloud Function to generate a custom token
-    const response = await fetch('https://us-central1-easosunov-webrtc.cloudfunctions.net/generateCustomToken', {
+    const response = await fetch('http://localhost:3000/start', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        phoneNumber: phoneNumber,
-        uid: phoneCheck.uid
+        uid: myUid
       })
     });
     
-    if (!response.ok) {
-      throw new Error('Custom token generation failed');
+    const data = await response.json();
+    
+    if (data.success) {
+      bgStatus.textContent = '✅ Background service active';
+      startBgBtn.disabled = true;
+      stopBgBtn.disabled = false;
+      logDiag('Background service started for UID: ' + myUid);
+    } else {
+      throw new Error(data.error || 'Failed to start');
     }
+  } catch (error) {
+    bgStatus.textContent = '❌ Failed to connect';
+    logDiag('Background service error: ' + error.message);
+    
+    // Show helpful message
+    if (error.message.includes('fetch') || error.message.includes('network')) {
+      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
+    }
+  }
+}
+
+// Stop background service
+async function stopBackgroundService() {
+  try {
+    const response = await fetch('http://localhost:3000/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
     
     const data = await response.json();
     
-    if (data.customToken) {
-      // Sign in with the custom token
-      const userCredential = await signInWithCustomToken(auth, data.customToken);
-      logDiag(`Custom token auth successful for UID: ${userCredential.user.uid}`);
-      
-      return {
-        success: true,
-        message: "Signed in successfully",
-        user: userCredential.user
-      };
-    } else {
-      throw new Error('No custom token received');
+    if (data.success) {
+      bgStatus.textContent = 'Background service stopped';
+      startBgBtn.disabled = false;
+      stopBgBtn.disabled = true;
+      logDiag('Background service stopped');
     }
-    
   } catch (error) {
-    logDiag("Custom token auth error: " + error.message);
-    return {
-      success: false,
-      message: "Authentication failed: " + error.message
-    };
+    logDiag('Error stopping background service: ' + error.message);
   }
 }
- 
-// Handle Android phone authentication
-async function handleAndroidPhoneAuthentication() {
+
+// Update service status
+async function updateServiceStatus() {
+  if (isAuthed) {
+    startBgBtn.disabled = false;
+    
+    try {
+      const status = await checkBackgroundService();
+      if (status.isRunning && status.uid === myUid) {
+        bgStatus.textContent = '✅ Background service active';
+        startBgBtn.disabled = true;
+        stopBgBtn.disabled = false;
+      } else {
+        bgStatus.textContent = 'Background service ready';
+        stopBgBtn.disabled = true;
+      }
+    } catch (error) {
+      bgStatus.textContent = 'Background app not detected';
+      stopBgBtn.disabled = true;
+    }
+  } else {
+    startBgBtn.disabled = true;
+    stopBgBtn.disabled = true;
+    bgStatus.textContent = 'Sign in required';
+  }
+}
+
+// Event listeners
+startBgBtn.onclick = startBackgroundService;
+stopBgBtn.onclick = stopBackgroundService;
+
+// Download link
+// Download link - remove onclick handler since href is already set
+// Or update to use your GitHub URL
+downloadBgLink.onclick = (e) => {
+  // Optional: Add analytics or confirmation
+  console.log('Downloading background app...');
+  // Let the default link behavior happen (browser will download)
+};
+
+/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
+const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
+const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
+
+const hasBroadcastChannel = ("BroadcastChannel" in window);
+const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
+
+function nowMs(){ return Date.now(); }
+
+function setDeviceOwner(uid){
+  try{
+    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
+    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
+  }catch{}
+}
+
+function clearDeviceOwner(){
+  try{
+    localStorage.removeItem(DEVICE_OWNER_KEY);
+    localStorage.removeItem(DEVICE_OWNER_AT);
+  }catch{}
+}
+
+function getDeviceOwner(){
+  try{
+    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
+  }catch{
+    return null;
+  }
+}
+
+async function forceSignOutBecauseDifferentUser(newUid){
+  // If this tab is signed in as someone else, sign out immediately.
+  const currentUid = auth.currentUser?.uid || null;
+  if (currentUid && newUid && currentUid !== newUid){
+    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
+    try{
+      stopAll(); // stop listeners/media before auth changes
+    }catch{}
+    try{
+      await signOut(auth);
+    }catch(e){
+      // If signOut fails, still show why
+      showError(e);
+    }
+  }
+}
+
+function broadcastNewOwner(uid){
+  if(authBC){
+    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
+  }
+}
+
+// Listen for owner changes via BroadcastChannel
+if(authBC){
+  authBC.onmessage = (ev)=>{
+    const msg = ev?.data || {};
+    if(msg.type === "NEW_OWNER" && msg.uid){
+      forceSignOutBecauseDifferentUser(String(msg.uid));
+    }
+    if(msg.type === "OWNER_CLEARED"){
+      // nothing required
+    }
+  };
+}
+// Listen for focus requests from duplicate tabs
+if (hasBroadcastChannel) {
+  const focusChannel = new BroadcastChannel("webrtc_focus_request");
+  focusChannel.onmessage = (ev) => {
+    const msg = ev?.data || {};
+    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
+      // This is the original tab - bring it to front
+      window.focus();
+      if (document.hidden) {
+        // Try to make browser bring tab to front (may not work due to browser restrictions)
+        console.log("Focus requested by duplicate tab");
+      }
+    }
+  };
+}
+/* ================== SINGLE PAGE INSTANCE LOCK ================== */
+const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
+const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
+const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
+
+// Generate unique tab ID
+const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+let hasLock = false;
+let lockCheckInterval = null;
+let isDisabled = false;
+
+// Function to IMMEDIATELY disable the app
+function disableAppImmediately() {
+  if (isDisabled) return;
+  isDisabled = true;
+  
+  logDiag("IMMEDIATE DISABLE: Another instance detected");
+  
+  // Stop all media and connections
+  stopAll();
+  
+  // Disable UI
+  if (appRoot) {
+    appRoot.classList.add('locked');
+    appRoot.style.pointerEvents = 'none';
+    appRoot.style.opacity = '0.5';
+  }
+  
+  // Hide login overlay if visible
+  if (loginOverlay) {
+    loginOverlay.style.display = 'none';
+  }
+  
+  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
+  // by closing this tab/window and focusing the original one
+  
+  // Try to close this tab/window
   try {
-    const phoneNumber = userPhone;
-    if (!phoneNumber) {
-      showLoginUI();
-      return;
+    // Try to find and focus the original tab by broadcasting a message
+    if (hasBroadcastChannel) {
+      const focusChannel = new BroadcastChannel("webrtc_focus_request");
+      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
+      setTimeout(() => {
+        focusChannel.close();
+      }, 1000);
     }
     
-    logDiag("Verifying phone number...");
+    // Close this tab after a short delay
+    setTimeout(() => {
+      if (window.history.length > 1) {
+        window.history.back();
+      } else {
+        window.close();
+      }
+    }, 100);
     
-    // Check phone number again
-    const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-    
-    if (!phoneCheck.allowed) {
-      logDiag("Phone number not registered");
-      showLoginUI();
-      return;
-    }
-    
-    // If we have an email associated with the phone, try to pre-fill it
-    if (phoneCheck.email) {
-      logDiag(`Attempting email login for Android user: ${phoneCheck.email}`);
-      // We'll show the email login form with pre-filled email
-      showEmailLoginForm(phoneCheck.email, phoneNumber);
+  } catch (e) {
+    // If we can't close, show a minimal message and redirect to about:blank
+    console.log("Another instance is already running");
+    window.location.href = "about:blank";
+  }
+  
+  // Add button hover effects
+  const buttons = blocker.querySelectorAll('button');
+  buttons.forEach(btn => {
+    btn.addEventListener('mouseenter', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff5252';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#5a6573';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.color = '#ddd';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (btn.id === 'closePageBtn') {
+        btn.style.background = '#ff6b6b';
+      } else if (btn.id === 'goBackBtn') {
+        btn.style.background = '#4a5568';
+      } else if (btn.id === 'reloadBtn') {
+        btn.style.background = 'transparent';
+        btn.style.color = '#aaa';
+      }
+    });
+  });
+  
+  // Add button handlers
+  document.getElementById('goBackBtn')?.addEventListener('click', () => {
+    if (window.history.length > 1) {
+      window.history.back();
     } else {
-      // No email associated - show standard login
-      showLoginUI();
+      // If no history, redirect to a blank page or previous page
+      window.location.href = 'about:blank';
+    }
+  });
+  
+  document.getElementById('closePageBtn')?.addEventListener('click', () => {
+    // Try multiple methods to close or navigate away
+    try {
+      // Method 1: Try to close (works for popup windows)
+      if (window.opener || window.history.length <= 1) {
+        window.close();
+      } else {
+        // Method 2: For regular tabs, navigate to blank page
+        window.location.href = 'about:blank';
+        // Method 3: Try to close after a delay
+        setTimeout(() => {
+          try { window.close(); } catch(e) {}
+        }, 100);
+      }
+    } catch (e) {
+      // Method 4: If close fails, navigate to previous page or blank
+      if (window.history.length > 1) {
+        window.history.go(-1);
+      } else {
+        window.location.href = 'about:blank';
+      }
+    }
+  });
+  
+  document.getElementById('reloadBtn')?.addEventListener('click', () => {
+    // First clear the lock so we can try to acquire it again
+    try {
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    } catch (e) {}
+    
+    // Remove blocker and reload
+    blocker.remove();
+    isDisabled = false;
+    setTimeout(() => {
+      window.location.reload();
+    }, 300);
+  });
+}
+
+// Function to check and acquire lock - STRICTER VERSION
+function checkAndAcquireLock() {
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    const lockAge = now - lockTime;
+    
+    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
+    if (storedLock && storedLock !== tabId && lockAge < 10000) {
+      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
+      return false;
     }
     
-  } catch (error) {
-    console.error("Android phone auth error:", error);
-    logDiag("Phone authentication failed: " + error.message);
-    showLoginUI();
+    // Clear any stale lock (older than 10 seconds)
+    if (lockAge >= 10000) {
+      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
+      localStorage.removeItem(PAGE_INSTANCE_KEY);
+      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+    }
+    
+    // Acquire the lock
+    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    hasLock = true;
+    
+    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock acquisition error: " + e.message);
+    return false; // Be strict if localStorage fails
   }
 }
 
-// Show login UI with optional pre-filled email
-function showLoginUI() {
-  loginOverlay.style.display = "flex";
-  appRoot.classList.add("locked");
+// Function to renew our lock and check for conflicts
+function renewAndCheckLock() {
+  if (!hasLock || isDisabled) return false;
+  
+  try {
+    const now = Date.now();
+    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
+    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
+    
+    // If we don't own the lock anymore, DISABLE IMMEDIATELY
+    if (storedLock !== tabId) {
+      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
+      disableAppImmediately();
+      return false;
+    }
+    
+    // If lock is stale (older than 30 seconds), someone else might have taken it
+    const lockAge = now - lockTime;
+    if (lockAge > 30000) {
+      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
+      // Try to reacquire
+      if (!checkAndAcquireLock()) {
+        disableAppImmediately();
+        return false;
+      }
+    }
+    
+    // Renew our lock
+    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
+    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
+    return true;
+    
+  } catch (e) {
+    logDiag("Lock renewal error: " + e.message);
+    return false;
+  }
 }
 
-// Show email login form with pre-filled email
-function showEmailLoginForm(email, phoneNumber) {
-  if (!document.querySelector('#loginCard')) return;
-  
-  document.querySelector('#loginCard').innerHTML = `
-    <button id="logoutBtn" style="display:none;">Logout</button>
-    <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Enter Password</h2>
-    <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">
-      Phone: <strong>${phoneNumber || ''}</strong><br>
-      Email: <strong>${email || ''}</strong>
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email (read-only)</div>
-      <input id="emailInput" type="email" value="${email || ''}" readonly style="font-size:20px;padding:16px;width:100%;background:#f5f5f5;border-radius:12px;"/>
-    </div>
-    
-    <div style="margin:20px 0;">
-      <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-      <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:20px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-    </div>
-    
-    <button id="loginBtn" style="font-size:22px;padding:18px;background:#4caf50;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-      Sign In
-    </button>
-    
-    <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-      Enter password for ${email || ''}
-    </div>
-    
-    <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-      <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-        ← Use Different Phone Number
-      </button>
-    </div>
-  `;
-  
-  // Re-attach event listeners
-  setTimeout(() => {
-    const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-    const loginBtn = document.getElementById('loginBtn');
-    const passInput = document.getElementById('passInput');
-    
-    if (showPhoneLoginBtn) {
-      showPhoneLoginBtn.addEventListener('click', () => {
-        location.reload();
-      });
+// Function to release our lock
+function releaseLock() {
+  if (hasLock) {
+    try {
+      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
+      if (currentLock === tabId) {
+        localStorage.removeItem(PAGE_INSTANCE_KEY);
+        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
+        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
+        logDiag(`Lock released by tab ${tabId}`);
+      }
+    } catch (e) {
+      // Ignore errors
     }
-    
-    if (loginBtn) {
-      loginBtn.addEventListener('click', handleEmailLogin);
-    }
-    
-    if (passInput) {
-      passInput.focus();
-    }
-  }, 100);
+    hasLock = false;
+  }
 }
 
-// Handle email login
-async function handleEmailLogin() {
-  const emailInput = document.getElementById('emailInput');
-  const passInput = document.getElementById('passInput');
-  const loginStatus = document.getElementById('loginStatus');
-  
-  if (!emailInput || !passInput || !loginStatus) return;
-  
-  const email = emailInput.value.trim();
-  const password = passInput.value;
-  
-  if (!email || !password) {
-    loginStatus.textContent = "Please enter email and password";
+// Initialize lock on page load - DO THIS EARLY
+(function initializeLock() {
+  // Try to acquire lock immediately
+  if (!checkAndAcquireLock()) {
+    logDiag("Failed to acquire lock on initialization");
+    setTimeout(disableAppImmediately, 100);
     return;
   }
   
-  loginStatus.textContent = "Signing in...";
+  // Start aggressive lock checking
+  lockCheckInterval = setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      if (!renewAndCheckLock()) {
+        clearInterval(lockCheckInterval);
+      }
+    }
+  }, 1000); // Check every second when visible
   
-  try {
-    await signInWithEmailAndPassword(auth, email, password);
-    loginStatus.textContent = "Signed in successfully!";
-  } catch (error) {
-    loginStatus.textContent = `Login failed: ${error.code || "unknown error"}`;
-    logDiag("Email login error: " + error.message);
-  }
+  // Also check when page becomes visible
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      // Page hidden - reduce checking frequency
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+        lockCheckInterval = setInterval(() => {
+          if (!renewAndCheckLock()) {
+            clearInterval(lockCheckInterval);
+          }
+        }, 3000); // Check every 3 seconds when hidden
+      }
+    } else {
+      // Page visible - check immediately and frequently
+      if (lockCheckInterval) {
+        clearInterval(lockCheckInterval);
+      }
+      if (!renewAndCheckLock()) {
+        return;
+      }
+      lockCheckInterval = setInterval(() => {
+        if (!renewAndCheckLock()) {
+          clearInterval(lockCheckInterval);
+        }
+      }, 1000);
+    }
+  });
+  
+  // Listen for storage events (other tabs changing localStorage)
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
+      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
+      setTimeout(() => {
+        if (!renewAndCheckLock()) {
+          disableAppImmediately();
+        }
+      }, 100);
+    }
+  });
+  
+  // Beforeunload cleanup
+  window.addEventListener('beforeunload', () => {
+    if (lockCheckInterval) {
+      clearInterval(lockCheckInterval);
+      lockCheckInterval = null;
+    }
+    releaseLock();
+  });
+  
+  // Double-check after a short delay
+  setTimeout(() => {
+    if (!renewAndCheckLock()) {
+      disableAppImmediately();
+    }
+  }, 2000);
+})();
+
+// Also add a pre-check before any significant action
+ /*
+const originalStartMedia = window.startMedia;
+if (originalStartMedia) {
+  window.startMedia = function(...args) {
+    if (!hasLock || isDisabled) {
+      logDiag("Blocked startMedia - no lock or disabled");
+      disableAppImmediately();
+      return Promise.reject(new Error("Another instance is running"));
+    }
+    return originalStartMedia.apply(this, args);
+  };
 }
+ */
+ /* ================== AUTH GATE ================== */
+function requireAuthOrPrompt(){
+  if (isAuthed) return true;
+  // Don't show login overlay here - let the auth state handler manage it
+  return false;
+}
+
+loginBtn.onclick = async () => {
+  hideErrorBox();
+  loginStatus.textContent = "Signing in…";
+  wasManualLogin = true;  // <-- Add this line
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+    loginStatus.textContent = "Signed in. Checking allowlist…";
+
+    // Claim device owner immediately (forces other tabs with different UID to sign out)
+    const uid = auth.currentUser?.uid;
+    if(uid){
+      setDeviceOwner(uid);
+      broadcastNewOwner(uid);
+    }
+
+  } catch (e) {
+    loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
+    try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
+    showError(e);
+  }
+};
+
+logoutBtn.onclick = async () => {
+  try{
+    stopAll();                 // stop listeners/media/UI
+    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
+    await signOut(auth);
+  }catch(e){
+    showError(e);
+  }
+};
 
 /* ================== PROCESS PENDING NOTIFICATIONS ================== */
 // Process pending notifications after authentication
@@ -3345,19 +3290,6 @@ function updatePersonBTitle(username = 'Other') {
   }
 }
 
-// Function to update user info display with phone/email badges
-function updateUserInfo() {
-  const userInfoDiv = document.getElementById('personATitle');
-  if (userInfoDiv && myDisplayName) {
-    let infoHtml = `Person A (${myDisplayName})`;
-    if (isAndroidPhoneLogin && userPhone) {
-      infoHtml += ` <span class="phone-badge">📱 ${userPhone}</span>`;
-    } else if (auth.currentUser?.email) {
-      infoHtml += ` <span class="email-badge">✉️ ${auth.currentUser.email}</span>`;
-    }
-    userInfoDiv.innerHTML = infoHtml;
-  }
-}
  
 async function saveMyName(){
   if(!requireAuthOrPrompt()) return;
@@ -3377,7 +3309,6 @@ async function saveMyName(){
   
   // Update Person A title with new username
   updatePersonATitle();
-  updateUserInfo();
 }
 
 function chunk(arr, n){
@@ -3657,7 +3588,7 @@ async function startCallToUid(toUid, toName=""){
   const callRef = await addDoc(collection(db,"calls"), {
   fromUid: myUid,
   toUid,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value) || "(unknown)",
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value) || "(unknown)",
   toName: toName || "",
   roomId: created.roomId,
   note,
@@ -3694,7 +3625,7 @@ try {
   const messagePayload = {
   toUid,          // Callee's UID
   callId: callRef.id,
-  fromName: myDisplayName || defaultNameFromEmail(emailInput?.value),
+  fromName: myDisplayName || defaultNameFromEmail(emailInput.value),
   note: note,
   timestamp: new Date().toLocaleString(), // Adding timestamp
   sentAtMs: Date.now(),  // Add the timestamp when the call was initiated
@@ -4068,738 +3999,13 @@ myNameInput.addEventListener("input", ()=>{
 });
 userSearchInput.addEventListener("input", ()=> renderUsersList(userSearchInput.value));
 
- /* ===== NEW: Phone dial restore handler ===== */
-// This will be called from the dynamically created button
-window.restorePhoneDial = function() {
-  location.reload();
-};
-
-// Update the showEmailLoginBtn handler
-if (showEmailLoginBtn) {
-  showEmailLoginBtn.addEventListener('click', () => {
-    if (!document.querySelector('#loginCard')) return;
-    
-    document.querySelector('#loginCard').innerHTML = `
-      <button id="logoutBtn" style="display:none;">Logout</button>
-      <h2 style="margin:0 0 20px;font-size:28px;text-align:center;">Email Sign In</h2>
-      <div class="small" style="font-size:18px;text-align:center;margin-bottom:20px;">For administrators and email users</div>
-      
-      <div style="margin:20px 0;">
-        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Email Address</div>
-        <input id="emailInput" type="email" placeholder="your.email@example.com" autocomplete="username" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-      </div>
-      
-      <div style="margin:20px 0;">
-        <div style="font-size:20px;margin-bottom:8px;font-weight:bold;">Password</div>
-        <input id="passInput" type="password" placeholder="Enter your password" autocomplete="current-password" style="font-size:22px;padding:16px;width:100%;border-radius:12px;border:2px solid #1976d2;"/>
-      </div>
-      
-      <button id="loginBtn" style="font-size:24px;padding:18px;background:#1976d2;color:white;border:none;border-radius:12px;width:100%;margin:10px 0;cursor:pointer;">
-        Sign In with Email
-      </button>
-      
-      <div id="loginStatus" style="font-size:18px;text-align:center;margin:20px 0;min-height:30px;color:#666;">
-        Enter your email and password
-      </div>
-      
-      <div style="margin-top:25px;border-top:1px solid #eee;padding-top:20px;">
-        <button id="showPhoneLoginBtn" style="font-size:18px;padding:14px;background:#f5f5f5;border:2px solid #ddd;color:#666;width:100%;border-radius:12px;cursor:pointer;">
-          ← Back to Phone Dial
-        </button>
-      </div>
-    `;
-    
-    setTimeout(() => {
-      const showPhoneLoginBtn = document.getElementById('showPhoneLoginBtn');
-      const loginBtn = document.getElementById('loginBtn');
-      const emailInput = document.getElementById('emailInput');
-      
-      if (showPhoneLoginBtn) {
-        showPhoneLoginBtn.addEventListener('click', () => {
-          location.reload();
-        });
-      }
-      
-      if (loginBtn) {
-        loginBtn.addEventListener('click', handleEmailLogin);
-      }
-      
-      if (emailInput) {
-        emailInput.focus();
-      }
-    }, 100);
-  });
-}
 
 /* Calls list button */
 refreshCallsBtn.onclick = ()=> loadRecentCalls().catch(showError);
 
-/* ================== UID allowlist ================== */
-async function enforceAllowlist(user){
-  const uid = user.uid;
-  logDiag("Allowlist check uid=" + uid);
-
-  try{
-    const ref = doc(db, "allowlistUids", uid);
-    const snap = await getDoc(ref);
-
-    if(!snap.exists()){
-      if(loginStatus) loginStatus.textContent = "Not approved yet. Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist missing for UID: " + uid);
-    }
-
-    const enabled = snap.data()?.enabled === true;
-    if(!enabled){
-      if(loginStatus) loginStatus.textContent = "Not approved yet (enabled=false). Your UID: " + uid;
-      try{ await signOut(auth); }catch{}
-      throw new Error("Allowlist disabled for UID: " + uid);
-    }
-
-    return true;
-  }catch(e){
-    if(String(e?.code || "").includes("permission-denied")){
-      if(loginStatus) {
-        loginStatus.textContent =
-          "Allowlist check blocked by Firestore rules (permission-denied).";
-      }
-    }
-    throw e;
-  }
-}
-
  
-/* ================== BACKGROUND SERVICE ================== */
-// Test if background service is running
-async function checkBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/status', { 
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    // Service is not running or not reachable
-    return { isRunning: false, uid: null };
-  }
-}
-
-// Start background service
-async function startBackgroundService() {
-  if (!isAuthed || !myUid) {
-    alert('Please sign in first');
-    return;
-  }
-  
-  try {
-    bgStatus.textContent = 'Connecting to background service...';
-    
-    const response = await fetch('http://localhost:3000/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: myUid
-      })
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = '✅ Background service active';
-      startBgBtn.disabled = true;
-      stopBgBtn.disabled = false;
-      logDiag('Background service started for UID: ' + myUid);
-    } else {
-      throw new Error(data.error || 'Failed to start');
-    }
-  } catch (error) {
-    bgStatus.textContent = '❌ Failed to connect';
-    logDiag('Background service error: ' + error.message);
-    
-    // Show helpful message
-    if (error.message.includes('fetch') || error.message.includes('network')) {
-      alert('Background app is not running. Please:\n1. Make sure webrtc-notifier.exe is running\n2. Check system tray for the icon\n3. Try starting it manually from the webrtc-notifier-win32-x64 folder');
-    }
-  }
-}
-
-// Stop background service
-async function stopBackgroundService() {
-  try {
-    const response = await fetch('http://localhost:3000/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      bgStatus.textContent = 'Background service stopped';
-      startBgBtn.disabled = false;
-      stopBgBtn.disabled = true;
-      logDiag('Background service stopped');
-    }
-  } catch (error) {
-    logDiag('Error stopping background service: ' + error.message);
-  }
-}
-
-// Update service status
-async function updateServiceStatus() {
-  if (isAuthed) {
-    startBgBtn.disabled = false;
-    
-    try {
-      const status = await checkBackgroundService();
-      if (status.isRunning && status.uid === myUid) {
-        bgStatus.textContent = '✅ Background service active';
-        startBgBtn.disabled = true;
-        stopBgBtn.disabled = false;
-      } else {
-        bgStatus.textContent = 'Background service ready';
-        stopBgBtn.disabled = true;
-      }
-    } catch (error) {
-      bgStatus.textContent = 'Background app not detected';
-      stopBgBtn.disabled = true;
-    }
-  } else {
-    startBgBtn.disabled = true;
-    stopBgBtn.disabled = true;
-    bgStatus.textContent = 'Sign in required';
-  }
-}
-
-// Event listeners
-startBgBtn.onclick = startBackgroundService;
-stopBgBtn.onclick = stopBackgroundService;
-
-// Download link
-// Download link - remove onclick handler since href is already set
-// Or update to use your GitHub URL
-downloadBgLink.onclick = (e) => {
-  // Optional: Add analytics or confirmation
-  console.log('Downloading background app...');
-  // Let the default link behavior happen (browser will download)
-};
-
-/* ================== SINGLE USER PER COMPUTER (cross-tab) ================== */
-const DEVICE_OWNER_KEY = "webrtc_device_owner_uid";
-const DEVICE_OWNER_AT  = "webrtc_device_owner_at";
-
-const hasBroadcastChannel = ("BroadcastChannel" in window);
-const authBC = hasBroadcastChannel ? new BroadcastChannel("webrtc_auth_channel") : null;
-
-function nowMs(){ return Date.now(); }
-
-function setDeviceOwner(uid){
-  try{
-    localStorage.setItem(DEVICE_OWNER_KEY, String(uid || ""));
-    localStorage.setItem(DEVICE_OWNER_AT, String(nowMs()));
-  }catch{}
-}
-
-function clearDeviceOwner(){
-  try{
-    localStorage.removeItem(DEVICE_OWNER_KEY);
-    localStorage.removeItem(DEVICE_OWNER_AT);
-  }catch{}
-}
-
-function getDeviceOwner(){
-  try{
-    return String(localStorage.getItem(DEVICE_OWNER_KEY) || "").trim() || null;
-  }catch{
-    return null;
-  }
-}
-
-async function forceSignOutBecauseDifferentUser(newUid){
-  // If this tab is signed in as someone else, sign out immediately.
-  const currentUid = auth.currentUser?.uid || null;
-  if (currentUid && newUid && currentUid !== newUid){
-    logDiag(`Single-user lock: another user (${newUid}) logged in on this computer -> signing out ${currentUid} in this tab`);
-    try{
-      stopAll(); // stop listeners/media before auth changes
-    }catch{}
-    try{
-      await signOut(auth);
-    }catch(e){
-      // If signOut fails, still show why
-      showError(e);
-    }
-  }
-}
-
-function broadcastNewOwner(uid){
-  if(authBC){
-    try{ authBC.postMessage({ type:"NEW_OWNER", uid, at: nowMs() }); }catch{}
-  }
-}
-
-// Listen for owner changes via BroadcastChannel
-if(authBC){
-  authBC.onmessage = (ev)=>{
-    const msg = ev?.data || {};
-    if(msg.type === "NEW_OWNER" && msg.uid){
-      forceSignOutBecauseDifferentUser(String(msg.uid));
-    }
-    if(msg.type === "OWNER_CLEARED"){
-      // nothing required
-    }
-  };
-}
-// Listen for focus requests from duplicate tabs
-if (hasBroadcastChannel) {
-  const focusChannel = new BroadcastChannel("webrtc_focus_request");
-  focusChannel.onmessage = (ev) => {
-    const msg = ev?.data || {};
-    if (msg.type === "FOCUS_REQUEST" && msg.fromTab !== tabId) {
-      // This is the original tab - bring it to front
-      window.focus();
-      if (document.hidden) {
-        // Try to make browser bring tab to front (may not work due to browser restrictions)
-        console.log("Focus requested by duplicate tab");
-      }
-    }
-  };
-}
-/* ================== SINGLE PAGE INSTANCE LOCK ================== */
-const PAGE_INSTANCE_KEY = "webrtc_single_page_instance";
-const PAGE_INSTANCE_TIMESTAMP = "webrtc_page_instance_ts";
-const PAGE_INSTANCE_ACTIVE_CHECK = "webrtc_page_active_check";
-
-// Generate unique tab ID
-const tabId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-let hasLock = false;
-let lockCheckInterval = null;
-let isDisabled = false;
-
-// Function to IMMEDIATELY disable the app
-function disableAppImmediately() {
-  if (isDisabled) return;
-  isDisabled = true;
-  
-  logDiag("IMMEDIATE DISABLE: Another instance detected");
-  
-  // Stop all media and connections
-  stopAll();
-  
-  // Disable UI
-  if (appRoot) {
-    appRoot.classList.add('locked');
-    appRoot.style.pointerEvents = 'none';
-    appRoot.style.opacity = '0.5';
-  }
-  
-  // Hide login overlay if visible
-  if (loginOverlay) {
-    loginOverlay.style.display = 'none';
-  }
-  
-  // Instead of showing a blocking overlay, redirect user to focus on the existing tab
-  // by closing this tab/window and focusing the original one
-  
-  // Try to close this tab/window
-  try {
-    // Try to find and focus the original tab by broadcasting a message
-    if (hasBroadcastChannel) {
-      const focusChannel = new BroadcastChannel("webrtc_focus_request");
-      focusChannel.postMessage({ type: "FOCUS_REQUEST", fromTab: tabId });
-      setTimeout(() => {
-        focusChannel.close();
-      }, 1000);
-    }
-    
-    // Close this tab after a short delay
-    setTimeout(() => {
-      if (window.history.length > 1) {
-        window.history.back();
-      } else {
-        window.close();
-      }
-    }, 100);
-    
-  } catch (e) {
-    // If we can't close, show a minimal message and redirect to about:blank
-    console.log("Another instance is already running");
-    window.location.href = "about:blank";
-  }
-  
-  // Add button hover effects
-  const buttons = blocker.querySelectorAll('button');
-  buttons.forEach(btn => {
-    btn.addEventListener('mouseenter', () => {
-      if (btn.id === 'closePageBtn') {
-        btn.style.background = '#ff5252';
-      } else if (btn.id === 'goBackBtn') {
-        btn.style.background = '#5a6573';
-      } else if (btn.id === 'reloadBtn') {
-        btn.style.background = 'rgba(255, 255, 255, 0.1)';
-        btn.style.color = '#ddd';
-      }
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (btn.id === 'closePageBtn') {
-        btn.style.background = '#ff6b6b';
-      } else if (btn.id === 'goBackBtn') {
-        btn.style.background = '#4a5568';
-      } else if (btn.id === 'reloadBtn') {
-        btn.style.background = 'transparent';
-        btn.style.color = '#aaa';
-      }
-    });
-  });
-  
-  // Add button handlers
-  document.getElementById('goBackBtn')?.addEventListener('click', () => {
-    if (window.history.length > 1) {
-      window.history.back();
-    } else {
-      // If no history, redirect to a blank page or previous page
-      window.location.href = 'about:blank';
-    }
-  });
-  
-  document.getElementById('closePageBtn')?.addEventListener('click', () => {
-    // Try multiple methods to close or navigate away
-    try {
-      // Method 1: Try to close (works for popup windows)
-      if (window.opener || window.history.length <= 1) {
-        window.close();
-      } else {
-        // Method 2: For regular tabs, navigate to blank page
-        window.location.href = 'about:blank';
-        // Method 3: Try to close after a delay
-        setTimeout(() => {
-          try { window.close(); } catch(e) {}
-        }, 100);
-      }
-    } catch (e) {
-      // Method 4: If close fails, navigate to previous page or blank
-      if (window.history.length > 1) {
-        window.history.go(-1);
-      } else {
-        window.location.href = 'about:blank';
-      }
-    }
-  });
-  
-  document.getElementById('reloadBtn')?.addEventListener('click', () => {
-    // First clear the lock so we can try to acquire it again
-    try {
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-    } catch (e) {}
-    
-    // Remove blocker and reload
-    blocker.remove();
-    isDisabled = false;
-    setTimeout(() => {
-      window.location.reload();
-    }, 300);
-  });
-}
-
-// Function to check and acquire lock - STRICTER VERSION
-function checkAndAcquireLock() {
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
-    const lockAge = now - lockTime;
-    
-    // CRITICAL: If lock exists and is less than 10 seconds old, reject immediately
-    if (storedLock && storedLock !== tabId && lockAge < 10000) {
-      logDiag(`LOCK REJECTED: Tab ${storedLock} has active lock (age: ${lockAge}ms)`);
-      return false;
-    }
-    
-    // Clear any stale lock (older than 10 seconds)
-    if (lockAge >= 10000) {
-      logDiag(`Clearing stale lock from tab ${storedLock} (age: ${lockAge}ms)`);
-      localStorage.removeItem(PAGE_INSTANCE_KEY);
-      localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-      localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-    }
-    
-    // Acquire the lock
-    localStorage.setItem(PAGE_INSTANCE_KEY, tabId);
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    hasLock = true;
-    
-    logDiag(`LOCK ACQUIRED by tab ${tabId}`);
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock acquisition error: " + e.message);
-    return false; // Be strict if localStorage fails
-  }
-}
-
-// Function to renew our lock and check for conflicts
-function renewAndCheckLock() {
-  if (!hasLock || isDisabled) return false;
-  
-  try {
-    const now = Date.now();
-    const storedLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-    const storedTimestamp = localStorage.getItem(PAGE_INSTANCE_TIMESTAMP);
-    const lockTime = storedTimestamp ? parseInt(storedTimestamp, 10) : 0;
-    
-    // If we don't own the lock anymore, DISABLE IMMEDIATELY
-    if (storedLock !== tabId) {
-      logDiag(`LOCK STOLEN: Tab ${storedLock} now owns the lock`);
-      disableAppImmediately();
-      return false;
-    }
-    
-    // If lock is stale (older than 30 seconds), someone else might have taken it
-    const lockAge = now - lockTime;
-    if (lockAge > 30000) {
-      logDiag(`LOCK STALE: Our lock is ${lockAge}ms old - possible conflict`);
-      // Try to reacquire
-      if (!checkAndAcquireLock()) {
-        disableAppImmediately();
-        return false;
-      }
-    }
-    
-    // Renew our lock
-    localStorage.setItem(PAGE_INSTANCE_TIMESTAMP, now.toString());
-    localStorage.setItem(PAGE_INSTANCE_ACTIVE_CHECK, now.toString());
-    return true;
-    
-  } catch (e) {
-    logDiag("Lock renewal error: " + e.message);
-    return false;
-  }
-}
-
-// Function to release our lock
-function releaseLock() {
-  if (hasLock) {
-    try {
-      const currentLock = localStorage.getItem(PAGE_INSTANCE_KEY);
-      if (currentLock === tabId) {
-        localStorage.removeItem(PAGE_INSTANCE_KEY);
-        localStorage.removeItem(PAGE_INSTANCE_TIMESTAMP);
-        localStorage.removeItem(PAGE_INSTANCE_ACTIVE_CHECK);
-        logDiag(`Lock released by tab ${tabId}`);
-      }
-    } catch (e) {
-      // Ignore errors if already updated above
-    }
-    hasLock = false;
-  }
-}
-
-// Initialize lock on page load - DO THIS EARLY
-(function initializeLock() {
-  // Try to acquire lock immediately
-  if (!checkAndAcquireLock()) {
-    logDiag("Failed to acquire lock on initialization");
-    setTimeout(disableAppImmediately, 100);
-    return;
-  }
-  
-  // Start aggressive lock checking
-  lockCheckInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      if (!renewAndCheckLock()) {
-        clearInterval(lockCheckInterval);
-      }
-    }
-  }, 1000); // Check every second when visible
-  
-  // Also check when page becomes visible
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-      // Page hidden - reduce checking frequency
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-        lockCheckInterval = setInterval(() => {
-          if (!renewAndCheckLock()) {
-            clearInterval(lockCheckInterval);
-          }
-        }, 3000); // Check every 3 seconds when hidden
-      }
-    } else {
-      // Page visible - check immediately and frequently
-      if (lockCheckInterval) {
-        clearInterval(lockCheckInterval);
-      }
-      if (!renewAndCheckLock()) {
-        return;
-      }
-      lockCheckInterval = setInterval(() => {
-        if (!renewAndCheckLock()) {
-          clearInterval(lockCheckInterval);
-        }
-      }, 1000);
-    }
-  });
-  
-  // Listen for storage events (other tabs changing localStorage)
-  window.addEventListener('storage', (event) => {
-    if (event.key === PAGE_INSTANCE_KEY && event.newValue && event.newValue !== tabId) {
-      logDiag(`Storage event: Another tab (${event.newValue}) set the lock`);
-      setTimeout(() => {
-        if (!renewAndCheckLock()) {
-          disableAppImmediately();
-        }
-      }, 100);
-    }
-  });  // <-- This should be just one closing brace and one closing parenthesis
-  
-  // Beforeunload cleanup
-  window.addEventListener('beforeunload', () => {
-    if (lockCheckInterval) {
-      clearInterval(lockCheckInterval);
-      lockCheckInterval = null;
-    }
-    releaseLock();
-  });
-  
-  // Double-check after a short delay
-  setTimeout(() => {
-    if (!renewAndCheckLock()) {
-      disableAppImmediately();
-    }
-  }, 2000);
-})();  // <-- This closes the entire IIFE
-
- /* ================== AUTH GATE ================== */
-function requireAuthOrPrompt(){
-  if (isAuthed) return true;
-  // Don't show login overlay here - let the auth state handler manage it
-  return false;
-}
-
-
-// SIMPLIFIED LOGIN BUTTON HANDLER - FIXED VERSION
-loginBtn.onclick = async () => {
-  hideErrorBox();
-  
-  // Check if we're in phone dial mode or email mode
-  const isPhoneDialMode = document.querySelector('.dial-btn') !== null;
-  
-  if (isPhoneDialMode) {
-    // PHONE DIAL LOGIN
-    if (loginStatus) loginStatus.textContent = "Checking phone number…";
-    wasManualLogin = true;
-    
-    try {
-      // Get the dialed number
-      const phoneNumber = window.dialedNumber || dialedNumber;
-      
-      if (loginStatus) loginStatus.textContent = "Verifying phone number…";
-      
-      // First check if phone number is allowed
-      const phoneCheck = await isPhoneNumberAllowed(phoneNumber);
-      
-      if (!phoneCheck.allowed) {
-        if (loginStatus) loginStatus.textContent = "Phone number not registered";
-        logDiag(`Phone auth failed: ${phoneNumber} not in allowlist`);
-        return;
-      }
-      
-      // Try custom token authentication first
-      if (loginStatus) loginStatus.textContent = "Signing in with phone…";
-      
-      try {
-        const authResult = await signInWithPhoneCustomToken(phoneNumber);
-        
-        if (authResult.success) {
-          // Success! Custom token authentication worked
-          if (loginStatus) loginStatus.textContent = "Signed in successfully!";
-          logDiag(`Phone authentication successful for: ${phoneNumber}`);
-          
-          // Claim device owner
-          const uid = auth.currentUser?.uid;
-          if (uid) {
-            setDeviceOwner(uid);
-            broadcastNewOwner(uid);
-          }
-          
-          return; // Authentication complete
-        }
-        
-        // If custom token auth failed, fall back to email/password
-        if (loginStatus) loginStatus.textContent = "Phone verified. Enter password…";
-        
-        if (phoneCheck.email) {
-          // Show email/password form with pre-filled email
-          showEmailLoginForm(phoneCheck.email, phoneNumber);
-        } else {
-          if (loginStatus) loginStatus.textContent = "No email associated with this phone number";
-        }
-        
-      } catch (error) {
-        if (loginStatus) loginStatus.textContent = `Login failed: ${error.message || "unknown error"}`;
-        logDiag("Phone login error: " + (error?.message || error));
-        showError(error);
-      }
-      
-    } catch (e) {
-      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.message || "unknown error"}`;
-      logDiag("Phone login error: " + (e?.message || e));
-      showError(e);
-    }
-    
-  } else {
-    // EMAIL/PASSWORD LOGIN (fallback mode)
-    if (loginStatus) loginStatus.textContent = "Signing in…";
-    wasManualLogin = true;
-    
-    try {
-      const email = emailInput?.value.trim();
-      const password = passInput?.value;
-      
-      if (!email || !password) {
-        if (loginStatus) loginStatus.textContent = "Please enter email and password";
-        return;
-      }
-      
-      await signInWithEmailAndPassword(auth, email, password);
-      if (loginStatus) loginStatus.textContent = "Signed in. Checking allowlist…";
-
-      // Claim device owner immediately
-      const uid = auth.currentUser?.uid;
-      if(uid){
-        setDeviceOwner(uid);
-        broadcastNewOwner(uid);
-      }
-
-    } catch (e) {
-      if (loginStatus) loginStatus.textContent = `Login failed: ${e?.code || "unknown"}`;
-      try { logDiag("LOGIN ERROR PROPS: " + JSON.stringify(e, Object.getOwnPropertyNames(e))); } catch {}
-      showError(e);
-    }
-  }
-};
-
-logoutBtn.onclick = async () => {
-  try{
-    stopAll();                 // stop listeners/media/UI
-    await revokePushForCurrentDevice(); // <-- remove token mapping for this browser
-    await signOut(auth);
-  }catch(e){
-    showError(e);
-  }
-};
-
 /* ================== AUTH STATE ================== */
 onAuthStateChanged(auth, async (user)=>{
-  // First, attempt Android phone auto-login before processing auth state
-  if (!isAutoLoginAttempted) {
-    await attemptPhoneNumberAutoLogin();
-  }
-  
   isAuthed = !!user;
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
@@ -4834,7 +4040,7 @@ onAuthStateChanged(auth, async (user)=>{
     }
     
     logoutBtn.style.display = "inline-block";
-    if (loginStatus) loginStatus.textContent = "Signed in.";
+    loginStatus.textContent = "Signed in.";
 
     startBtn.disabled = false;
     setStatus(mediaStatus, "Ready. Click Start to enable camera/mic.");
@@ -4872,9 +4078,6 @@ onAuthStateChanged(auth, async (user)=>{
     try{ await loadRecentCalls(); } catch(e){ logDiag("loadRecentCalls failed: " + (e?.message || e)); }
     // Process any pending notifications after auth
     await processPendingNotifications();
-    
-    // Update user info with phone/email badge
-    updateUserInfo();
 
     if (pendingIncomingCallWhileLoggedOut?.id) {
       const callId = pendingIncomingCallWhileLoggedOut.id;
@@ -4891,13 +4094,6 @@ onAuthStateChanged(auth, async (user)=>{
     window.addEventListener("click", () => startMedia().catch(()=>{}), { once:true });
 
   } else {
-    // If we have Android phone login but no Firebase user, handle it
-    if (isAndroidPhoneLogin && !user) {
-      await handleAndroidPhoneAuthentication();
-      return;
-    }
-    
-    // Show phone dial interface by default for elderly users
     loginOverlay.style.display = "flex";
     appRoot.classList.add("locked");
     logoutBtn.style.display = "none";
@@ -4913,7 +4109,7 @@ onAuthStateChanged(auth, async (user)=>{
     saveNameBtn.disabled = true;
     refreshUsersBtn.disabled = true;
 
-    /* Hide utility logout button when signed out */
+    /* ADD THIS LINE: Hide utility logout button when signed out */
     if (logoutUtilityBtn) {
         logoutUtilityBtn.style.display = "none";
         logoutUtilityBtn.disabled = true;
@@ -4931,18 +4127,7 @@ onAuthStateChanged(auth, async (user)=>{
     allUsersCache = [];
     myDisplayName = "";
     currentCalleeUid = null;
-    userPhone = '';
-    isAndroidPhoneLogin = false;
-    
-    // ===== NEW: Initialize phone dial interface =====
-    // Ensure phone dial elements are properly initialized
-    setTimeout(() => {
-      if (phoneDisplay && dialedNumber) {
-        phoneDisplay.textContent = dialedNumber;
-      }
-    }, 100);
   }
-   
 });
 
 window.addEventListener("beforeunload", ()=>{
