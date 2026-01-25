@@ -5421,7 +5421,7 @@ onAuthStateChanged(auth, async (user)=>{
   myUid = user?.uid || null;
   logDiag(isAuthed ? "Auth: signed in" : "Auth: signed out");
 
-  if (isAuthed){
+  if (isAuthed && user){
     try{ 
       console.log("1. Checking allowlist...");
       await enforceAllowlist(user); 
